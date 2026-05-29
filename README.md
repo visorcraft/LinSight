@@ -7,14 +7,18 @@ A fast, beautiful, modular Linux system-monitoring dashboard with
 multi-GPU support, a runtime plugin system, and a remote mTLS
 tunnel.
 
-**Status:** v1.0.0 — Hardeningsprint + per-device nicknames + extensive plugin expansion.
-**344+ tests passing.** Daemon, CLI, Qt 6 / Kirigami GUI with
+**Status:** v1.4.0 — hardening sprint + per-device nicknames +
+themes/custom dashboards + extensive plugin expansion.
+Run `cargo test --workspace` for the live count (322 at the time of
+writing). Daemon, CLI, Qt 6 / Kirigami GUI with
 sidebar navigation, preset pages (Overview / GPUs / Storage / Network /
 Hardware), a custom-canvas editor with keyboard-accessible nav, alerts
 (argv-exec only — no shell injection), Prometheus exporter with
 single-snapshot scrapes and a stable `device_key` label, SQLite history,
-NVIDIA + Intel xe + AMD + NVMe + network + disk + filesystem + hwmon + system (PSI, load, uptime) sensors, runtime `.so` plugins
-(ABI v4 via R-mirror types — validated at the FFI boundary,
+sensors for NVIDIA / AMD / Intel (xe + i915) GPUs, CPU, memory, NVMe,
+disk, filesystem, network, hwmon, ZRAM, processes, systemd units, and
+system metrics (PSI, load, uptime), runtime `.so` plugins
+(ABI v5 via R-mirror types — validated at the FFI boundary,
 dynamically-loaded test coverage, kind+payload struct encoding so
 release builds round-trip every variant correctly), and the
 `linsight-tunnel` mTLS bridge for non-SSH remote topologies (graceful
@@ -84,7 +88,7 @@ is simpler and equally secure.
 ## Build
 
 ```bash
-just ci              # fmt-check + clippy -D warnings + tests (213 pass)
+just ci              # fmt-check + clippy -D warnings + tests
 just build           # debug
 just build-release   # release: lto=fat, codegen-units=1, strip
 just build-release-v3   # x86_64-v3 tuned (CachyOS / modern systems)
@@ -134,13 +138,14 @@ this bypasses the Wayland stale-surface trap that `spectacle` /
 - **`crates/linsight-core/`** — shared types (no I/O, no async).
 - **`crates/linsight-protocol/`** — postcard wire format + framing.
 - **`crates/linsight-plugin-sdk/`** — public `LinsightPlugin`
-  trait + `export_plugin!` macro. ABI v4 uses R-mirror types on
+  trait + `export_plugin!` macro. ABI v5 uses R-mirror types on
   the FFI boundary for cross-rustc safety, encoded as
   `(kind, payload)` structs over `#[repr(u8)]` discriminants. See
   [`docs/adr/0001-plugin-abi-stabby-deferral.md`](docs/adr/0001-plugin-abi-stabby-deferral.md)
   for the v2→v3 rationale.
-- **`crates/linsight-sensors/{cpu,mem,xe,nvml,nvme,net}/`** — one
-  in-tree plugin per hardware family.
+- **`crates/linsight-sensors/{cpu,mem,net,nvme,nvml,xe,amdgpu,i915,
+  disk,fs,hwmon,proc,system,systemd,zram}/`** — one in-tree plugin
+  per hardware family / metric source.
 - **`crates/linsight-cli/`** — `list` / `read` / `plugin {new,
   install, ls, remove}`.
 - **`examples/echo-plugin/`** — minimal third-party plugin built as
