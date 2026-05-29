@@ -81,6 +81,8 @@ perf.data.old
 /AGENTS.md
 /CLAUDE.md
 /GEMINI.md
+# Internal implementation plan — kept local, not version-controlled.
+/PLAN.md
 
 # Local env overrides (never commit secrets)
 .env
