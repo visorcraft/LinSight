@@ -1,13 +1,20 @@
 # LinSight v2 — Implementation Plan
 
-> **Audit date:** 2026-05-27  
-> **Current version:** v1.0.0 (224 tests)  
-> **Architecture:** daemon (`linsightd`) + Qt6/Kirigami GUI + CLI + mTLS tunnel  
-> **Plugins:** CPU, Memory, NVMe, NVML (NVIDIA), Intel Xe, Network  
-> **Extras:** Prometheus exporter, SQLite history, evalexpr alerts, device nicknames  
+> **Audit date:** 2026-05-27 (status updated 2026-05-29)
+> **Current version:** v1.4.0 (322 tests passing)
+> **Architecture:** daemon (`linsightd`) + Qt6/Kirigami GUI + CLI + mTLS tunnel
+> **Plugins (15):** CPU, Memory, Network, NVMe, NVML (NVIDIA), Intel Xe,
+>   AMDGPU, Intel i915, block-device I/O (disk), filesystem (fs), hwmon,
+>   process table (proc), system, systemd units, ZRAM
+> **Extras:** Prometheus exporter, SQLite history, evalexpr alerts, device nicknames
 > **Dashboard:** Preset pages (Overview/GPUs/Storage/Network/Hardware) + custom canvas editor
 
-This document inventories what a highly-customizable system resource monitor *should* have that LinSight does **not** yet implement, organized by theme. Each entry includes priority, rationale, and a sketch of how to build it given the existing architecture.
+This document inventoried what a highly-customizable system resource monitor
+*should* have that LinSight did **not** yet implement, organized by theme.
+**Status (2026-05-29): all phases are implemented except where explicitly
+noted as deferred/partial below** — see the per-item ✅ marks, the Priority
+Matrix, and the Summary. Each entry includes priority, rationale, and a
+sketch of how it was built given the existing architecture.
 
 ---
 
@@ -165,13 +172,13 @@ This document inventories what a highly-customizable system resource monitor *sh
 
 **Tests:** Synthetic tmpfs mounts. Verify pseudo-fs filtering.
 
-### B4. Container/Systemd Unit Monitoring ✅ (systemd only)
+### B4. Container/Systemd Unit Monitoring ✅ systemd · ⬜ containers (deferred)
 
 **What:** No awareness of containers or services.
 
 **Near-term (systemd) ✅:** `linsight-sensors-systemd` — reads cgroup v2 filesystem at `/sys/fs/cgroup/system.slice/` for per-service CPU usage, memory, and PID counts. Emits a `Reading::Table` (`systemd.units`) with columns: unit name, state (running/inactive), CPU delta (usec), memory (bytes), PIDs. No D-Bus dependency — pure cgroup v2 filesystem reads. Device key: `system:systemd`. Gracefully returns empty manifest when cgroup v2 or systemd is absent.
 
-**Long-term (containers):** `linsight-sensors-docker` or `linsight-sensors-podman` — list containers via socket, emit per-container CPU/mem/net as Table sensors.
+**Long-term (containers) ⬜ not implemented:** `linsight-sensors-docker` or `linsight-sensors-podman` — list containers via socket, emit per-container CPU/mem/net as Table sensors. Deferred; no such crate exists yet.
 
 **Why:** Most production Linux systems run containers or systemd services. A "top for containers" view is table-stakes.
 
@@ -194,7 +201,7 @@ This document inventories what a highly-customizable system resource monitor *sh
 
 **Tests:** Synthetic `/proc/pressure/*` files.
 
-### B6. Network Detail: Errors, Drops, Packets ✅
+### B6. Network Detail: Errors, Drops, Packets ✅ net stats · ⬜ socket stats (deferred)
 
 **What:** Current network sensors only cover aggregate bytes + link state/speed.
 
@@ -205,7 +212,7 @@ This document inventories what a highly-customizable system resource monitor *sh
 - `net.<iface>.rx_multicast`
 - `net.<iface>.tx_carrier` / `tx_colls` (if available)
 
-**Socket-level (`linsight-sensors-sock`):**
+**Socket-level (`linsight-sensors-sock`) ⬜ not implemented:** (deferred — no `linsight-sensors-sock` crate exists yet)
 - `sock.tcp_established` / `tcp_time_wait` / `tcp_listen` — from `/proc/net/sockstat` or `ss`-like parsing
 - `sock.udp_inuse`
 - `sock.mem_bytes` — TCP memory pressure
@@ -330,19 +337,19 @@ This document inventories what a highly-customizable system resource monitor *sh
 
 ## Phase E: CLI & Developer Experience
 
-### F1. `linsight-cli watch` ✅
+### E1. `linsight-cli watch` ✅
 
 **What:** `linsight-cli read` fetches once. Add `linsight-cli watch cpu.util --rate 1` that subscribes and prints live updates.
 
 **How:** Connect to the daemon, subscribe, enter the pump loop printing formatted samples to stdout. Support `--format json` for machine consumption.
 
-### F2. `linsight-cli alert` Subcommands ✅
+### E2. `linsight-cli alert` Subcommands ✅
 
 **What:** `linsight-cli alert list`, `linsight-cli alert add`, `linsight-cli alert rm`. Manage alert rules from the terminal.
 
 **How:** `RequestOp::ListAlerts` etc. implemented in the protocol, CLI subcommands wired against them.
 
-### F3. `linsight-cli history` ✅
+### E3. `linsight-cli history` ✅
 
 **What:** `linsight-cli history cpu.util --last 5m --format csv` — query the SQLite history database through the daemon's protocol.
 
@@ -376,7 +383,7 @@ exclude_devices = ["loop*", "dm-*", "md*"]
 - **PluginHost**: `with_builtins_and_config(&HashMap)` passes per-plugin config. `register_with_config()` builds `PluginCtx` with config before calling `host_init`.
 - **Net plugin**: Reads `exclude_interfaces` from config. Glob pattern matching (`docker*` matches `docker0`).
 - **Disk plugin**: Reads `exclude_devices` from config, applied in addition to existing hardcoded `VIRTUAL_PREFIXES`.
-- **Tests**: 307 passing (up from 261). New tests: `enumerate_respects_exclude_patterns`, `matches_exclude_handles_star_suffix`, `enumerate_respects_exclude_devices`, `with_builtins_and_config_passes_config_to_plugins`.
+- **Tests**: new tests added — `enumerate_respects_exclude_patterns`, `matches_exclude_handles_star_suffix`, `enumerate_respects_exclude_devices`, `with_builtins_and_config_passes_config_to_plugins`.
 
 **Known limitation:** per-plugin config is wired through for in-tree plugins only. Dynamic `.so` plugins loaded from `plugin_dirs()` currently always receive an empty config — `PluginHost::load_from_dir` does not look up the plugin id in `plugin_configs` before calling `host_init`, because the plugin id is only known after init returns the manifest. A follow-up needs either an SDK-level `plugin_id()` accessor separate from `init`, or a documented "init is idempotent" contract so init can be re-run with the looked-up config. Until then, dynamic plugins must work with empty configuration. Tracked in `apps/linsightd/src/plugin_host.rs::load_from_dir`.
 
@@ -433,23 +440,31 @@ exclude_devices = ["loop*", "dm-*", "md*"]
 | D1 — Alert rule UI | P2 | Large | Usability |
 | B3 — Filesystem usage ✅ | P2 | Medium | Essential metric |
 | H1 — mTLS CN/SAN filtering ✅ | P2 | Small | Production security |
-| F1 — CLI watch ✅ | P2 | Small | Developer UX |
+| E1 — CLI watch ✅ | P2 | Small | Developer UX |
 | D2 — Webhook alerts ✅ | P2 | Small | Integration |
 | G1 — Plugin configuration | P2 | Medium | Extensibility |
 | A6 — Thermal zones ✅ | P3 | Small | Completeness |
-| C5 — Conditional tiles | P3 | Small | Dashboard polish |
-| E1 — Multi-host GUI | P3 | Huge | Architecture change |
-| F2 — CLI alert mgmt ✅ | P3 | Medium | Parity |
-| F3 — CLI history ✅ | P3 | Medium | Parity |
+| C5 — Conditional tiles ✅ | P3 | Small | Dashboard polish |
+| Multi-host GUI ⬜ | P3 | Huge | Architecture change — deferred, not implemented |
+| E2 — CLI alert mgmt ✅ | P3 | Medium | Parity |
+| E3 — CLI history ✅ | P3 | Medium | Parity |
 | H2 — Socket auth ✅ | P3 | Small | Security |
 | G2 — Sensor tagging ✅ | P3 | Small | Organization |
 | H3 — Rate limits ✅ | P3 | Small | Security |
 
 ## Summary of Changes
 
-All Phase A through G items are now implemented. Full workspace compiles and all tests pass (current count: 307).
+All Phase A through H items are implemented except where marked deferred:
+the container sub-item of B4 (systemd shipped; Docker/Podman not), the
+socket-stats sub-item of B6 (`linsight-sensors-sock` not built), and the
+Multi-host GUI (architecture change, never started). Full workspace compiles
+and `cargo test --workspace` passes **322** at the time of writing — run it
+for the current number.
 
-**None of these changes require breaking the plugin ABI (v4).** They are additive:
+**The plugin ABI is now v5** (`LINSIGHT_PLUGIN_ABI_VERSION = 5`). Most of the
+work above was additive and ABI-neutral; the one exception was G1 (per-plugin
+config), which added `config_json` to `RPluginCtx` and bumped the factory
+symbol `linsight_plugin_v4` → `_v5`. The additive patterns were:
 
 1. **New sensors** are new `linsight-sensors-*` crates implementing the existing `LinsightPlugin` trait.
 2. **New protocol messages** extend the `ClientMsg`/`ServerMsg` enums with new `RequestOp` / `ResponsePayload` variants — append-only to maintain wire stability.
@@ -457,6 +472,4 @@ All Phase A through G items are now implemented. Full workspace compiles and all
 4. **Alert UI** requires new request types but no daemon-side engine changes.
 5. **Multi-host** and **Prometheus data source** are the only items that touch the client-architecture.
 
-The existing 213-test baseline should remain green with every addition described here. Each item adds its own unit tests.
-
-**Next recommended sprint:** Tackle P0 items: A2 (system sensors), A4 (full block I/O). These fill the most conspicuous gaps with moderate effort. Then B5 (PSI) for the contention-measurement story, followed by B1 (process list) and C1 (history+sparklines) as the two biggest user-facing improvements.
+Each item added its own unit tests; see the live count via `cargo test --workspace`.
