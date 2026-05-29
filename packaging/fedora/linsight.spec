@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 Name:           linsight
-Version:        1.4.0
+Version:        1.4.1
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -62,6 +62,10 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Fri May 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.4.1-1
+- v1.4.1 release. Correct the company domain to visorcraft.com (Qt
+  organizationDomain + packaging contact fields); packaging recipes
+  build end-to-end from a clean checkout.
 * Fri May 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.4.0-1
 - v1.4.0 release. Theme-aware buttons and dropdowns across the app;
   ThemedButton / ThemedComboBox shared components; dark-theme dropdown

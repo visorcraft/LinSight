@@ -9,6 +9,16 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-05-29
+
+- **Fixed: company domain corrected to `visorcraft.com`.** The GUI's Qt
+  `organizationDomain` was `visorcraft.io`; it is now `visorcraft.com`,
+  matching the project website. Packaging maintainer/contact fields and
+  the security contact were updated to match.
+- **Packaging: distro recipes now build end-to-end from a clean
+  checkout** (Arch `!lto` fix for the `ring` link, Fedora container gains
+  mold + correct target/output handling). No runtime behavior change.
+
 ## [1.4.0] — 2026-05-29
 
 - **Themed, theme-aware buttons and dropdowns across the app.** The flat
