@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --workspace --release --locked
+
+override_dh_auto_test:
+	cargo test --workspace --release --locked
+
+override_dh_auto_install:
+	install -Dm755 target/release/linsight     debian/linsight/usr/bin/linsight
+	install -Dm755 target/release/linsightd    debian/linsight/usr/bin/linsightd
+	install -Dm755 target/release/linsight-cli debian/linsight/usr/bin/linsight-cli
+	install -Dm644 packaging/io.visorcraft.LinSight.desktop \
+	    debian/linsight/usr/share/applications/io.visorcraft.LinSight.desktop
+	install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml \
+	    debian/linsight/usr/share/metainfo/io.visorcraft.LinSight.metainfo.xml
+	install -Dm644 packaging/systemd/linsight.service \
+	    debian/linsight/usr/lib/systemd/user/linsight.service
+	install -d debian/linsight/usr/lib/linsight/plugins

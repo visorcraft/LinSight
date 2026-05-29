@@ -1,0 +1,21 @@
+linsight (0.5.1-1) unstable; urgency=medium
+
+  * v0.5.1 release. Hardware page with per-device nicknames; ABI v4
+    plugin surface.
+
+ -- VisorCraft LLC <support@visorcraft.io>  Tue, 26 May 2026 12:00:00 +0000
+
+linsight (0.3.0-1) unstable; urgency=medium
+
+  * v0.3.0 release. All 10 spec phases shipped: daemon, CLI, Qt 6 /
+    Kirigami GUI, preset pages, canvas editor, alerts engine,
+    Prometheus exporter, SQLite history, runtime .so plugin ABI v2
+    (stabby R-mirror types), linsight-tunnel mTLS bridge.
+
+ -- VisorCraft LLC <support@visorcraft.io>  Mon, 25 May 2026 21:00:00 +0000
+
+linsight (0.1.0-1) unstable; urgency=medium
+
+  * Initial preview release. Phases 1-10 scaffolded.
+
+ -- VisorCraft LLC <support@visorcraft.io>  Sun, 24 May 2026 12:00:00 +0000

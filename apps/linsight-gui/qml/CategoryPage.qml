@@ -1,0 +1,135 @@
+// SPDX-FileCopyrightText: 2026 VisorCraft LLC
+// SPDX-License-Identifier: GPL-3.0-only
+
+import QtQuick
+import QtQuick.Controls as Controls
+import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
+
+Kirigami.Page {
+    id: page
+    title: pageTitle
+    padding: 0
+
+    property string category: ""
+    property string pageTitle: ""
+    property QtObject dashModel: null
+
+    Accessible.role: Accessible.Pane
+    Accessible.name: pageTitle
+
+    Rectangle { anchors.fill: parent; color: app.tokens.surface0; z: -1 }
+
+    // Filter the shared tilesJson on every change. The tilesJsonChanged
+    // NOTIFY makes this binding re-eval whenever the model gets fresh
+    // samples.
+    //
+    // Note: the "-1" filter is a workaround for sensors that use -1 as
+    // an "unknown" sentinel (e.g. net.speed_mbps when the kernel writes
+    // -1 for a virtual interface). We only suppress the EXACT scalar
+    // form "-1" (post-formatter); earlier code did `indexOf("-1") === 0`
+    // which also hid legitimate "-1.0°C" / "-1 rpm" readings on a
+    // genuinely cold or stopped device. Long-term this should become an
+    // explicit `available: bool` field on the tile JSON; see
+    // `format_reading` in `overview_model.rs`.
+    readonly property var tilesArray: {
+        if (!page.dashModel) return []
+        try {
+            const raw = JSON.parse(page.dashModel.tilesJson || "[]")
+            return raw.filter(t => t.category === page.category
+                && !(typeof t.value === "string" && page.isUnknownSentinel(t.value)))
+        } catch (e) {
+            return []
+        }
+    }
+
+    function isUnknownSentinel(v) {
+        // Match the formatter's exact output for the kernel's -1 sentinel
+        // across the units sensors actually emit it for. Anything else
+        // (including "-1.0°C" or "-1.5%") is a real reading.
+        return v === "-1" || v === "-1 rpm" || v === "-1 Hz" || v === "-1 B/s"
+    }
+
+    Rectangle {
+        id: header
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: app.tokens.pageHeaderHeight
+        color: app.tokens.surface0
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: app.tokens.separator
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.leftMargin: app.tokens.spaceXL
+            anchors.rightMargin: app.tokens.spaceXL
+            spacing: 1
+            Layout.alignment: Qt.AlignVCenter
+            Controls.Label {
+                text: page.pageTitle
+                font.pixelSize: app.tokens.textHeading
+                font.weight: app.tokens.weightBold
+                font.family: app.tokens.sansFamily
+            }
+            Controls.Label {
+                // Two separate qsTr strings, not `%1 sensor%2` with a
+                // suffix arg — that pattern doesn't translate into German
+                // ("1 Sensor" / "2 Sensoren"), Japanese (no plural), or
+                // most other languages. Each form gets its own
+                // translation key.
+                text: page.tilesArray.length === 1
+                    ? qsTr("%1 sensor").arg(1)
+                    : qsTr("%1 sensors").arg(page.tilesArray.length)
+                opacity: 0.6
+                font.pixelSize: app.tokens.textCaption + 1
+            }
+        }
+    }
+
+    Controls.ScrollView {
+        anchors.top: header.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: app.tokens.spaceXL
+        anchors.rightMargin: app.tokens.spaceXL
+        anchors.topMargin: app.tokens.spaceL
+        anchors.bottomMargin: app.tokens.spaceL
+        clip: true
+        contentWidth: availableWidth
+
+        GridLayout {
+            id: grid
+            width: parent.width
+            columns: Math.max(1, Math.floor(parent.width / 240))
+            rowSpacing: app.tokens.spaceM
+            columnSpacing: app.tokens.spaceM
+
+            Repeater {
+                model: page.tilesArray
+                delegate: SensorTile {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: modelData.kind === "table" && modelData.rows && modelData.rows.length > 0 ? 280 : 156
+                    tileName: modelData.name
+                    tileDeviceLabel: modelData.deviceLabel || ""
+                    tileValue: modelData.value
+                    tileKind: modelData.kind || "scalar"
+                    tileRows: modelData.rows || []
+                }
+            }
+        }
+    }
+
+    Controls.Label {
+        anchors.centerIn: parent
+        text: qsTr("No %1 sensors detected").arg(page.category)
+        visible: page.tilesArray.length === 0
+        opacity: 0.55
+        font.pixelSize: app.tokens.textBody
+    }
+}

@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsight-example-echo-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Minimal third-party plugin example. Used by the SDK's dynamic-load integration test."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+linsight-plugin-sdk = { path = "../../crates/linsight-plugin-sdk", version = "1.4.0" }
+# Only referenced via the SDK re-export in src/, but `export_plugin!` (and
+# stabby's `#[export]`) emit absolute `::stabby` paths, so it must stay a
+# direct dependency. cargo-machete can't see macro output.
+stabby = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["stabby"]

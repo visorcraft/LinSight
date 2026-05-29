@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsight-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "LinSight daemon ↔ client wire protocol (postcard-framed)."
+
+[dependencies]
+linsight-core = { path = "../linsight-core", version = "1.4.0" }
+postcard = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

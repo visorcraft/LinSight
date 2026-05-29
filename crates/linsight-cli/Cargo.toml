@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsight-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "LinSight CLI (talks to linsightd)."
+
+[[bin]]
+name = "linsight-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+linsight-core = { path = "../linsight-core", version = "1.4.0" }
+linsight-protocol = { path = "../linsight-protocol", version = "1.4.0" }
+signal-hook = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+escargot = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }
+

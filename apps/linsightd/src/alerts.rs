@@ -1,0 +1,568 @@
+// SPDX-FileCopyrightText: 2026 VisorCraft LLC
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Alert engine (Phase 7b).
+//!
+//! Opt-in: set `LINSIGHT_ALERTS=1` to load
+//! `$XDG_CONFIG_HOME/linsight/alerts.toml`. Each rule has a name, an
+//! `evalexpr` expression over recent sensor values, an optional `for`
+//! debounce duration, and a list of notify targets:
+//!
+//! * `"desktop"` — libnotify popup via `notify-rust`.
+//! * `"exec:<argv>"` — argv-split execution. Tokens are split using shell-
+//!   style quoting (single and double quotes, backslash escapes), then
+//!   exec'd directly via `std::process::Command` with NO shell interposed.
+//!   This means metacharacters like `$()`, `;`, `&&`, and `|` are passed
+//!   as literal argv elements rather than interpreted. Use a wrapper
+//!   script if you genuinely need shell features.
+//!
+//! Rules see sensor values as variables — `cpu.util` is bound to its latest
+//! scalar value. Expressions like `xe.gpu1.temp_c > 85 && cpu.util > 50`
+//! work as you'd expect.
+//!
+//! The engine maintains per-rule state for debouncing and edge-triggered
+//! firing: a rule that's continuously true only fires once until it goes
+//! false again. Scalar samples are eligible inputs; Counter, State, and
+//! Table samples are skipped (could be revisited later).
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result};
+use evalexpr::{ContextWithMutableVariables, HashMapContext, Value, eval_boolean_with_context};
+use linsight_core::{Reading, Sample};
+use linsight_protocol::AlertRuleJson;
+use serde::{Deserialize, Serialize};
+use tracing::{info, warn};
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AlertsConfig {
+    #[serde(default, rename = "rule")]
+    rules: Vec<RuleConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RuleConfig {
+    name: String,
+    expr: String,
+    #[serde(default)]
+    #[serde(rename = "for")]
+    for_duration: Option<String>,
+    #[serde(default)]
+    notify: Vec<String>,
+    // `enabled` is tri-stated at the config layer: `None` means "not
+    // specified" (downstream defaults to true), `Some(false)` means
+    // "explicitly disabled". Skip serialization on `None` so the
+    // round-tripped TOML doesn't grow a spurious `enabled = ...` line
+    // on rules the user never touched the toggle for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+}
+
+struct CompiledRule {
+    name: String,
+    expr: String,
+    for_duration: Duration,
+    notify: Vec<String>,
+    enabled: bool,
+    triggered_at: Option<Instant>,
+    fired: bool,
+    referenced_sensors: Vec<String>,
+}
+
+pub struct AlertEngine {
+    rules: Vec<CompiledRule>,
+    /// Latest scalar value seen per sensor.
+    values: HashMap<String, f64>,
+}
+
+#[derive(Clone)]
+pub struct AlertEngineHandle {
+    inner: Arc<Mutex<AlertEngine>>,
+}
+
+impl AlertEngineHandle {
+    pub fn on_sample(&self, sample: &Sample) {
+        let mut eng = self.inner.lock().unwrap();
+        eng.observe(sample);
+    }
+
+    /// Return a snapshot of all current rules for RPC dispatch.
+    pub fn list_rules_json(&self) -> Vec<AlertRuleJson> {
+        let eng = self.inner.lock().unwrap();
+        eng.rules
+            .iter()
+            .map(|r| AlertRuleJson {
+                name: r.name.clone(),
+                expr: r.expr.clone(),
+                for_duration: if r.for_duration == Duration::ZERO {
+                    None
+                } else {
+                    Some(format_duration(r.for_duration))
+                },
+                notify: r.notify.clone(),
+                enabled: r.enabled,
+            })
+            .collect()
+    }
+
+    /// Upsert (add or update) a rule by name. Returns Ok on success.
+    pub fn upsert_rule(
+        &self,
+        name: &str,
+        expr: &str,
+        for_duration: Option<&str>,
+        notify: Vec<String>,
+        enabled: Option<bool>,
+    ) -> Result<(), String> {
+        let for_duration = match for_duration {
+            Some(s) if !s.is_empty() => parse_duration(s).map_err(|e| e.to_string())?,
+            _ => Duration::ZERO,
+        };
+        let mut eng = self.inner.lock().unwrap();
+        let referenced_sensors = extract_sensor_refs(expr);
+        if let Some(existing) = eng.rules.iter_mut().find(|r| r.name == name) {
+            existing.expr = expr.to_string();
+            existing.notify = notify;
+            existing.referenced_sensors = referenced_sensors;
+            existing.for_duration = for_duration;
+            if let Some(e) = enabled {
+                existing.enabled = e;
+            }
+            existing.triggered_at = None;
+            existing.fired = false;
+        } else {
+            eng.rules.push(CompiledRule {
+                name: name.to_string(),
+                expr: expr.to_string(),
+                for_duration,
+                notify,
+                enabled: enabled.unwrap_or(true),
+                triggered_at: None,
+                fired: false,
+                referenced_sensors,
+            });
+        }
+        Ok(())
+    }
+
+    /// Delete a rule by name. Returns Ok(true) if found and removed, Ok(false) if not found.
+    pub fn delete_rule(&self, name: &str) -> Result<bool, String> {
+        let mut eng = self.inner.lock().unwrap();
+        let before = eng.rules.len();
+        eng.rules.retain(|r| r.name != name);
+        Ok(eng.rules.len() < before)
+    }
+
+    /// Persist current rules to the alerts TOML config file.
+    pub fn save_config(&self, path: &std::path::Path) -> Result<(), String> {
+        let config = {
+            let eng = self.inner.lock().unwrap();
+            AlertsConfig {
+                rules: eng
+                    .rules
+                    .iter()
+                    .map(|r| RuleConfig {
+                        name: r.name.clone(),
+                        expr: r.expr.clone(),
+                        for_duration: if r.for_duration == Duration::ZERO {
+                            None
+                        } else {
+                            Some(format_duration(r.for_duration))
+                        },
+                        notify: r.notify.clone(),
+                        enabled: if r.enabled { None } else { Some(false) },
+                    })
+                    .collect(),
+            }
+        };
+        let toml_str = toml::to_string(&config).map_err(|e| format!("serialize: {e}"))?;
+        std::fs::write(path, toml_str).map_err(|e| format!("write: {e}"))?;
+        Ok(())
+    }
+}
+
+impl AlertEngine {
+    pub fn load(path: &Path) -> Result<Self> {
+        let content =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        let config: AlertsConfig =
+            toml::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
+        let mut compiled = Vec::with_capacity(config.rules.len());
+        for r in config.rules {
+            let for_duration = match r.for_duration.as_deref() {
+                None | Some("") => Duration::ZERO,
+                Some(s) => parse_duration(s)
+                    .with_context(|| format!("rule {}: bad `for` = {s:?}", r.name))?,
+            };
+            let referenced_sensors = extract_sensor_refs(&r.expr);
+            compiled.push(CompiledRule {
+                name: r.name,
+                expr: r.expr,
+                for_duration,
+                notify: r.notify,
+                enabled: r.enabled.unwrap_or(true),
+                triggered_at: None,
+                fired: false,
+                referenced_sensors,
+            });
+        }
+        info!(count = compiled.len(), "alerts loaded");
+        Ok(Self { rules: compiled, values: HashMap::new() })
+    }
+
+    pub fn into_handle(self) -> AlertEngineHandle {
+        AlertEngineHandle { inner: Arc::new(Mutex::new(self)) }
+    }
+
+    fn observe(&mut self, sample: &Sample) {
+        let id = sample.sensor.as_str().to_string();
+        let val = match &sample.reading {
+            Reading::Scalar(v) => *v,
+            Reading::Counter(v) => *v as f64,
+            _ => return,
+        };
+        self.values.insert(id.clone(), val);
+
+        let now = Instant::now();
+        let mut to_eval: Vec<usize> = Vec::new();
+        for (i, rule) in self.rules.iter().enumerate() {
+            if !rule.enabled {
+                continue;
+            }
+            if rule.referenced_sensors.iter().any(|s| s == &id) {
+                to_eval.push(i);
+            }
+        }
+        for i in to_eval {
+            self.evaluate_rule(i, now);
+        }
+    }
+
+    fn evaluate_rule(&mut self, idx: usize, now: Instant) {
+        let rule = &mut self.rules[idx];
+        let mut ctx = HashMapContext::new();
+        for (k, v) in &self.values {
+            // evalexpr identifiers may contain `.`; we substitute the dot for
+            // `__` to keep the parser happy and rewrite the expression once.
+            // The conversion happens at expression-eval time below.
+            let _ = ctx.set_value(k.replace('.', "__"), Value::Float(*v));
+        }
+        let rewritten_expr = rule.expr.replace('.', "__");
+        let truthy = match eval_boolean_with_context(&rewritten_expr, &ctx) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!(rule = %rule.name, error = %e, "alert expression failed to evaluate");
+                return;
+            }
+        };
+
+        if truthy {
+            let started = rule.triggered_at.get_or_insert(now);
+            if !rule.fired && now.duration_since(*started) >= rule.for_duration {
+                rule.fired = true;
+                let name = rule.name.clone();
+                let notify = rule.notify.clone();
+                let expr = rule.expr.clone();
+                fire(&name, &expr, &notify);
+            }
+        } else {
+            rule.triggered_at = None;
+            rule.fired = false;
+        }
+    }
+}
+
+fn fire(name: &str, expr: &str, notify: &[String]) {
+    info!(rule = %name, expr = %expr, "alert firing");
+    for target in notify {
+        if target == "desktop" {
+            if let Err(e) = notify_rust::Notification::new()
+                .summary(&format!("LinSight: {name}"))
+                .body(&format!("Condition true: {expr}"))
+                .show()
+            {
+                warn!(error = ?e, "desktop notification failed");
+            }
+        } else if let Some(cmd) = target.strip_prefix("exec:") {
+            // Argv-split + direct exec. No shell. See module docs for
+            // rationale; this replaces the previous `shell:<cmd>` target
+            // which passed the raw string to `sh -c` and was an RCE for
+            // anyone who could write the alerts config.
+            match shell_split(cmd) {
+                Ok(argv) if argv.is_empty() => {
+                    warn!(target = %target, "exec notify target is empty");
+                }
+                Ok(argv) => {
+                    let result = Command::new(&argv[0]).args(&argv[1..]).status();
+                    if let Err(e) = result {
+                        warn!(target = %target, error = ?e, "exec notify failed");
+                    }
+                }
+                Err(e) => warn!(target = %target, error = %e, "exec notify: bad quoting"),
+            }
+        } else if let Some(url) = target.strip_prefix("webhook:") {
+            if let Err(e) = fire_webhook(name, expr, url) {
+                warn!(target = %target, error = %e, "webhook notify failed");
+            }
+        } else if let Some(_cmd) = target.strip_prefix("shell:") {
+            // The old `shell:<cmd>` target was removed because it passed
+            // user-config strings to `sh -c` unescaped. Anyone able to
+            // write the alerts config (malicious dotfile, sync gone wrong)
+            // could execute arbitrary commands as the daemon's user.
+            warn!(
+                target = %target,
+                "the `shell:` notify target was removed for safety; use `exec:<argv>` instead",
+            );
+        } else {
+            warn!(target = %target, "unknown notify target");
+        }
+    }
+}
+
+/// Fire a webhook notification via a simple HTTP POST.
+fn fire_webhook(name: &str, expr: &str, url: &str) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "name": name,
+        "expr": expr,
+        "source": "linsight",
+    });
+    let body = serde_json::to_string(&payload).map_err(|e| format!("serialize: {e}"))?;
+    let url = url.to_owned();
+    let body_clone = body.clone();
+    // Spawn a thread so we don't block the alert engine
+    std::thread::spawn(move || {
+        if let Err(e) = do_webhook_post(&url, &body_clone) {
+            tracing::warn!(url = %url, error = %e, "webhook POST failed");
+        }
+    });
+    Ok(())
+}
+
+fn do_webhook_post(url: &str, body: &str) -> std::result::Result<(), std::io::Error> {
+    match ureq::post(url).header("Content-Type", "application/json").send(body) {
+        Ok(_) => Ok(()),
+        Err(ureq::Error::StatusCode(code)) => {
+            Err(std::io::Error::other(format!("webhook returned HTTP {code}")))
+        }
+        Err(e) => Err(std::io::Error::other(format!("webhook request failed: {e}"))),
+    }
+}
+
+/// POSIX-ish argv tokenizer for `exec:` notify targets. Supports single
+/// quotes (literal), double quotes (with backslash escapes for `\`, `"`),
+/// and unquoted backslash escapes of any single character. Whitespace
+/// outside quotes separates tokens. Returns an error on an unterminated
+/// quoted segment. Deliberately does NOT handle environment expansion,
+/// command substitution, redirections, or globbing — those are shell
+/// features, and the whole point of this notify target is to avoid a
+/// shell.
+fn shell_split(input: &str) -> Result<Vec<String>, String> {
+    let mut argv = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' | '\t' | '\n' if !in_token => continue,
+            ' ' | '\t' | '\n' => {
+                argv.push(std::mem::take(&mut current));
+                in_token = false;
+            }
+            '\'' => {
+                in_token = true;
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(ch) => current.push(ch),
+                        None => return Err("unterminated single quote".into()),
+                    }
+                }
+            }
+            '"' => {
+                in_token = true;
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some(esc @ ('\\' | '"' | '$' | '`')) => current.push(esc),
+                            Some(ch) => {
+                                current.push('\\');
+                                current.push(ch);
+                            }
+                            None => return Err("unterminated escape in double quote".into()),
+                        },
+                        Some(ch) => current.push(ch),
+                        None => return Err("unterminated double quote".into()),
+                    }
+                }
+            }
+            '\\' => {
+                in_token = true;
+                match chars.next() {
+                    Some(ch) => current.push(ch),
+                    None => return Err("trailing backslash".into()),
+                }
+            }
+            other => {
+                in_token = true;
+                current.push(other);
+            }
+        }
+    }
+    if in_token {
+        argv.push(current);
+    }
+    Ok(argv)
+}
+
+fn parse_duration(s: &str) -> Result<Duration> {
+    let s = s.trim();
+    let (num, unit) =
+        s.split_at(s.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(s.len()));
+    let n: f64 = num.parse().with_context(|| format!("invalid number in {s:?}"))?;
+    let secs = match unit {
+        "" | "s" => n,
+        "ms" => n / 1000.0,
+        "m" => n * 60.0,
+        "h" => n * 3600.0,
+        other => anyhow::bail!("unknown duration unit {other:?}"),
+    };
+    Ok(Duration::from_secs_f64(secs))
+}
+
+fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs_f64();
+    if secs >= 3600.0 && (secs % 3600.0).abs() < f64::EPSILON {
+        format!("{}h", secs as u64 / 3600)
+    } else if secs >= 60.0 && (secs % 60.0).abs() < f64::EPSILON {
+        format!("{}m", secs as u64 / 60)
+    } else if secs >= 1.0 && (secs % 1.0).abs() < f64::EPSILON {
+        format!("{}s", secs as u64)
+    } else if secs >= 0.001 {
+        format!("{}ms", d.as_millis())
+    } else {
+        format!("{}s", secs)
+    }
+}
+
+/// Pull plausible sensor identifiers out of a rule expression. A sensor id
+/// is the canonical dotted form (e.g. `xe.gpu1.temp_c`); this helper scans
+/// the expression text for tokens of that shape so the rule's
+/// `referenced_sensors` cache can avoid re-evaluating unrelated rules on
+/// every sample. Tokens that look like float literals (e.g. `85.5`) are
+/// skipped so a numeric threshold in the expression isn't mistaken for a
+/// sensor reference.
+fn extract_sensor_refs(expr: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for c in expr.chars() {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '_' {
+            current.push(c);
+        } else {
+            push_if_sensor_token(&current, &mut out);
+            current.clear();
+        }
+    }
+    push_if_sensor_token(&current, &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn push_if_sensor_token(token: &str, out: &mut Vec<String>) {
+    if !token.contains('.') {
+        return;
+    }
+    // Sensor identifiers always start with a lowercase letter; numeric
+    // literals start with a digit (or `-`, which the tokenizer already
+    // split on). Filters out `85.5`-shaped tokens that would otherwise be
+    // mistaken for sensor refs and trigger spurious rule re-evaluations.
+    if !token.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return;
+    }
+    out.push(token.to_owned());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_refs_finds_dotted_tokens() {
+        let refs = extract_sensor_refs("xe.gpu1.temp_c > 85 && cpu.util < 50");
+        assert_eq!(refs, vec!["cpu.util".to_string(), "xe.gpu1.temp_c".to_string()]);
+    }
+
+    #[test]
+    fn parse_duration_handles_units() {
+        assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
+        assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
+        assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
+        assert_eq!(parse_duration("250ms").unwrap(), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn shell_split_basic() {
+        assert_eq!(shell_split("notify-send hello").unwrap(), vec!["notify-send", "hello"]);
+    }
+
+    #[test]
+    fn shell_split_double_quoted_keeps_spaces() {
+        assert_eq!(
+            shell_split(r#"notify-send "alert: hot" "body line""#).unwrap(),
+            vec!["notify-send", "alert: hot", "body line"],
+        );
+    }
+
+    #[test]
+    fn shell_split_single_quoted_is_literal() {
+        // Single quotes pass `$VAR` and `$(cmd)` as literal text — exactly
+        // what we want to prevent command-substitution injection from a
+        // hostile alerts.toml.
+        assert_eq!(
+            shell_split("logger 'pwned: $(uptime)'").unwrap(),
+            vec!["logger", "pwned: $(uptime)"],
+        );
+    }
+
+    #[test]
+    fn shell_split_metacharacters_are_literal() {
+        // The whole point of dropping `sh -c`: `;`, `|`, `&&` etc. become
+        // ordinary argv characters rather than shell directives.
+        assert_eq!(
+            shell_split("echo a ; rm -rf /").unwrap(),
+            vec!["echo", "a", ";", "rm", "-rf", "/"],
+        );
+    }
+
+    #[test]
+    fn shell_split_rejects_unterminated_quote() {
+        assert!(shell_split("echo \"unterminated").is_err());
+        assert!(shell_split("echo 'unterminated").is_err());
+        assert!(shell_split("echo \\").is_err());
+    }
+
+    #[test]
+    fn webhook_payload_format() {
+        let payload = serde_json::json!({
+            "name": "high-cpu",
+            "expr": "cpu.util > 90",
+            "source": "linsight",
+        });
+        let body = serde_json::to_string(&payload).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["name"], "high-cpu");
+        assert_eq!(parsed["expr"], "cpu.util > 90");
+        assert_eq!(parsed["source"], "linsight");
+    }
+
+    #[test]
+    fn fire_webhook_returns_ok_for_any_url() {
+        let result = fire_webhook("test-rule", "cpu.util > 90", "http://127.0.0.1:1");
+        assert!(result.is_ok());
+    }
+}

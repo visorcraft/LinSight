@@ -1,0 +1,7 @@
+# A minimal pci.ids fragment for tests. Real file lives at
+# /usr/share/hwdata/pci.ids and follows the same syntax.
+8086  Intel Corporation
+	e223  Battlemage [Arc B-series]
+	b0a0  Arrow Lake-S iGPU
+10de  NVIDIA Corporation
+	2782  GeForce RTX 4070

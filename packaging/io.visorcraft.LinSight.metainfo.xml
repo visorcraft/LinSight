@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 VisorCraft LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<component type="desktop-application">
+  <id>io.visorcraft.LinSight</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>LinSight</name>
+  <summary>Fast multi-GPU Linux system monitor</summary>
+  <description>
+    <p>
+      LinSight is a fast, beautiful, modular Linux system-monitoring dashboard.
+      It shows live CPU, RAM, multi-GPU (NVIDIA + Intel xe), NVMe, and network
+      sensors in a single Overview page, with a runtime plugin system for
+      hardware that isn't covered out of the box.
+    </p>
+    <p>Key features:</p>
+    <ul>
+      <li>Subscription-driven sampling — sensors only run when something is watching</li>
+      <li>Built-in support for NVIDIA NVML and Intel xe driver GPUs</li>
+      <li>Per-NVMe SSD temperatures and bytes-read/written counters</li>
+      <li>Per-interface network rx/tx counters and link state</li>
+      <li>Always-on mode (opt-in): SQLite history + Prometheus exporter</li>
+      <li>Remote dashboards over SSH-forwarded sockets</li>
+      <li>Drop-in .so plugin support for new hardware</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.visorcraft.LinSight.desktop</launchable>
+  <provides>
+    <binary>linsight</binary>
+    <binary>linsightd</binary>
+    <binary>linsight-cli</binary>
+  </provides>
+  <url type="homepage">https://github.com/visorcraft/linsight</url>
+  <url type="bugtracker">https://github.com/visorcraft/linsight/issues</url>
+  <developer id="io.visorcraft">
+    <name>VisorCraft LLC</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <categories>
+    <category>System</category>
+    <category>Monitor</category>
+  </categories>
+  <releases>
+    <release version="0.3.0" date="2026-05-25">
+      <description>
+        <p>All 10 spec phases shipped: daemon, CLI, Qt 6 / Kirigami GUI with sidebar, preset pages (Overview, GPUs, Storage, Network), canvas editor, alerts engine, Prometheus exporter, SQLite history, runtime .so plugin ABI v2 (stabby R-mirror types), and the linsight-tunnel mTLS bridge.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-05-24">
+      <description>
+        <p>Initial preview — Phase 1 through Phase 10 scaffolding.</p>
+      </description>
+    </release>
+  </releases>
+</component>

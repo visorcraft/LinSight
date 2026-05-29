@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[advisories]
+yanked = "deny"
+ignore = [
+    # atomic-polyfill is unmaintained, but it's a transitive dep via
+    # postcard → heapless. No safe upgrade is available until postcard
+    # ships against a newer heapless. Tracked for removal when the
+    # upstream chain updates.
+    "RUSTSEC-2023-0089",
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path-only internal deps (e.g., `linsight-core = { path = "../linsight-core" }`)
+# are normal in a Cargo workspace and not actually wildcards. This flag tells
+# cargo-deny to skip them.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

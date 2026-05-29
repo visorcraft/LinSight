@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+edition = "2024"
+max_width = 100
+use_small_heuristics = "Max"
+reorder_imports = true

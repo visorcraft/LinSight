@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsightd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "LinSight daemon: hosts plugins, serves clients over a Unix socket."
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+libloading = { workspace = true }
+stabby = { workspace = true }
+linsight-core = { path = "../../crates/linsight-core", version = "1.4.0" }
+linsight-plugin-sdk = { path = "../../crates/linsight-plugin-sdk", version = "1.4.0" }
+linsight-protocol = { path = "../../crates/linsight-protocol", version = "1.4.0" }
+linsight-sensors-cpu = { path = "../../crates/linsight-sensors/cpu", version = "1.4.0" }
+linsight-sensors-mem = { path = "../../crates/linsight-sensors/mem", version = "1.4.0" }
+linsight-sensors-net = { path = "../../crates/linsight-sensors/net", version = "1.4.0" }
+linsight-sensors-nvme = { path = "../../crates/linsight-sensors/nvme", version = "1.4.0" }
+linsight-sensors-nvml = { path = "../../crates/linsight-sensors/nvml", version = "1.4.0" }
+linsight-sensors-xe = { path = "../../crates/linsight-sensors/xe", version = "1.4.0" }
+linsight-sensors-fs = { path = "../../crates/linsight-sensors/fs", version = "1.4.0" }
+linsight-sensors-hwmon = { path = "../../crates/linsight-sensors/hwmon", version = "1.4.0" }
+linsight-sensors-system = { path = "../../crates/linsight-sensors/system", version = "1.4.0" }
+linsight-sensors-amdgpu = { path = "../../crates/linsight-sensors/amdgpu", version = "1.4.0" }
+linsight-sensors-disk = { path = "../../crates/linsight-sensors/disk", version = "1.4.0" }
+linsight-sensors-proc = { path = "../../crates/linsight-sensors/proc", version = "1.4.0" }
+linsight-sensors-zram = { path = "../../crates/linsight-sensors/zram", version = "1.4.0" }
+linsight-sensors-i915 = { path = "../../crates/linsight-sensors/i915", version = "1.4.0" }
+linsight-sensors-systemd = { path = "../../crates/linsight-sensors/systemd", version = "1.4.0" }
+ureq = { workspace = true }
+evalexpr = { workspace = true }
+notify-rust = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+signal-hook = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=LinSight
+GenericName=System Monitor
+Comment=Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
+Exec=linsight
+Icon=io.visorcraft.LinSight
+Terminal=false
+Categories=Qt;KDE;System;Monitor;
+Keywords=monitor;system;cpu;gpu;memory;temperature;sensors;
+StartupNotify=true
+StartupWMClass=io.visorcraft.LinSight
+X-GNOME-UsesNotifications=true

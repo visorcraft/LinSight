@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Minimal appimage-builder recipe. Run from the repo root after
+# `cargo build --workspace --release`.
+
+version: 1
+script: []  # filled by `just appimage`
+
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: io.visorcraft.LinSight
+    name: LinSight
+    icon: io.visorcraft.LinSight
+    version: 0.3.0
+    exec: usr/bin/linsight
+    exec_args: $@
+  apt:
+    arch:
+      - amd64
+    sources:
+      - sourceline: deb [arch=amd64] https://deb.debian.org/debian trixie main
+    include:
+      - libqt6core6
+      - libqt6quick6
+      - libqt6qml6
+      - qml6-module-org-kde-kirigami
+      - libsqlite3-0
+    exclude: []
+  runtime:
+    env:
+      QT_QPA_PLATFORM: wayland;xcb
+      LINSIGHT_LOG: info
+  test:
+    fedora-37:
+      image: appimagecrafters/tests-env:fedora-37
+      command: ./AppRun --help
+      use_host_x: true
+
+AppImage:
+  arch: x86_64
+  update-information: gh-releases-zsync|visorcraft|linsight|latest|*x86_64.AppImage.zsync

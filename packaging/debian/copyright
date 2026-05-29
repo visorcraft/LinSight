@@ -1,0 +1,16 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: linsight
+Upstream-Contact: VisorCraft LLC <support@visorcraft.io>
+Source: https://github.com/visorcraft/linsight
+
+Files: *
+Copyright: 2026 VisorCraft LLC
+License: GPL-3.0-only
+
+License: GPL-3.0-only
+ This package is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License version 3 as
+ published by the Free Software Foundation.
+ .
+ On Debian systems, the full license text is at
+ /usr/share/common-licenses/GPL-3.

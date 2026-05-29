@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsight-tunnel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "LinSight mTLS remote tunnel: exposes the LinSight Unix socket over TCP+TLS with mutual auth."
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+x509-parser = "0.17"
+
+[dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["pem", "crypto", "ring"] }
+tempfile = { workspace = true }

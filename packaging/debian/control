@@ -1,0 +1,28 @@
+Source: linsight
+Section: utils
+Priority: optional
+Maintainer: VisorCraft LLC <support@visorcraft.io>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc (>= 1.95),
+               qt6-base-dev,
+               qt6-declarative-dev,
+               qt6-tools-dev,
+               kirigami2-dev,
+               libsqlite3-dev,
+               clang
+Standards-Version: 4.7.0
+Homepage: https://github.com/visorcraft/linsight
+Vcs-Browser: https://github.com/visorcraft/linsight
+Vcs-Git: https://github.com/visorcraft/linsight.git
+Rules-Requires-Root: no
+
+Package: linsight
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, libqt6core6, libqt6quick6, kirigami2
+Recommends: libnvidia-ml1
+Description: Fast, beautiful Linux system-monitoring dashboard
+ LinSight is a Linux-native multi-GPU system monitor with a runtime plugin
+ system. It shows CPU, RAM, NVIDIA + Intel xe GPUs, NVMe drives, and network
+ interfaces on a single Overview page. Optional always-on mode adds
+ SQLite-backed history and a Prometheus exporter.
