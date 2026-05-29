@@ -1,3 +1,11 @@
+linsight (1.4.0-1) unstable; urgency=medium
+
+  * v1.4.0 release. Theme-aware buttons and dropdowns across the app
+    (shared ThemedButton / ThemedComboBox components); dark-theme dropdown
+    readability fixes; About page rework; sidebar hover fix.
+
+ -- VisorCraft LLC <support@visorcraft.io>  Fri, 29 May 2026 10:31:34 +0000
+
 linsight (0.5.1-1) unstable; urgency=medium
 
   * v0.5.1 release. Hardware page with per-device nicknames; ABI v4

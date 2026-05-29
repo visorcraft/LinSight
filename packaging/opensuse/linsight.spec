@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 Name:           linsight
-Version:        0.3.0
+Version:        1.4.0
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
