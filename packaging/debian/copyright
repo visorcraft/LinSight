@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: linsight
-Upstream-Contact: VisorCraft LLC <support@visorcraft.io>
+Upstream-Contact: VisorCraft LLC <support@visorcraft.com>
 Source: https://github.com/visorcraft/linsight
 
 Files: *

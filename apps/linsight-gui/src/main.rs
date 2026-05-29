@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
         app.as_mut().set_application_name(&QString::from("LinSight"));
         app.as_mut().set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
         app.as_mut().set_organization_name(&QString::from("VisorCraft"));
-        app.as_mut().set_organization_domain(&QString::from("visorcraft.io"));
+        app.as_mut().set_organization_domain(&QString::from("visorcraft.com"));
     }
     cxx_qt_lib::QGuiApplication::set_desktop_file_name(&QString::from("io.visorcraft.LinSight"));
 

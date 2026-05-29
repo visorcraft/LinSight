@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
-# Maintainer: VisorCraft <support@visorcraft.io>
+# Maintainer: VisorCraft <support@visorcraft.com>
 pkgname=linsight
 pkgver=1.4.0
 pkgrel=1

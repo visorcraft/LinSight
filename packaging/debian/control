@@ -1,7 +1,7 @@
 Source: linsight
 Section: utils
 Priority: optional
-Maintainer: VisorCraft LLC <support@visorcraft.io>
+Maintainer: VisorCraft LLC <support@visorcraft.com>
 Build-Depends: debhelper-compat (= 13),
                cargo,
                rustc (>= 1.95),

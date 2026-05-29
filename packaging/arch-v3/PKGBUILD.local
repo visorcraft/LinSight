@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
-# Maintainer: VisorCraft <support@visorcraft.io>
+# Maintainer: VisorCraft <support@visorcraft.com>
 #
 # LOCAL / dev PKGBUILD for the x86_64-v3 tuned variant. Builds the CURRENT
 # working tree (not a published tarball), mirroring ../arch/PKGBUILD.local

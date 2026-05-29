@@ -117,5 +117,5 @@ in-process to inter-process.
 
 ## Reporting
 
-Please email `security@visorcraft.io` for vulnerabilities. We'll
+Please email `security@visorcraft.com` for vulnerabilities. We'll
 acknowledge within 72 hours.

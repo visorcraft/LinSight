@@ -4,14 +4,14 @@ linsight (1.4.0-1) unstable; urgency=medium
     (shared ThemedButton / ThemedComboBox components); dark-theme dropdown
     readability fixes; About page rework; sidebar hover fix.
 
- -- VisorCraft LLC <support@visorcraft.io>  Fri, 29 May 2026 10:31:34 +0000
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 29 May 2026 10:31:34 +0000
 
 linsight (0.5.1-1) unstable; urgency=medium
 
   * v0.5.1 release. Hardware page with per-device nicknames; ABI v4
     plugin surface.
 
- -- VisorCraft LLC <support@visorcraft.io>  Tue, 26 May 2026 12:00:00 +0000
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 26 May 2026 12:00:00 +0000
 
 linsight (0.3.0-1) unstable; urgency=medium
 
@@ -20,10 +20,10 @@ linsight (0.3.0-1) unstable; urgency=medium
     Prometheus exporter, SQLite history, runtime .so plugin ABI v2
     (stabby R-mirror types), linsight-tunnel mTLS bridge.
 
- -- VisorCraft LLC <support@visorcraft.io>  Mon, 25 May 2026 21:00:00 +0000
+ -- VisorCraft LLC <support@visorcraft.com>  Mon, 25 May 2026 21:00:00 +0000
 
 linsight (0.1.0-1) unstable; urgency=medium
 
   * Initial preview release. Phases 1-10 scaffolded.
 
- -- VisorCraft LLC <support@visorcraft.io>  Sun, 24 May 2026 12:00:00 +0000
+ -- VisorCraft LLC <support@visorcraft.com>  Sun, 24 May 2026 12:00:00 +0000

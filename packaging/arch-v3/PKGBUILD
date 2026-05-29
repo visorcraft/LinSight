@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
-# Maintainer: VisorCraft <support@visorcraft.io>
+# Maintainer: VisorCraft <support@visorcraft.com>
 #
 # x86_64-v3 tuned variant — same source as the generic linsight package,
 # compiled with -C target-cpu=x86-64-v3 for AVX2 + BMI2 + FMA-enabled
