@@ -40,11 +40,21 @@ rpm -q qt6-qtbase qt6-qtdeclarative | sed 's/^/      /'
 # host tree is never modified.
 work="$(mktemp -d /tmp/linsight-build.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
-cp -a /src/. "$work/repo"
+# Copy the source via tar rather than `cp -a`, excluding the host build dirs.
+# Under rootless podman the container user maps to a subuid that can't read
+# the host's 0600 target/**/*.lock files, so a recursive copy of them aborts
+# under `set -e`. We only need the tracked tree + .git (for `git archive`),
+# never target/, so skip them — this also avoids copying gigabytes of artefacts.
+mkdir -p "$work/repo"
+tar -C /src \
+    --exclude=./target --exclude=./target-v3 \
+    --exclude=./packaging/fedora/_rpmbuild \
+    --exclude=./packaging/fedora/_rpmbuild-fedora44 \
+    -cf - . | tar -C "$work/repo" -xf -
 
-# Point cargo at the container-private target dir so host builds and
-# container builds don't fight over the same compiled artefacts.
-export CARGO_TARGET_DIR=/home/builder/target-cache
+# Cache only the cargo registry/git downloads. We deliberately do NOT redirect
+# CARGO_TARGET_DIR: the spec's %install reads the relative ./target/release, so
+# cargo must build into the spec's own build dir, not a side volume.
 export CARGO_HOME=/home/builder/.cargo
 
 cd "$work/repo"
@@ -80,8 +90,13 @@ if [ "$spec_version" != "$version" ]; then
 fi
 
 # --nocheck skips %check (tests). See header comment.
+# debug_package %{nil}: the spec doesn't disable Fedora's automatic
+# -debuginfo/-debugsource subpackages, but the stripped Rust binaries leave
+# debugsourcefiles.list empty and rpmbuild aborts ("Empty %files file"). This
+# is the standard opt-out for Rust RPMs that don't ship a debuginfo package.
 rpmbuild --define "_topdir $(pwd)/_rpmbuild" \
          --define "_sourcedir $(pwd)" \
+         --define "debug_package %{nil}" \
          --nocheck \
          -bb linsight.spec
 

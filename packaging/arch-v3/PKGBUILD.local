@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Maintainer: VisorCraft <support@visorcraft.io>
 #
-# x86_64-v3 tuned variant — same source as the generic linsight package,
-# compiled with -C target-cpu=x86-64-v3 for AVX2 + BMI2 + FMA-enabled
-# hardware (Haswell and later). Recommended on CachyOS and other distros
-# that already build for v3.
+# LOCAL / dev PKGBUILD for the x86_64-v3 tuned variant. Builds the CURRENT
+# working tree (not a published tarball), mirroring ../arch/PKGBUILD.local
+# but compiling with -C target-cpu=x86-64-v3 into a separate target dir so
+# it never clobbers the baseline target/.
+#
+#   cd packaging/arch-v3
+#   makepkg -p PKGBUILD.local -d --nocheck -f
+
 pkgname=linsight-v3
 _pkgname=linsight
 pkgver=1.4.0
@@ -16,32 +20,28 @@ url='https://github.com/visorcraft/linsight'
 license=('GPL-3.0-only')
 depends=('qt6-base' 'qt6-declarative' 'kirigami' 'sqlite' 'nvidia-utils')
 makedepends=('rust' 'cargo' 'qt6-tools' 'clang')
+optdepends=('cuda: NVML diagnostics via nvidia-smi')
 conflicts=('linsight')
 provides=('linsight')
 # See ../arch/PKGBUILD: makepkg's -flto breaks the `ring` crate's asm link.
 options=('!lto')
-source=("$_pkgname-$pkgver.tar.gz::https://github.com/visorcraft/linsight/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+
+_srcdir="${startdir}/../.."
+_targetdir="${startdir}/../../target-v3"
 
 build() {
-  cd "$_pkgname-$pkgver"
+  cd "$_srcdir"
   export RUSTUP_TOOLCHAIN=stable
-  export CARGO_TARGET_DIR=target
+  export CARGO_TARGET_DIR="$_targetdir"
   export RUSTFLAGS="-C target-cpu=x86-64-v3 ${RUSTFLAGS:-}"
   cargo build --workspace --release --locked
 }
 
-check() {
-  cd "$_pkgname-$pkgver"
-  RUSTFLAGS="-C target-cpu=x86-64-v3 ${RUSTFLAGS:-}" \
-    cargo test --workspace --release --locked
-}
-
 package() {
-  cd "$_pkgname-$pkgver"
-  install -Dm755 target/release/linsight     "$pkgdir/usr/bin/linsight"
-  install -Dm755 target/release/linsightd    "$pkgdir/usr/bin/linsightd"
-  install -Dm755 target/release/linsight-cli "$pkgdir/usr/bin/linsight-cli"
+  cd "$_srcdir"
+  install -Dm755 target-v3/release/linsight     "$pkgdir/usr/bin/linsight"
+  install -Dm755 target-v3/release/linsightd    "$pkgdir/usr/bin/linsightd"
+  install -Dm755 target-v3/release/linsight-cli "$pkgdir/usr/bin/linsight-cli"
 
   install -Dm644 packaging/io.visorcraft.LinSight.desktop \
     "$pkgdir/usr/share/applications/io.visorcraft.LinSight.desktop"
@@ -50,8 +50,15 @@ package() {
   install -Dm644 packaging/systemd/linsight.service \
     "$pkgdir/usr/lib/systemd/user/linsight.service"
 
+  install -Dm644 packaging/icons/scalable/apps/io.visorcraft.LinSight.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.visorcraft.LinSight.svg"
+  local size
+  for size in 16 24 32 48 64 96 128 192 256 512; do
+    install -Dm644 "packaging/icons/${size}x${size}/apps/io.visorcraft.LinSight.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/io.visorcraft.LinSight.png"
+  done
+
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
-
   install -d "$pkgdir/usr/lib/linsight/plugins"
 }

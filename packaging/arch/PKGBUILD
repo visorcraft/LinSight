@@ -13,6 +13,11 @@ makedepends=('rust' 'cargo' 'qt6-tools' 'clang')
 optdepends=(
   'cuda: NVML diagnostics via nvidia-smi'
 )
+# Disable makepkg's LTO. It injects -flto into the C/asm build of the `ring`
+# crate, whose hand-written assembly objects then fail the final link
+# (undefined ring_core_* symbols). Cargo's own Rust-side lto="fat" in
+# Cargo.toml's [profile.release] is unaffected by this and still applies.
+options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/visorcraft/linsight/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

@@ -22,7 +22,6 @@ set -euo pipefail
 self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${self_dir}/../.." && pwd)"
 image_tag="linsight-rpm-fedora44"
-target_volume="linsight-fedora44-target"
 cargo_volume="linsight-fedora44-cargo"
 output_dir="${self_dir}/_rpmbuild-fedora44/RPMS/x86_64"
 
@@ -59,6 +58,31 @@ else
 fi
 
 mkdir -p "$output_dir"
+# The container runs as the unprivileged `builder` user, which under rootless
+# podman maps to a subuid that is neither the dir's owner nor in its group.
+# Make the output dir world-writable so the finished RPM can be copied out.
+chmod 0777 "$output_dir"
+
+# The workspace Cargo.toml pins qt-build-utils to a local cxx-qt fork via
+# [patch.crates-io] using an absolute path *outside* this repo. The container
+# only mounts /src, so find that fork's workspace root and bind-mount it
+# read-only at the same path, letting `cargo --locked` resolve the patch.
+patch_mount=()
+fork_crate="$(sed -nE 's/^[[:space:]]*qt-build-utils[[:space:]]*=.*\bpath[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' \
+    "${repo_root}/Cargo.toml" | head -1)"
+if [ -n "${fork_crate:-}" ]; then
+    fork_root="$fork_crate"
+    while [ "$fork_root" != "/" ] && ! grep -qs '^\[workspace\]' "${fork_root}/Cargo.toml"; do
+        fork_root="$(dirname "$fork_root")"
+    done
+    if [ -d "$fork_root" ] && [ "$fork_root" != "/" ]; then
+        echo "==> Patch dependency: bind-mounting cxx-qt fork ${fork_root}"
+        patch_mount=(-v "${fork_root}:${fork_root}:ro")
+    else
+        echo "WARNING: Cargo.toml patches qt-build-utils to ${fork_crate} but its" >&2
+        echo "         workspace root was not found; the container build will fail." >&2
+    fi
+fi
 
 echo "==> Building RPM"
 echo "    Source : ${repo_root}"
@@ -72,8 +96,8 @@ echo
 podman run --rm \
     --security-opt label=disable \
     -v "${repo_root}:/src:ro" \
+    "${patch_mount[@]}" \
     -v "${output_dir}:/output" \
-    -v "${target_volume}:/home/builder/target-cache" \
     -v "${cargo_volume}:/home/builder/.cargo" \
     "$image_tag"
 

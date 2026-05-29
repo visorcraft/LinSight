@@ -4,6 +4,9 @@
 # Rust / Cargo
 /target
 **/target
+# Separate target dir used by packaging/arch-v3/PKGBUILD.local so the
+# x86_64-v3 build doesn't clobber the baseline ./target.
+/target-v3
 **/*.rs.bk
 Cargo.lock.bak
 # Guards against an accidental `cargo vendor` at the workspace
