@@ -9,6 +9,19 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+- **New: container monitoring (Docker + Podman).** A
+  `linsight-sensors-containers` plugin emits a `containers.list` table of
+  running containers discovered in the cgroup v2 hierarchy
+  (`system.slice/docker-*.scope`, `machine.slice/libpod-*.scope`): short
+  id, runtime, CPU delta, memory, and PID count. Pure cgroup-filesystem
+  reads — no Docker/Podman socket or elevated privileges, and it degrades
+  to an empty table when no container runtime is present. (The non-systemd
+  `cgroupfs` cgroup-driver layout is not covered.)
+- **New: socket statistics sensors.** A `linsight-sensors-sock` plugin
+  adds `sock.tcp_established`, `sock.tcp_listen`, `sock.tcp_time_wait`,
+  `sock.udp_inuse`, and `sock.tcp_mem_bytes`, derived from
+  `/proc/net/tcp{,6}` (per-connection state tally) and `/proc/net/sockstat`.
+
 ## [1.4.1] — 2026-05-29
 
 - **Fixed: company domain corrected to `visorcraft.com`.** The GUI's Qt

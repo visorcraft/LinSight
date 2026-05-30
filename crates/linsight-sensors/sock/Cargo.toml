@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsight-sensors-sock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Socket statistics sensor backend (TCP/UDP counts from /proc/net)."
+
+[dependencies]
+linsight-core = { path = "../../linsight-core", version = "1.4.0" }
+linsight-plugin-sdk = { path = "../../linsight-plugin-sdk", version = "1.4.0" }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

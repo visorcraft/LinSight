@@ -1326,6 +1326,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "linsight-sensors-containers"
+version = "1.4.1"
+dependencies = [
+ "linsight-core",
+ "linsight-plugin-sdk",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "linsight-sensors-cpu"
 version = "1.4.1"
 dependencies = [
@@ -1425,6 +1436,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "linsight-sensors-sock"
+version = "1.4.1"
+dependencies = [
+ "linsight-core",
+ "linsight-plugin-sdk",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "linsight-sensors-system"
 version = "1.4.1"
 dependencies = [
@@ -1490,6 +1512,7 @@ dependencies = [
  "linsight-plugin-sdk",
  "linsight-protocol",
  "linsight-sensors-amdgpu",
+ "linsight-sensors-containers",
  "linsight-sensors-cpu",
  "linsight-sensors-disk",
  "linsight-sensors-fs",
@@ -1500,6 +1523,7 @@ dependencies = [
  "linsight-sensors-nvme",
  "linsight-sensors-nvml",
  "linsight-sensors-proc",
+ "linsight-sensors-sock",
  "linsight-sensors-system",
  "linsight-sensors-systemd",
  "linsight-sensors-xe",

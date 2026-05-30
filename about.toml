@@ -42,3 +42,5 @@ accepted = [
 [linsight-sensors-zram]
 [linsight-sensors-i915]
 [linsight-sensors-systemd]
+[linsight-sensors-sock]
+[linsight-sensors-containers]

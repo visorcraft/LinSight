@@ -32,6 +32,8 @@ linsight-sensors-proc = { path = "../../crates/linsight-sensors/proc", version =
 linsight-sensors-zram = { path = "../../crates/linsight-sensors/zram", version = "1.4.0" }
 linsight-sensors-i915 = { path = "../../crates/linsight-sensors/i915", version = "1.4.0" }
 linsight-sensors-systemd = { path = "../../crates/linsight-sensors/systemd", version = "1.4.0" }
+linsight-sensors-sock = { path = "../../crates/linsight-sensors/sock", version = "1.4.0" }
+linsight-sensors-containers = { path = "../../crates/linsight-sensors/containers", version = "1.4.0" }
 ureq = { workspace = true }
 evalexpr = { workspace = true }
 notify-rust = { workspace = true }

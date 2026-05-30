@@ -12,6 +12,7 @@ use linsight_plugin_sdk::{
     SensorDescriptor, host_init, host_sample,
 };
 use linsight_sensors_amdgpu::AmdgpuPlugin;
+use linsight_sensors_containers::ContainersPlugin;
 use linsight_sensors_cpu::CpuPlugin;
 use linsight_sensors_disk::DiskPlugin;
 use linsight_sensors_fs::FsPlugin;
@@ -22,6 +23,7 @@ use linsight_sensors_net::NetPlugin;
 use linsight_sensors_nvme::NvmePlugin;
 use linsight_sensors_nvml::NvmlPlugin;
 use linsight_sensors_proc::ProcPlugin;
+use linsight_sensors_sock::SockPlugin;
 use linsight_sensors_system::SystemPlugin;
 use linsight_sensors_systemd::SystemdPlugin;
 use linsight_sensors_xe::XePlugin;
@@ -158,6 +160,16 @@ impl PluginHost {
             Arc::new(SystemdPlugin::default()),
             None,
             cfg("linsight-sensors-systemd"),
+        );
+        host.register_with_config(
+            Arc::new(SockPlugin::default()),
+            None,
+            cfg("linsight-sensors-sock"),
+        );
+        host.register_with_config(
+            Arc::new(ContainersPlugin::default()),
+            None,
+            cfg("linsight-sensors-containers"),
         );
         host
     }

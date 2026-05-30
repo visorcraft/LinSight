@@ -24,6 +24,8 @@ members = [
     "crates/linsight-sensors/zram",
     "crates/linsight-sensors/i915",
     "crates/linsight-sensors/systemd",
+    "crates/linsight-sensors/sock",
+    "crates/linsight-sensors/containers",
     "examples/echo-plugin",
 ]
 resolver = "3"
