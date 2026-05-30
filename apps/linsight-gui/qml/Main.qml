@@ -551,7 +551,7 @@ Kirigami.ApplicationWindow {
                 visible: !drawer.isCollapsed
                 Rectangle {
                     radius: tokens.radiusPill
-                    color: tokens.surface1
+                    color: tokens.pillBackground
                     border.color: tokens.separator
                     border.width: 1
                     implicitHeight: 22

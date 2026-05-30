@@ -61,6 +61,7 @@ Kirigami.Page {
                 font.pixelSize: app.tokens.textHeading
                 font.weight: app.tokens.weightBold
                 font.family: app.tokens.sansFamily
+                color: app.tokens.textPrimary
             }
             Controls.Label {
                 // Two separate qsTr strings, not `%1 device%2` with a
@@ -69,8 +70,9 @@ Kirigami.Page {
                 text: page.devices.length === 1
                     ? qsTr("%1 device").arg(1)
                     : qsTr("%1 devices").arg(page.devices.length)
-                opacity: 0.6
+                opacity: 0.8
                 font.pixelSize: app.tokens.textCaption + 1
+                color: app.tokens.textPrimary
             }
         }
     }
@@ -99,6 +101,7 @@ Kirigami.Page {
                 opacity: 0.55
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: app.tokens.spaceXL
+                color: app.tokens.textPrimary
             }
 
             Controls.Label {
@@ -166,12 +169,14 @@ Kirigami.Page {
                     font.weight: app.tokens.weightBold
                     Layout.fillWidth: true
                     elide: Text.ElideRight
+                    color: app.tokens.textPrimary
                 }
                 Controls.Label {
                     text: card.deviceKey + " · " + card.sensorCount + " " + qsTr("sensors")
-                    opacity: 0.5
+                    opacity: 0.7
                     font.pixelSize: app.tokens.textCaption
                     elide: Text.ElideRight
+                    color: app.tokens.textPrimary
                 }
             }
 
@@ -180,10 +185,11 @@ Kirigami.Page {
                 spacing: app.tokens.spaceS
                 Controls.Label {
                     text: qsTr("Nickname:")
-                    opacity: 0.7
+                    opacity: 1.0
                     font.pixelSize: app.tokens.textCaption
+                    color: app.tokens.textPrimary
                 }
-                Controls.TextField {
+                ThemedTextField {
                     id: nicknameField
                     Layout.fillWidth: true
                     placeholderText: qsTr("(none)")

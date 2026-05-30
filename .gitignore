@@ -105,3 +105,6 @@ Desktop.ini
 
 # AI agent workdirs
 .qwen/
+
+# ripgrep override for opencode (un-ignores AGENTS.md etc. for search); local-only
+.ignore

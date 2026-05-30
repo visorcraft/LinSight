@@ -147,9 +147,10 @@ Kirigami.ScrollablePage {
                         RowLayout {
                             spacing: app.tokens.spaceS
                             Layout.topMargin: app.tokens.spaceS
+                            
                             Rectangle {
                                 radius: app.tokens.radiusPill
-                                color: app.tokens.accentMute
+                                color: app.tokens.pillBackground
                                 border.color: app.tokens.accent
                                 border.width: 1
                                 implicitHeight: 26
@@ -164,9 +165,10 @@ Kirigami.ScrollablePage {
                                     color: app.tokens.accent
                                 }
                             }
+                            
                             Rectangle {
                                 radius: app.tokens.radiusPill
-                                color: "transparent"
+                                color: app.tokens.pillBackground
                                 border.color: app.tokens.separator
                                 border.width: 1
                                 implicitHeight: 26
@@ -178,11 +180,13 @@ Kirigami.ScrollablePage {
                                     font.pixelSize: app.tokens.textCaption
                                     opacity: 0.78
                                     font.family: app.tokens.sansFamily
+                                    color: app.tokens.textPrimary
                                 }
                             }
+                            
                             Rectangle {
                                 radius: app.tokens.radiusPill
-                                color: "transparent"
+                                color: app.tokens.pillBackground
                                 border.color: app.tokens.separator
                                 border.width: 1
                                 implicitHeight: 26
@@ -194,6 +198,7 @@ Kirigami.ScrollablePage {
                                     font.pixelSize: app.tokens.textCaption
                                     opacity: 0.78
                                     font.family: app.tokens.monoFamily
+                                    color: app.tokens.textPrimary
                                 }
                             }
                         }
@@ -217,7 +222,7 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 92
                     color: app.tokens.surface1
-                    radius: app.tokens.radiusCard
+                    radius: app.tokens.radiusPill
                     border.color: app.tokens.separator
                     border.width: 1
                     RowLayout {

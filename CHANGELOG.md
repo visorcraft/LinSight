@@ -9,6 +9,8 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-05-30
+
 - **Dynamically-loaded `.so` plugins now receive their per-plugin config.**
   Previously only in-tree sensors honored `plugins.toml`; dynamic plugins
   always got an empty config, because a plugin's id (the config key) is

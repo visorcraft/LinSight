@@ -1,3 +1,10 @@
+linsight (1.5.0-1) unstable; urgency=medium
+
+  * v1.5.0 release. Dynamic plugin config delivery plus container and
+    socket statistics sensors.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 30 May 2026 22:56:00 +0000
+
 linsight (1.4.1-1) unstable; urgency=medium
 
   * v1.4.1 release. Correct the company domain to visorcraft.com (Qt

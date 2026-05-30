@@ -40,7 +40,7 @@ Item {
         anchors.rightMargin: app.tokens.spaceS
         anchors.topMargin: 1
         anchors.bottomMargin: 1
-        radius: app.tokens.radiusInput
+        radius: app.tokens.radiusPill
         color: root.active ? app.tokens.accentMute : "transparent"
         Behavior on color { ColorAnimation { duration: app.tokens.durationSnap } }
         border.color: {
@@ -66,7 +66,7 @@ Item {
         anchors.rightMargin: app.tokens.spaceS
         anchors.topMargin: 1
         anchors.bottomMargin: 1
-        radius: app.tokens.radiusInput
+        radius: app.tokens.radiusPill
         visible: !root.active && (mouseArea.containsMouse || mouseArea.containsPress)
         color: mouseArea.containsPress ? app.tokens.surface2 : app.tokens.surface1
     }

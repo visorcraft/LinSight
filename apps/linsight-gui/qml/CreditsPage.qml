@@ -346,7 +346,7 @@ Kirigami.Page {
                                     Layout.preferredHeight: 24
                                     Layout.alignment: Qt.AlignVCenter
                                     radius: app.tokens.radiusPill
-                                    color: app.tokens.accentMute
+                                    color: app.tokens.pillBackground
                                     Controls.Label {
                                         anchors.fill: parent
                                         anchors.leftMargin: app.tokens.spaceS

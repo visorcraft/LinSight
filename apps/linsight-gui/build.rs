@@ -43,6 +43,7 @@ fn main() {
             "qml/NewDashboardDialog.qml",
             "qml/DashboardViewPage.qml",
             "qml/HardwarePage.qml",
+            "qml/ThemedTextField.qml",
             "qml/AlertsPage.qml",
         ]),
     )

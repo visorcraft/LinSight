@@ -174,24 +174,41 @@ Rectangle {
     // --- State ---
     Component {
         id: stateRenderer
-        Rectangle {
-            implicitHeight: stateLabel.implicitHeight + Kirigami.Units.smallSpacing * 2
-            implicitWidth: stateLabel.implicitWidth + Kirigami.Units.largeSpacing * 2
-            radius: Kirigami.Units.smallRadius
-            color: {
+        Item {
+            id: stateRoot
+
+            readonly property color statusColor: {
                 var s = root.tileValue.toLowerCase();
-                if (s === "up" || s === "running" || s === "active") return Kirigami.Theme.positiveBackgroundColor;
-                if (s === "down" || s === "error" || s === "dead") return Kirigami.Theme.negativeBackgroundColor;
-                return Kirigami.Theme.neutralBackgroundColor;
+                if (s === "up" || s === "running" || s === "active") return app.tokens.positive;
+                if (s === "down" || s === "error" || s === "dead") return app.tokens.negative;
+                return app.tokens.neutral;
             }
-            Layout.alignment: Qt.AlignCenter
-            Label {
-                id: stateLabel
-                anchors.centerIn: parent
-                text: root.tileValue
-                color: app.tokens.textPrimary
-                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.5
-                font.weight: Font.Medium
+
+            RowLayout {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: app.tokens.spaceS
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: 8
+                    implicitHeight: 8
+                    radius: 2
+                    color: stateRoot.statusColor
+                }
+
+                Label {
+                    text: root.tileValue
+                    color: app.tokens.textPrimary
+                    opacity: 0.92
+                    font.pixelSize: app.tokens.textDisplay
+                    font.weight: app.tokens.weightMedium
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
+                    Accessible.ignored: true
+                }
             }
         }
     }

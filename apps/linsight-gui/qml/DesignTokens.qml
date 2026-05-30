@@ -125,6 +125,15 @@ QtObject {
         Qt.rgba(0x6c/255, 0x8c/255, 0xff/255, 0.16))
     readonly property color accentText: _pickColor("accent_text", "white")
 
+    // Pill surfaces follow LinSight's active theme, not the host
+    // Kirigami background, so named light/dark themes keep contrast.
+    readonly property color pillBackground: _pickColor("pill_background", surface2)
+
+    // Status colors for badges and semantic UI elements.
+    readonly property color positive: _pickColor("positive", Kirigami.Theme.positiveTextColor)
+    readonly property color negative: _pickColor("negative", Kirigami.Theme.negativeTextColor)
+    readonly property color neutral: _pickColor("neutral", Kirigami.Theme.neutralTextColor)
+
     // Monospace family probe — picks the first installed of a small
     // preferred list; falls back to the platform's generic monospace.
     readonly property string monoFamily: {
