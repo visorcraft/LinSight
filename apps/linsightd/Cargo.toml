@@ -48,3 +48,4 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+escargot = { workspace = true }

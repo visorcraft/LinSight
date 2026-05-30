@@ -9,6 +9,15 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+- **Dynamically-loaded `.so` plugins now receive their per-plugin config.**
+  Previously only in-tree sensors honored `plugins.toml`; dynamic plugins
+  always got an empty config, because a plugin's id (the config key) is
+  only known after `init` runs — and `init` is what consumes the config.
+  The loader now runs a throwaway "probe" `init` to read the id, looks up
+  the config, and re-instantiates the plugin once with it (a fresh
+  instance, so no live plugin is double-initialized). No plugin ABI
+  change. A plugin that cannot `init` at all without config still can't be
+  auto-configured, but that is vanishingly rare for read-only sensors.
 - **New: container monitoring (Docker + Podman).** A
   `linsight-sensors-containers` plugin emits a `containers.list` table of
   running containers discovered in the cgroup v2 hierarchy

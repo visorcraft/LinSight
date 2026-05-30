@@ -24,16 +24,30 @@ use linsight_plugin_sdk::{
 pub struct EchoPlugin;
 
 impl EchoPlugin {
-    fn init_inner(&self, _ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
+    fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
         let key =
             HardwareDeviceKey::try_new("plugin:io.visorcraft.linsight.example.echo:demo").unwrap();
-        Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.example.echo".into(),
-            display_name: "Echo example".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-            sensors: vec![SensorDescriptor {
-                id: SensorId::new("example.echo.value"),
-                display_name: "Echo value".into(),
+        let mut sensors = vec![SensorDescriptor {
+            id: SensorId::new("example.echo.value"),
+            display_name: "Echo value".into(),
+            unit: Unit::Count,
+            kind: SensorKind::Scalar,
+            category: Category::Custom,
+            native_rate_hz: 1.0,
+            min: None,
+            max: None,
+            device_id: Some("demo".into()),
+            device_key: Some(key.clone()),
+            tags: vec![],
+        }];
+        // Per-plugin config demo: when the host passes
+        // `{"enable_extra": true}` (via `plugins.toml` keyed by this
+        // plugin's id) the plugin advertises a second sensor. Proves
+        // that dynamically-loaded `.so` plugins receive their config.
+        if ctx.config().get("enable_extra").and_then(|v| v.as_bool()).unwrap_or(false) {
+            sensors.push(SensorDescriptor {
+                id: SensorId::new("example.echo.extra"),
+                display_name: "Echo extra (config-gated)".into(),
                 unit: Unit::Count,
                 kind: SensorKind::Scalar,
                 category: Category::Custom,
@@ -43,7 +57,13 @@ impl EchoPlugin {
                 device_id: Some("demo".into()),
                 device_key: Some(key.clone()),
                 tags: vec![],
-            }],
+            });
+        }
+        Ok(PluginManifest {
+            plugin_id: "io.visorcraft.linsight.example.echo".into(),
+            display_name: "Echo example".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            sensors,
             devices: vec![HardwareDevice {
                 key,
                 category: HardwareCategory::Other,
@@ -58,10 +78,10 @@ impl EchoPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        if sensor.as_str() == "example.echo.value" {
-            Ok(Reading::Scalar(42.0))
-        } else {
-            Err(PluginError::Unsupported(sensor.to_string()))
+        match sensor.as_str() {
+            "example.echo.value" => Ok(Reading::Scalar(42.0)),
+            "example.echo.extra" => Ok(Reading::Scalar(99.0)),
+            _ => Err(PluginError::Unsupported(sensor.to_string())),
         }
     }
 }

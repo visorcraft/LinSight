@@ -9,7 +9,7 @@ use libloading::Library;
 use linsight_core::{HardwareDevice, Reading, Sample, SensorId};
 use linsight_plugin_sdk::{
     LINSIGHT_PLUGIN_ABI_VERSION, LinsightPlugin, LinsightPluginDyn, PluginCtx, PluginError,
-    SensorDescriptor, host_init, host_sample,
+    PluginManifest, SensorDescriptor, host_init, host_sample,
 };
 use linsight_sensors_amdgpu::AmdgpuPlugin;
 use linsight_sensors_containers::ContainersPlugin;
@@ -193,28 +193,53 @@ impl PluginHost {
             if path.extension().and_then(|e| e.to_str()) != Some("so") {
                 continue;
             }
-            match unsafe { load_one(&path) } {
-                Ok(plugin) => {
-                    info!(path = %path.display(), "loaded plugin");
-                    // TODO(plan-G2): per-plugin config for dynamic .so
-                    // plugins is currently dropped. The plugin id is
-                    // only known after `host_init` returns the manifest,
-                    // and re-running init to apply the looked-up config
-                    // would double-initialize plugins that hold real
-                    // resources. Re-wiring this needs either an SDK
-                    // `plugin_id()` accessor (separate from manifest) or
-                    // a documented "init is idempotent" contract.
-                    // Dropping the unused-marker so any future caller
-                    // sees the parameter is supposed to be honored.
-                    let _ = plugin_configs;
-                    self.register_with_config(
-                        plugin.plugin,
-                        Some(plugin.library),
-                        serde_json::Value::Null,
-                    );
-                }
+            let LoadedPlugin { plugin, library } = match unsafe { load_one(&path) } {
+                Ok(p) => p,
                 Err(e) => {
                     warn!(path = %path.display(), error = %e, "plugin load failed; skipping");
+                    continue;
+                }
+            };
+            info!(path = %path.display(), "loaded plugin");
+
+            // A plugin's id lives in its manifest, which is only known
+            // after `init` runs — but `init` is also what consumes the
+            // per-plugin config. Resolve the ordering problem by running a
+            // throwaway "probe" `init` with an empty context to read the
+            // id, then look up the config keyed by that id.
+            let probe_manifest = match host_init(plugin.as_ref(), &PluginCtx::default()) {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!(path = %path.display(), error = ?e, "plugin init failed; skipping");
+                    continue;
+                }
+            };
+            let config = plugin_configs.get(&probe_manifest.plugin_id).cloned();
+
+            match config {
+                // No per-plugin config: keep the already-initialized probe
+                // instance as-is — re-running `init` with the same empty
+                // config would only add work.
+                None | Some(serde_json::Value::Null) => {
+                    self.finish_register(plugin, Some(library), probe_manifest);
+                }
+                // Config present: discard the probe (releasing whatever its
+                // `init` acquired) and build a fresh instance from the same
+                // library so `init` runs exactly once, this time with the
+                // looked-up config. Using a new instance means no live
+                // plugin is ever double-initialized.
+                Some(config) => {
+                    plugin.shutdown();
+                    drop(plugin);
+                    match unsafe { instantiate(&library) } {
+                        Ok(configured) => {
+                            self.register_with_config(configured, Some(library), config);
+                        }
+                        Err(e) => {
+                            warn!(path = %path.display(), error = %e,
+                                "plugin re-instantiation failed; skipping");
+                        }
+                    }
                 }
             }
         }
@@ -234,6 +259,19 @@ impl PluginHost {
                 return;
             }
         };
+        self.finish_register(plugin, library, manifest);
+    }
+
+    /// Register an already-initialized plugin together with the manifest
+    /// its `init` returned. Split out of [`register_with_config`] so the
+    /// dynamic loader can register a plugin it has already `init`-ed (to
+    /// discover its id) without paying for a second `init`.
+    fn finish_register(
+        &mut self,
+        plugin: Arc<dyn LinsightPlugin>,
+        library: Option<Library>,
+        manifest: PluginManifest,
+    ) {
         let idx = self.plugins.len();
         let meta = PluginMeta {
             plugin_id: manifest.plugin_id.clone(),
@@ -350,6 +388,20 @@ unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
             "ABI mismatch: plugin reports v{version}, daemon expects v{LINSIGHT_PLUGIN_ABI_VERSION}"
         ));
     }
+    let plugin = unsafe { instantiate(&library) }?;
+    Ok(LoadedPlugin { plugin, library })
+}
+
+/// Build a plugin instance from an already-opened, version-checked
+/// library by invoking its stabby factory. Separated from [`load_one`] so
+/// the dynamic loader can construct a second instance from the same `.so`
+/// (to re-`init` with per-plugin config) without re-opening the library.
+///
+/// SAFETY: `library` must export the `#[stabby::export]`-annotated
+/// `linsight_plugin_v5` factory whose return type is
+/// `dynptr!(Box<dyn LinsightPlugin + Send + Sync>)`. Type compatibility is
+/// verified by stabby's reflection (`get_stabbied`).
+unsafe fn instantiate(library: &Library) -> Result<Arc<dyn LinsightPlugin>, String> {
     let factory = unsafe {
         library
             .get_stabbied::<PluginFactory>(b"linsight_plugin_v5")
@@ -359,8 +411,7 @@ unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
     // The dynptr is `Dyn<'static, Box<()>, ...>` carrying our trait's
     // vtable. Wrap it in an `Arc<dyn LinsightPlugin>` by converting via a
     // trait object that boxes the dynptr.
-    let arc: Arc<dyn LinsightPlugin> = Arc::new(DynBoxPlugin(dyn_box));
-    Ok(LoadedPlugin { plugin: arc, library })
+    Ok(Arc::new(DynBoxPlugin(dyn_box)))
 }
 
 /// Adapter: a `dynptr!(Box<dyn LinsightPlugin + Send + Sync>)` exposes the
@@ -408,9 +459,79 @@ fn plugin_dirs() -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use linsight_core::SensorId;
 
     use super::*;
+
+    /// Build `examples/echo-plugin` once via escargot and return its `.so`.
+    fn echo_plugin_so() -> PathBuf {
+        static PATH: OnceLock<PathBuf> = OnceLock::new();
+        PATH.get_or_init(|| {
+            let build = escargot::CargoBuild::new()
+                .package("linsight-example-echo-plugin")
+                .exec()
+                .expect("cargo build the echo example plugin");
+            for msg in build {
+                let msg = msg.expect("read cargo build message");
+                if let escargot::format::Message::CompilerArtifact(art) =
+                    msg.decode().expect("decode cargo message")
+                    && art.target.name == "linsight_example_echo_plugin"
+                {
+                    for path in art.filenames {
+                        let p: PathBuf = path.into_owned();
+                        if p.extension().and_then(|s| s.to_str()) == Some("so") {
+                            return p;
+                        }
+                    }
+                }
+            }
+            panic!("escargot produced no .so for the echo plugin");
+        })
+        .clone()
+    }
+
+    /// Stage the built echo `.so` into a fresh temp plugin directory.
+    fn staged_plugin_dir() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::copy(echo_plugin_so(), dir.path().join("libecho.so")).unwrap();
+        dir
+    }
+
+    fn empty_host() -> PluginHost {
+        PluginHost { plugins: Vec::new(), registry: HashMap::new() }
+    }
+
+    #[test]
+    fn dynamic_plugin_without_config_has_base_sensors_only() {
+        let dir = staged_plugin_dir();
+        let mut host = empty_host();
+        host.load_from_dir(dir.path(), &HashMap::new());
+        let ids: Vec<&str> = host.descriptors().map(|d| d.id.as_str()).collect();
+        assert!(ids.contains(&"example.echo.value"), "base sensor missing: {ids:?}");
+        assert!(
+            !ids.contains(&"example.echo.extra"),
+            "config-gated sensor must be absent without config: {ids:?}",
+        );
+    }
+
+    #[test]
+    fn dynamic_plugin_receives_per_plugin_config() {
+        let dir = staged_plugin_dir();
+        let mut host = empty_host();
+        let mut configs: HashMap<String, serde_json::Value> = HashMap::new();
+        configs.insert(
+            "io.visorcraft.linsight.example.echo".to_string(),
+            serde_json::json!({ "enable_extra": true }),
+        );
+        host.load_from_dir(dir.path(), &configs);
+        let ids: Vec<&str> = host.descriptors().map(|d| d.id.as_str()).collect();
+        assert!(
+            ids.contains(&"example.echo.extra"),
+            "dynamically-loaded plugin did not receive its per-plugin config; sensors = {ids:?}",
+        );
+    }
 
     #[test]
     fn with_builtins_registers_cpu() {
