@@ -14,6 +14,7 @@ Kirigami.Page {
     property string category: ""
     property string pageTitle: ""
     property QtObject dashModel: null
+    property string groupBy: ""
 
     Accessible.role: Accessible.Pane
     Accessible.name: pageTitle
@@ -36,8 +37,29 @@ Kirigami.Page {
         if (!page.dashModel) return []
         try {
             const raw = JSON.parse(page.dashModel.tilesJson || "[]")
-            return raw.filter(t => t.category === page.category
+            let filtered = raw.filter(t => t.category === page.category
                 && !(typeof t.value === "string" && page.isUnknownSentinel(t.value)))
+
+            if (page.groupBy === "") return filtered
+
+            filtered.sort((a, b) => {
+                const valA = a[page.groupBy] || ""
+                const valB = b[page.groupBy] || ""
+                if (valA !== valB) return valA.localeCompare(valB)
+                return (a.name || "").localeCompare(b.name || "")
+            })
+
+            const result = []
+            let lastGroup = null
+            for (const t of filtered) {
+                const currentGroup = t[page.groupBy] || ""
+                if (currentGroup !== lastGroup) {
+                    result.push({ type: "header", label: currentGroup })
+                    lastGroup = currentGroup
+                }
+                result.push(Object.assign({}, t, { type: "tile" }))
+            }
+            return result
         } catch (e) {
             return []
         }
@@ -112,14 +134,57 @@ Kirigami.Page {
 
             Repeater {
                 model: page.tilesArray
-                delegate: SensorTile {
+                delegate: Loader {
+                    id: cellLoader
+                    sourceComponent: modelData.type === "header" ? headerComponent : tileComponent
+                    Layout.columnSpan: modelData.type === "header" ? grid.columns : 1
                     Layout.fillWidth: true
-                    Layout.preferredHeight: modelData.kind === "table" && modelData.rows && modelData.rows.length > 0 ? 280 : 156
-                    tileName: modelData.name
-                    tileDeviceLabel: modelData.deviceLabel || ""
-                    tileValue: modelData.value
-                    tileKind: modelData.kind || "scalar"
-                    tileRows: modelData.rows || []
+                    Layout.preferredHeight: modelData.type === "header" ? 32 : (modelData.kind === "table" && modelData.rows && modelData.rows.length > 0 ? 280 : 156)
+                    onLoaded: {
+                        item.anchors.fill = cellLoader
+                        if (modelData.type === "header") {
+                            item.label = modelData.label
+                        } else {
+                            item.tileName = modelData.name
+                            item.tileDeviceLabel = modelData.deviceLabel || ""
+                            item.tileValue = modelData.value
+                            item.tileKind = modelData.kind || "scalar"
+                            item.tileRows = modelData.rows || []
+                        }
+                    }
+                }
+            }
+
+            Component {
+                id: headerComponent
+                Rectangle {
+                    property string label: ""
+                    Layout.fillWidth: true
+                    color: app.tokens.surface0
+
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: 1
+                        color: app.tokens.separator
+                    }
+
+                    Controls.Label {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: app.tokens.spaceM
+                        text: label
+                        font.pixelSize: app.tokens.textCaption
+                        font.weight: app.tokens.weightBold
+                        opacity: 0.6
+                    }
+                }
+            }
+
+            Component {
+                id: tileComponent
+                SensorTile {
+                    Layout.fillWidth: true
                 }
             }
         }

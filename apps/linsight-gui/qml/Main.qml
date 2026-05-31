@@ -592,7 +592,7 @@ Kirigami.ApplicationWindow {
     }
 
     Component { id: overviewPage;  OverviewPage  { dashModel: app.dashModel } }
-    Component { id: gpusPage;      CategoryPage  { dashModel: app.dashModel; category: "gpu";     pageTitle: qsTr("GPUs") } }
+    Component { id: gpusPage;      CategoryPage  { dashModel: app.dashModel; category: "gpu";     pageTitle: qsTr("GPUs"); groupBy: "deviceLabel" } }
     Component { id: storagePage;   CategoryPage  { dashModel: app.dashModel; category: "storage"; pageTitle: qsTr("Storage") } }
     Component { id: networkPage;   CategoryPage  { dashModel: app.dashModel; category: "network"; pageTitle: qsTr("Network") } }
     Component { id: hardwarePage;  HardwarePage  {} }

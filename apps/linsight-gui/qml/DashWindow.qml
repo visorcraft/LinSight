@@ -48,7 +48,7 @@ Kirigami.ApplicationWindow {
                 currentIndex: bar.currentIndex
 
                 OverviewPage { dashModel: root.dashModel }
-                CategoryPage { category: "gpu";     dashModel: root.dashModel; pageTitle: qsTr("GPUs") }
+                CategoryPage { category: "gpu";     dashModel: root.dashModel; pageTitle: qsTr("GPUs"); groupBy: "deviceLabel" }
                 CategoryPage { category: "storage"; dashModel: root.dashModel; pageTitle: qsTr("Storage") }
                 CategoryPage { category: "network"; dashModel: root.dashModel; pageTitle: qsTr("Network") }
             }
