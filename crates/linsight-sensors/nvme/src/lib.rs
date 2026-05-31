@@ -24,7 +24,7 @@ use linsight_core::{
 use linsight_plugin_sdk::stabby::result::Result as SResult;
 use linsight_plugin_sdk::{
     LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
-    RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
+    RPluginManifest, RReading, RSampleResult, RSensorId, STATIC_TAG, SensorDescriptor,
 };
 
 #[derive(Default)]
@@ -54,6 +54,8 @@ struct NvmeDevice {
     hwmon_root: Option<PathBuf>,
     /// /sys/class/block/nvmeNn1/stat — first namespace's I/O stats.
     block_stat: Option<PathBuf>,
+    /// Capacity in bytes.
+    capacity_bytes: u64,
 }
 
 /// Pick the most stable identifier available and normalize it to
@@ -72,7 +74,7 @@ impl NvmePlugin {
         inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
         inner.devices = enumerate(ctx.sysroot()).map_err(|e| PluginError::Io(e.to_string()))?;
 
-        let mut sensors = Vec::with_capacity(inner.devices.len() * 3);
+        let mut sensors = Vec::with_capacity(inner.devices.len() * 4);
         let mut devices: Vec<HardwareDevice> = Vec::with_capacity(inner.devices.len());
         for dev in &inner.devices {
             // Device identity is carried via device_key → device_label and
@@ -88,6 +90,19 @@ impl NvmePlugin {
                 plugin_id: String::new(),
                 plugin_device_id: dev.name.clone(),
                 sensor_ids: vec![],
+            });
+            sensors.push(SensorDescriptor {
+                id: SensorId::new(format!("nvme.{}.capacity_bytes", dev.name)),
+                display_name: "NVMe capacity".into(),
+                unit: Unit::Bytes,
+                kind: SensorKind::Scalar,
+                category: Category::Storage,
+                native_rate_hz: 0.2,
+                min: Some(0.0),
+                max: None,
+                device_id: Some(dev.name.clone()),
+                device_key: Some(key.clone()),
+                tags: vec![STATIC_TAG.into()],
             });
             if dev.hwmon_root.is_some() {
                 sensors.push(SensorDescriptor {
@@ -154,6 +169,7 @@ impl NvmePlugin {
             .find(|d| d.name == name)
             .ok_or_else(|| PluginError::Unsupported(id.into()))?;
         match metric {
+            "capacity_bytes" => Ok(Reading::Scalar(dev.capacity_bytes as f64)),
             "temp_c" => {
                 let hwmon =
                     dev.hwmon_root.as_ref().ok_or_else(|| PluginError::Unsupported(id.into()))?;
@@ -194,11 +210,6 @@ impl LinsightPlugin for NvmePlugin {
     }
 }
 
-/// `/sys/class/block/X/stat` is 11 (or 17, depending on kernel) whitespace-
-/// separated fields. We only need the read and write sector counts.
-///   field 2: sectors read
-///   field 6: sectors written
-/// See `Documentation/admin-guide/iostats.rst` in the kernel tree.
 #[derive(Clone, Copy, Debug, Default)]
 struct BlockStat {
     sectors_read: u64,
@@ -241,40 +252,40 @@ fn enumerate(sysroot: Option<&Path>) -> Result<Vec<NvmeDevice>, std::io::Error> 
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        // Match `nvmeN` exactly. Bare `starts_with("nvme")` would also
-        // pick up hypothetical future entries like `nvme-fabrics` or
-        // `nvme-subsystem` that aren't controllers we know how to read.
         if !is_nvme_controller_name(&name) {
             continue;
         }
         let ctrl_root = entry.path();
         let model = match fs::read_to_string(ctrl_root.join("model")) {
             Ok(s) => s.trim().to_owned(),
-            // No model file is unusual but not fatal — show a useful
-            // fallback instead of an empty string that the GUI would
-            // render as "NVMe temperature ()".
             Err(_) => format!("unknown model ({name})"),
         };
         let hwmon_root = find_hwmon(&ctrl_root);
-        // The first namespace is conventionally <ctrl>n1 (e.g. nvme0n1).
-        // Enterprise SSDs may expose multiple namespaces (`nvme0n2`, …);
-        // we currently only count I/O on n1 — see open follow-up.
         let block_stat = {
             let candidate = block_root.join(format!("{name}n1/stat"));
             if candidate.exists() { Some(candidate) } else { None }
         };
+
+        let capacity_bytes = if let Some(ref stat_path) = block_stat {
+            let size_path = stat_path.parent().unwrap().join("size");
+            if let Ok(s) = fs::read_to_string(&size_path) {
+                s.trim().parse::<u64>().map(|sectors| sectors * 512).unwrap_or(0)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
         let wwid = read_trimmed_nonempty(&ctrl_root.join("wwid"));
         let serial = read_trimmed_nonempty(&ctrl_root.join("serial"));
-        out.push(NvmeDevice { name, model, wwid, serial, hwmon_root, block_stat });
+        out.push(NvmeDevice { name, model, wwid, serial, hwmon_root, block_stat, capacity_bytes });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 
 fn is_nvme_controller_name(s: &str) -> bool {
-    // nvme<digits>: the controller naming convention in
-    // /sys/class/nvme/. Excludes future kernel entries like
-    // `nvme-fabrics` or `nvme-subsystem` that aren't controllers.
     let Some(rest) = s.strip_prefix("nvme") else {
         return false;
     };
@@ -338,17 +349,21 @@ mod tests {
         fs::create_dir_all(n0.join("hwmon5")).unwrap();
         fs::write(n0.join("model"), "Samsung SSD 990 PRO 2TB\n").unwrap();
         fs::write(n0.join("wwid"), "eui.001b448b41234567\n").unwrap();
-        fs::write(n0.join("serial"), "S6S2NJ0X123456\n").unwrap();
         fs::write(n0.join("hwmon5/temp1_input"), "42000\n").unwrap();
         let n0_block = dir.path().join("sys/class/block/nvme0n1");
         fs::create_dir_all(&n0_block).unwrap();
         fs::write(n0_block.join("stat"), "0 0 12345 0 0 0 678910 0 0 0 0\n").unwrap();
+        fs::write(n0_block.join("size"), "500000000\n").unwrap();
 
         // nvme1: no wwid, serial only — falls back to serial.
         let n1 = dir.path().join("sys/class/nvme/nvme1");
         fs::create_dir_all(&n1).unwrap();
         fs::write(n1.join("model"), "WD_BLACK SN850X 1TB\n").unwrap();
         fs::write(n1.join("serial"), "WD-XYZ123\n").unwrap();
+        let n1_block = dir.path().join("sys/class/block/nvme1n1");
+        fs::create_dir_all(&n1_block).unwrap();
+        fs::write(n1_block.join("stat"), "0 0 12345 0 0 0 678910 0 0 0 0\n").unwrap();
+        fs::write(n1_block.join("size"), "250000000\n").unwrap();
 
         let plugin = NvmePlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
@@ -370,6 +385,11 @@ mod tests {
             let k = s.device_key.as_ref().expect("nvme sensors must have device_key");
             assert!(keys.contains(k.as_str()), "sensor key {k} not in manifest devices");
         }
+
+        // Check capacity sensor
+        let cap_sensor =
+            manifest.sensors.iter().find(|s| s.id.as_str() == "nvme.nvme0.capacity_bytes").unwrap();
+        assert!(cap_sensor.tags.contains(&linsight_plugin_sdk::STATIC_TAG.to_string()));
     }
 
     #[test]

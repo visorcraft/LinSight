@@ -24,7 +24,7 @@ use linsight_core::{
 use linsight_plugin_sdk::stabby::result::Result as SResult;
 use linsight_plugin_sdk::{
     LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
-    RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
+    RPluginManifest, RReading, RSampleResult, RSensorId, STATIC_TAG, SensorDescriptor,
 };
 
 /// Virtual/software device prefixes to skip.
@@ -45,6 +45,7 @@ struct Inner {
 struct DiskDevice {
     name: String,
     stat_path: PathBuf,
+    capacity_bytes: u64,
 }
 
 impl DiskPlugin {
@@ -54,7 +55,7 @@ impl DiskPlugin {
         let extra_exclude = parse_string_array(ctx.config(), "exclude_devices");
         inner.devices = enumerate(ctx.sysroot(), &extra_exclude);
 
-        let mut sensors = Vec::with_capacity(inner.devices.len() * 5);
+        let mut sensors = Vec::with_capacity(inner.devices.len() * 6);
         let mut hw_devices: Vec<HardwareDevice> = Vec::with_capacity(inner.devices.len());
         for dev in &inner.devices {
             let key = HardwareDeviceKey::try_new(format!("block:{}", dev.name))
@@ -68,6 +69,19 @@ impl DiskPlugin {
                 plugin_id: String::new(),
                 plugin_device_id: dev.name.clone(),
                 sensor_ids: vec![],
+            });
+            sensors.push(SensorDescriptor {
+                id: SensorId::new(format!("disk.{}.capacity_bytes", dev.name)),
+                display_name: "Disk capacity".into(),
+                unit: Unit::Bytes,
+                kind: SensorKind::Scalar,
+                category: Category::Storage,
+                native_rate_hz: 0.2,
+                min: Some(0.0),
+                max: None,
+                device_id: Some(dev.name.clone()),
+                device_key: Some(key.clone()),
+                tags: vec![STATIC_TAG.into()],
             });
             sensors.push(SensorDescriptor {
                 id: SensorId::new(format!("disk.{}.bytes_read", dev.name)),
@@ -158,14 +172,15 @@ impl DiskPlugin {
             .ok_or_else(|| PluginError::Unsupported(id.into()))?;
         let stat = read_block_stat(&dev.stat_path)?;
         let value = match metric {
-            "bytes_read" => stat.sectors_read.saturating_mul(512),
-            "bytes_written" => stat.sectors_written.saturating_mul(512),
-            "iops_read" => stat.reads_completed,
-            "iops_written" => stat.writes_completed,
-            "io_util_ms" => stat.io_ticks,
+            "capacity_bytes" => Reading::Scalar(dev.capacity_bytes as f64),
+            "bytes_read" => Reading::Counter(stat.sectors_read.saturating_mul(512)),
+            "bytes_written" => Reading::Counter(stat.sectors_written.saturating_mul(512)),
+            "iops_read" => Reading::Counter(stat.reads_completed),
+            "iops_written" => Reading::Counter(stat.writes_completed),
+            "io_util_ms" => Reading::Counter(stat.io_ticks),
             _ => return Err(PluginError::Unsupported(id.into())),
         };
-        Ok(Reading::Counter(value))
+        Ok(value)
     }
 }
 
@@ -187,18 +202,6 @@ impl LinsightPlugin for DiskPlugin {
     }
 }
 
-/// `/sys/class/block/X/stat` fields (kernel Documentation/admin-guide/iostats.rst):
-///   1. reads completed
-///   2. reads merged
-///   3. sectors read
-///   4. time spent reading (ms)
-///   5. writes completed
-///   6. writes merged
-///   7. sectors written
-///   8. time spent writing (ms)
-///   9. I/Os currently in progress
-///  10. time spent doing I/O (ms) — io_ticks
-///  11. weighted time spent doing I/O (ms)
 struct BlockStat {
     reads_completed: u64,
     writes_completed: u64,
@@ -225,13 +228,9 @@ fn read_block_stat(path: &Path) -> Result<BlockStat, PluginError> {
     };
     Ok(BlockStat {
         reads_completed: parse(0)?,
-        // reads_merged: parse(1)?
-        sectors_read: parse(2)?,
-        // read_ticks: parse(3)?
         writes_completed: parse(4)?,
-        // writes_merged: parse(5)?
+        sectors_read: parse(2)?,
         sectors_written: parse(6)?,
-        // write_ticks: parse(7)?
         io_ticks: parse(9)?,
     })
 }
@@ -247,7 +246,6 @@ fn enumerate(sysroot: Option<&Path>, extra_exclude: &[String]) -> Vec<DiskDevice
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        // Skip virtual devices
         if VIRTUAL_PREFIXES.iter().any(|p| name.starts_with(p)) {
             continue;
         }
@@ -257,7 +255,6 @@ fn enumerate(sysroot: Option<&Path>, extra_exclude: &[String]) -> Vec<DiskDevice
         }) {
             continue;
         }
-        // Skip NVMe controllers (nvme0n1: already covered by nvme plugin)
         if name.starts_with("nvme") {
             continue;
         }
@@ -265,7 +262,15 @@ fn enumerate(sysroot: Option<&Path>, extra_exclude: &[String]) -> Vec<DiskDevice
         if !stat_path.exists() {
             continue;
         }
-        out.push(DiskDevice { name, stat_path });
+
+        let size_path = entry.path().join("size");
+        let capacity_bytes = if let Ok(s) = fs::read_to_string(&size_path) {
+            s.trim().parse::<u64>().map(|sectors| sectors * 512).unwrap_or(0)
+        } else {
+            0
+        };
+
+        out.push(DiskDevice { name, stat_path, capacity_bytes });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
@@ -314,14 +319,15 @@ mod tests {
     }
 
     #[test]
-    fn init_advertises_five_sensors_per_device() {
+    fn init_advertises_six_sensors_per_device() {
         let dir = fake_sysroot(&[("sda", "100 200 300 400 500 600 700 800 0 900 1000")]);
         let plugin = DiskPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         let manifest = host_init(&plugin, &ctx).unwrap();
         // sda + nvme0n1 filtered out → only sda
         let ids: Vec<&str> = manifest.sensors.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids.len(), 5);
+        assert_eq!(ids.len(), 6);
+        assert!(ids.contains(&"disk.sda.capacity_bytes"));
         assert!(ids.contains(&"disk.sda.bytes_read"));
         assert!(ids.contains(&"disk.sda.bytes_written"));
         assert!(ids.contains(&"disk.sda.iops_read"));
