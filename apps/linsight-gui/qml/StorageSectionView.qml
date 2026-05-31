@@ -12,6 +12,9 @@ import org.kde.kirigami as Kirigami
 Controls.ScrollView {
     id: view
     property var sections: []
+    // Expansion state lives here (not on the delegates) so it survives the
+    // ~1s model rebuild. Keyed by mount label (unique per mountpoint).
+    property var expandedMounts: ({})
     clip: true
     contentWidth: availableWidth
 
@@ -83,7 +86,7 @@ Controls.ScrollView {
                         delegate: Rectangle {
                             id: mountCardRoot
                             required property var modelData
-                            property bool expanded: false
+                            property bool expanded: view.expandedMounts[modelData.label] === true
                             Layout.fillWidth: true
                             Layout.leftMargin: app.tokens.spaceL
                             Layout.preferredHeight: mountCard.implicitHeight + app.tokens.spaceM * 2
@@ -122,7 +125,7 @@ Controls.ScrollView {
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: mountCardRoot.expanded = !mountCardRoot.expanded
+                                        onClicked: view.expandedMounts = Object.assign({}, view.expandedMounts, { [mountCardRoot.modelData.label]: !mountCardRoot.expanded })
                                     }
                                 }
 
