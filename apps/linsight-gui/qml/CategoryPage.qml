@@ -167,6 +167,85 @@ Kirigami.Page {
         }
     }
 
+    // Nested model for the Storage page: physical-disk sections (capacity
+    // desc), each with its own sensors plus inset mount sub-sections; mounts
+    // with no resolved disk become their own top-level "orphan" sections.
+    readonly property var storageSections: {
+        if (page.category !== "storage" || !page.dashModel) return []
+        try {
+            const raw = JSON.parse(page.dashModel.tilesJson || "[]")
+            const tiles = raw.filter(t => t.category === "storage"
+                && !(typeof t.value === "string" && page.isUnknownSentinel(t.value)))
+
+            const disks = new Map()    // device -> { device, label, capacity, ownTiles: [] }
+            const fsTiles = []
+            for (const t of tiles) {
+                if (t.id && String(t.id).indexOf("fs.") === 0) { fsTiles.push(t); continue }
+                const dev = t.device || ""
+                if (dev === "") continue
+                if (!disks.has(dev)) disks.set(dev, { device: dev, label: t.deviceLabel || dev, capacity: -1, ownTiles: [] })
+                const d = disks.get(dev)
+                d.ownTiles.push(t)
+                if (t.id && String(t.id).endsWith("capacity_bytes")) d.capacity = page.parseBytes(t.value)
+            }
+
+            const diskMounts = new Map()   // device -> Map(mountLabel -> { label, tiles: [] })
+            const orphanGroups = new Map() // mountLabel -> { label, tiles: [] }
+            for (const t of fsTiles) {
+                const parent = t.parentDevice || ""
+                const mountLabel = t.deviceLabel || ""
+                if (parent !== "" && disks.has(parent)) {
+                    if (!diskMounts.has(parent)) diskMounts.set(parent, new Map())
+                    const mm = diskMounts.get(parent)
+                    if (!mm.has(mountLabel)) mm.set(mountLabel, { label: mountLabel, tiles: [] })
+                    mm.get(mountLabel).tiles.push(t)
+                } else {
+                    if (!orphanGroups.has(mountLabel)) orphanGroups.set(mountLabel, { label: mountLabel, tiles: [] })
+                    orphanGroups.get(mountLabel).tiles.push(t)
+                }
+            }
+
+            const byName = (a, b) => (a.name || "").localeCompare(b.name || "")
+
+            const diskSections = Array.from(disks.values()).map(d => {
+                const mm = diskMounts.get(d.device) || new Map()
+                const mounts = Array.from(mm.values())
+                    .sort((a, b) => a.label.localeCompare(b.label))
+                    .map(m => ({ label: m.label, tiles: m.tiles.slice().sort(byName) }))
+                return { kind: "disk", device: d.device, label: d.label,
+                         capacity: d.capacity, ownTiles: d.ownTiles.slice().sort(byName), mounts: mounts }
+            })
+            diskSections.sort((a, b) => a.capacity !== b.capacity ? b.capacity - a.capacity
+                                                                   : a.label.localeCompare(b.label))
+
+            const orphanSections = Array.from(orphanGroups.values())
+                .sort((a, b) => a.label.localeCompare(b.label))
+                .map(o => ({ kind: "orphan", device: "", label: o.label, capacity: -1,
+                             ownTiles: o.tiles.slice().sort(byName), mounts: [] }))
+
+            return diskSections.concat(orphanSections)
+        } catch (e) {
+            return []
+        }
+    }
+
+    readonly property bool nested: page.category === "storage"
+
+    // Parse a formatted capacity string ("2 TB", "512 GB") to a GB-scaled
+    // number for ordering. Returns -1 when unparseable.
+    function parseBytes(v) {
+        if (typeof v !== "string") return -1
+        const m = v.match(/^(\d+(\.\d+)?)\s*(TB|TiB|GB|GiB|MB|MiB|KB|KiB|B)$/)
+        if (!m) return -1
+        let val = parseFloat(m[1]); const u = m[3]
+        if (u === "TB" || u === "TiB") val *= 1024
+        else if (u === "GB" || u === "GiB") val *= 1
+        else if (u === "MB" || u === "MiB") val /= 1024
+        else if (u === "KB" || u === "KiB") val /= (1024 * 1024)
+        else if (u === "B") val /= (1024 * 1024 * 1024)
+        return val
+    }
+
     function isUnknownSentinel(v) {
         // Match the formatter's exact output for the kernel's -1 sentinel
         // across the units sensors actually emit it for. Anything else
