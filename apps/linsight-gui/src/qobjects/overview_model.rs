@@ -122,6 +122,8 @@ struct TileJson {
     /// sensors (CPU, memory, …).
     #[serde(rename = "deviceLabel", skip_serializing_if = "Option::is_none")]
     device_label: Option<String>,
+    #[serde(rename = "parentDevice", skip_serializing_if = "Option::is_none")]
+    parent_device: Option<String>,
     value: String,
     kind: String,
     unit: String,
@@ -268,6 +270,7 @@ impl ffi::OverviewModel {
                     device: info.device_id.clone(),
                     name: info.display_name.clone(),
                     device_label: device_label_for(info),
+                    parent_device: parent_device_for(info),
                     value: "…".into(),
                     kind,
                     unit: "".into(),
@@ -343,6 +346,7 @@ impl ffi::OverviewModel {
                             if let Some(tile) = guard.tiles.get_mut(id) {
                                 tile.name = info.display_name.clone();
                                 tile.device_label = device_label_for(info);
+                                tile.parent_device = parent_device_for(info);
                             }
                         }
                         serialize_tiles(&guard.id_order, &guard.tiles)
@@ -644,6 +648,12 @@ fn device_label_for(info: &SensorInfo) -> Option<String> {
     }
 }
 
+/// Extract the backing physical-disk id from a sensor's `parent:<id>` tag
+/// (set by the fs plugin). `None` for sensors with no such tag.
+fn parent_device_for(info: &linsight_protocol::SensorInfo) -> Option<String> {
+    info.tags.iter().find_map(|t| t.strip_prefix("parent:").map(|s| s.to_owned()))
+}
+
 fn serialize_tiles(order: &[String], tiles: &HashMap<String, TileJson>) -> String {
     let ordered: Vec<&TileJson> = order.iter().filter_map(|id| tiles.get(id)).collect();
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
@@ -790,6 +800,7 @@ fn serialize_kind(k: linsight_core::SensorKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use linsight_core::{Category, SensorKind};
     use std::sync::mpsc;
 
     fn empty_state_with_tiles(ids: &[&str]) -> SampleState {
@@ -804,6 +815,7 @@ mod tests {
                         device: None,
                         name: (*id).to_string(),
                         device_label: None,
+                        parent_device: None,
                         value: String::new(),
                         kind: "scalar".into(),
                         unit: "count".into(),
@@ -848,6 +860,7 @@ mod tests {
             device: Some("gpu0".into()),
             name: "GPU utilization".into(),
             device_label: Some("RTX 5080 Max-Q".into()),
+            parent_device: None,
             value: "…".into(),
             kind: "scalar".into(),
             unit: String::new(),
@@ -865,6 +878,30 @@ mod tests {
         let cpu = TileJson { name: "CPU".into(), device_label: None, ..gpu };
         let cpu_json = serde_json::to_string(&cpu).unwrap();
         assert!(!cpu_json.contains("deviceLabel"), "{cpu_json}");
+    }
+
+    #[test]
+    fn parent_device_extracted_from_parent_tag() {
+        let info = linsight_protocol::SensorInfo {
+            id: SensorId::new("fs.home.used_bytes"),
+            display_name: "Filesystem used".into(),
+            unit: Unit::Bytes,
+            kind: SensorKind::Scalar,
+            category: Category::Storage,
+            native_rate_hz: 1.0,
+            min: Some(0.0),
+            max: None,
+            device_id: Some("home".into()),
+            plugin_id: "io.visorcraft.linsight.fs".into(),
+            device_key: Some("fs:home".into()),
+            device_label: Some("btrfs (/home)".into()),
+            tags: vec!["parent:nvme0".into()],
+        };
+        assert_eq!(super::parent_device_for(&info), Some("nvme0".to_owned()));
+
+        let mut no_parent = info.clone();
+        no_parent.tags = vec!["static".into()];
+        assert_eq!(super::parent_device_for(&no_parent), None);
     }
 
     #[test]
