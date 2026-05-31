@@ -180,6 +180,13 @@ impl FsPlugin {
             let parent_tags: Vec<String> = resolve_parent_device(source, inner.sysroot.as_deref())
                 .map(|p| vec![format!("parent:{p}")])
                 .unwrap_or_default();
+            // Some filesystems (btrfs, FAT/vfat, exFAT, ...) don't expose inode
+            // counts via statvfs (f_files == 0), so inodes_total/inodes_used are
+            // perpetually 0. Skip those sensors for such mounts. A statvfs error
+            // (e.g. a mount that vanished) defaults to keeping them.
+            let reports_inodes = statvfs_raw(mountpoint)
+                .map(|(_, _, inodes, _)| inodes > 0)
+                .unwrap_or(true);
             let base = mount_safekey(mountpoint);
             let safe =
                 if taken.insert(base.clone()) { base } else { format!("{base}_{}", mtab_idx + 1) };
@@ -235,32 +242,34 @@ impl FsPlugin {
                 device_key: Some(key.clone()),
                 tags: parent_tags.clone(),
             });
-            sensors.push(SensorDescriptor {
-                id: SensorId::new(format!("fs.{safe}.inodes_total")),
-                display_name: "Inodes total".into(),
-                unit: Unit::Count,
-                kind: SensorKind::Scalar,
-                category: Category::Storage,
-                native_rate_hz: 0.2,
-                min: Some(0.0),
-                max: None,
-                device_id: Some(safe.clone()),
-                device_key: Some(key.clone()),
-                tags: parent_tags.clone(),
-            });
-            sensors.push(SensorDescriptor {
-                id: SensorId::new(format!("fs.{safe}.inodes_used")),
-                display_name: "Inodes used".into(),
-                unit: Unit::Count,
-                kind: SensorKind::Scalar,
-                category: Category::Storage,
-                native_rate_hz: 1.0,
-                min: Some(0.0),
-                max: None,
-                device_id: Some(safe.clone()),
-                device_key: Some(key.clone()),
-                tags: parent_tags.clone(),
-            });
+            if reports_inodes {
+                sensors.push(SensorDescriptor {
+                    id: SensorId::new(format!("fs.{safe}.inodes_total")),
+                    display_name: "Inodes total".into(),
+                    unit: Unit::Count,
+                    kind: SensorKind::Scalar,
+                    category: Category::Storage,
+                    native_rate_hz: 0.2,
+                    min: Some(0.0),
+                    max: None,
+                    device_id: Some(safe.clone()),
+                    device_key: Some(key.clone()),
+                    tags: parent_tags.clone(),
+                });
+                sensors.push(SensorDescriptor {
+                    id: SensorId::new(format!("fs.{safe}.inodes_used")),
+                    display_name: "Inodes used".into(),
+                    unit: Unit::Count,
+                    kind: SensorKind::Scalar,
+                    category: Category::Storage,
+                    native_rate_hz: 1.0,
+                    min: Some(0.0),
+                    max: None,
+                    device_id: Some(safe.clone()),
+                    device_key: Some(key.clone()),
+                    tags: parent_tags.clone(),
+                });
+            }
         }
         inner.mounts = resolved_mounts;
         Ok(PluginManifest {
@@ -450,8 +459,18 @@ mod tests {
         let p = FsPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(d.path().to_path_buf()).unwrap();
         let m = host_init(&p, &ctx).unwrap();
-        assert_eq!(m.sensors.len(), 5);
+        let reports_inodes =
+            super::statvfs_raw("/").map(|(_, _, inodes, _)| inodes > 0).unwrap_or(true);
+        assert_eq!(m.sensors.len(), if reports_inodes { 5 } else { 3 });
         assert!(m.sensors.iter().any(|s| s.id.as_str() == "fs.root.total_bytes"));
+        assert_eq!(
+            m.sensors.iter().any(|s| s.id.as_str() == "fs.root.inodes_total"),
+            reports_inodes
+        );
+        assert_eq!(
+            m.sensors.iter().any(|s| s.id.as_str() == "fs.root.inodes_used"),
+            reports_inodes
+        );
     }
 
     #[test]
