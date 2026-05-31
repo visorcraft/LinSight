@@ -62,7 +62,7 @@ fn mount_safekey(mountpoint: &str) -> String {
     if s.is_empty() { "root".into() } else { s.replace('/', "_") }
 }
 
-fn read_mtab(sysroot: Option<&Path>) -> Vec<(String, String)> {
+fn read_mtab(sysroot: Option<&Path>) -> Vec<(String, String, String)> {
     let path = match sysroot {
         Some(r) => r.join("etc/mtab"),
         None => PathBuf::from("/etc/mtab"),
@@ -94,7 +94,7 @@ fn read_mtab(sysroot: Option<&Path>) -> Vec<(String, String)> {
         if f[0] == "none" || f[0] == "tmpfs" {
             continue;
         }
-        out.push((f[1].to_owned(), f[2].to_owned()));
+        out.push((f[0].to_owned(), f[1].to_owned(), f[2].to_owned()));
     }
     out
 }
@@ -176,7 +176,10 @@ impl FsPlugin {
         // Stash the (mountpoint, disambiguated safekey) pairs so
         // `sample_inner` can map back without re-running disambiguation.
         let mut resolved_mounts: Vec<(String, String)> = Vec::with_capacity(mtab.len());
-        for (mtab_idx, (mountpoint, fstype)) in mtab.iter().enumerate() {
+        for (mtab_idx, (source, mountpoint, fstype)) in mtab.iter().enumerate() {
+            let parent_tags: Vec<String> = resolve_parent_device(source, inner.sysroot.as_deref())
+                .map(|p| vec![format!("parent:{p}")])
+                .unwrap_or_default();
             let base = mount_safekey(mountpoint);
             let safe =
                 if taken.insert(base.clone()) { base } else { format!("{base}_{}", mtab_idx + 1) };
@@ -204,7 +207,7 @@ impl FsPlugin {
                 max: None,
                 device_id: Some(safe.clone()),
                 device_key: Some(key.clone()),
-                tags: vec![],
+                tags: parent_tags.clone(),
             });
             sensors.push(SensorDescriptor {
                 id: SensorId::new(format!("fs.{safe}.used_bytes")),
@@ -217,7 +220,7 @@ impl FsPlugin {
                 max: None,
                 device_id: Some(safe.clone()),
                 device_key: Some(key.clone()),
-                tags: vec![],
+                tags: parent_tags.clone(),
             });
             sensors.push(SensorDescriptor {
                 id: SensorId::new(format!("fs.{safe}.avail_bytes")),
@@ -230,7 +233,7 @@ impl FsPlugin {
                 max: None,
                 device_id: Some(safe.clone()),
                 device_key: Some(key.clone()),
-                tags: vec![],
+                tags: parent_tags.clone(),
             });
             sensors.push(SensorDescriptor {
                 id: SensorId::new(format!("fs.{safe}.inodes_total")),
@@ -243,7 +246,7 @@ impl FsPlugin {
                 max: None,
                 device_id: Some(safe.clone()),
                 device_key: Some(key.clone()),
-                tags: vec![],
+                tags: parent_tags.clone(),
             });
             sensors.push(SensorDescriptor {
                 id: SensorId::new(format!("fs.{safe}.inodes_used")),
@@ -256,7 +259,7 @@ impl FsPlugin {
                 max: None,
                 device_id: Some(safe.clone()),
                 device_key: Some(key.clone()),
-                tags: vec![],
+                tags: parent_tags.clone(),
             });
         }
         inner.mounts = resolved_mounts;
@@ -401,6 +404,38 @@ mod tests {
         assert_eq!(super::resolve_parent_device("/dev/mapper/vg-root", Some(dir.path())), None);
         assert_eq!(super::resolve_parent_device("/dev/zram0", Some(dir.path())), None);
         assert_eq!(super::resolve_parent_device("/dev/dm-0", Some(dir.path())), None);
+    }
+
+    #[test]
+    fn fs_sensors_carry_parent_tag_for_backed_mounts() {
+        // sysroot with one btrfs mount on /dev/nvme0n1p2 and one nfs mount.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("sys/block/nvme0n1/nvme0n1p2")).unwrap();
+        std::fs::write(dir.path().join("sys/block/nvme0n1/nvme0n1p2/partition"), "2\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("proc")).unwrap();
+        std::fs::write(
+            dir.path().join("proc/mounts"),
+            "/dev/nvme0n1p2 /home btrfs rw 0 0\nnas:/media /mnt/media nfs rw 0 0\n",
+        )
+        .unwrap();
+
+        let plugin = super::FsPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        let manifest = plugin.init_inner(&ctx).unwrap();
+
+        let home = manifest
+            .sensors
+            .iter()
+            .find(|s| s.id.as_str() == "fs.home.total_bytes")
+            .expect("home sensor");
+        assert!(home.tags.iter().any(|t| t == "parent:nvme0"), "tags={:?}", home.tags);
+
+        let media = manifest
+            .sensors
+            .iter()
+            .find(|s| s.id.as_str() == "fs.mnt_media.total_bytes")
+            .expect("media sensor");
+        assert!(!media.tags.iter().any(|t| t.starts_with("parent:")), "nfs should have no parent");
     }
 
     #[test]
