@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 Name:           linsight
-Version:        1.5.0
+Version:        1.6.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -62,6 +62,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sun May 31 2026 VisorCraft LLC <support@visorcraft.com> - 1.6.0-1
+- v1.6.0 release. Storage page nests mount points inside their physical disk
+  as collapsible cards (ordered by capacity); GPU sections ordered by VRAM
+  with unified "GPU VRAM" sensor naming; inode sensors skipped for
+  filesystems that don't report them.
 * Sat May 30 2026 VisorCraft LLC <support@visorcraft.com> - 1.5.0-1
 - v1.5.0 release. Dynamic plugin config delivery plus container and
   socket statistics sensors.

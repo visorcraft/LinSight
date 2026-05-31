@@ -9,6 +9,27 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-05-31
+
+- **Storage page: mount points are nested inside their physical disk.** Each
+  disk is a section (ordered by capacity, largest first) showing the drive's
+  own sensors, with its filesystems rendered as **collapsible inset cards**
+  (collapsed by default) — `btrfs (/home)` sits under the Samsung 990 Pro it
+  lives on, etc. The daemon resolves each mount's backing block device to its
+  physical disk (including the NVMe namespace→controller step), so grouping is
+  robust across btrfs subvolumes and multi-disk setups. Mounts with no
+  resolvable local disk (NFS/CIFS, zram, LVM) appear as their own top-level
+  sections.
+- **GPU page: sections ordered by total VRAM, with unified sensor naming.**
+  NVIDIA/Intel `GPU memory {used,total}` are renamed to `GPU VRAM
+  {used,total}` to match AMD, and each GPU's sensors are grouped under the
+  device and ordered by capacity (largest first).
+- **Inode sensors are skipped for filesystems that don't report them.** btrfs
+  and FAT/vfat return no inode counts from `statvfs` (perpetual zeros), so the
+  daemon no longer registers or samples `inodes_total`/`inodes_used` for those
+  mounts — less work in `linsightd` and a cleaner Storage page. ext4/xfs still
+  report real inode usage.
+
 ## [1.5.0] — 2026-05-30
 
 - **Dynamically-loaded `.so` plugins now receive their per-plugin config.**

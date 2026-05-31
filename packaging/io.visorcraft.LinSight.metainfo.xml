@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.6.0" date="2026-05-31">
+      <description>
+        <p>Storage page nests mount points inside their physical disk as
+        collapsible cards; GPU sections ordered by VRAM with unified "GPU
+        VRAM" sensor naming; inode sensors skipped for filesystems that do
+        not report them.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-05-25">
       <description>
         <p>All 10 spec phases shipped: daemon, CLI, Qt 6 / Kirigami GUI with sidebar, preset pages (Overview, GPUs, Storage, Network), canvas editor, alerts engine, Prometheus exporter, SQLite history, runtime .so plugin ABI v2 (stabby R-mirror types), and the linsight-tunnel mTLS bridge.</p>

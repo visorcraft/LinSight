@@ -1,3 +1,12 @@
+linsight (1.6.0-1) unstable; urgency=medium
+
+  * v1.6.0 release. Storage page nests mount points inside their physical
+    disk as collapsible cards (ordered by capacity); GPU sections ordered by
+    VRAM with unified "GPU VRAM" sensor naming; inode sensors skipped for
+    filesystems that don't report them (btrfs, vfat).
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sun, 31 May 2026 12:00:00 +0000
+
 linsight (1.5.0-1) unstable; urgency=medium
 
   * v1.5.0 release. Dynamic plugin config delivery plus container and
