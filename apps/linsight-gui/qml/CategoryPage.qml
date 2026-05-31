@@ -294,7 +294,7 @@ Kirigami.Page {
         }
     }
 
-    Controls.ScrollView {
+    Loader {
         anchors.top: header.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -303,69 +303,81 @@ Kirigami.Page {
         anchors.rightMargin: app.tokens.spaceXL
         anchors.topMargin: app.tokens.spaceL
         anchors.bottomMargin: app.tokens.spaceL
-        clip: true
-        contentWidth: availableWidth
+        sourceComponent: page.nested ? nestedView : flatView
+    }
 
-        GridLayout {
-            id: grid
-            width: parent.width
-            columns: Math.max(1, Math.floor(parent.width / 240))
-            rowSpacing: app.tokens.spaceM
-            columnSpacing: app.tokens.spaceM
+    Component {
+        id: nestedView
+        StorageSectionView { sections: page.storageSections }
+    }
 
-            Repeater {
-                model: page.tilesArray
-                delegate: Loader {
-                    id: cellLoader
-                    sourceComponent: modelData.type === "header" ? headerComponent : tileComponent
-                    Layout.columnSpan: modelData.type === "header" ? grid.columns : 1
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: modelData.type === "header" ? 32 : (modelData.kind === "table" && modelData.rows && modelData.rows.length > 0 ? 280 : 156)
-                    onLoaded: {
-                        item.anchors.fill = cellLoader
-                        if (modelData.type === "header") {
-                            item.label = modelData.label
-                        } else {
-                            item.tileName = modelData.name
-                            item.tileDeviceLabel = modelData.deviceLabel || ""
-                            item.tileValue = modelData.value
-                            item.tileKind = modelData.kind || "scalar"
-                            item.tileRows = modelData.rows || []
+    Component {
+        id: flatView
+        Controls.ScrollView {
+            clip: true
+            contentWidth: availableWidth
+
+            GridLayout {
+                id: grid
+                width: parent.width
+                columns: Math.max(1, Math.floor(parent.width / 240))
+                rowSpacing: app.tokens.spaceM
+                columnSpacing: app.tokens.spaceM
+
+                Repeater {
+                    model: page.tilesArray
+                    delegate: Loader {
+                        id: cellLoader
+                        sourceComponent: modelData.type === "header" ? headerComponent : tileComponent
+                        Layout.columnSpan: modelData.type === "header" ? grid.columns : 1
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: modelData.type === "header" ? 32 : (modelData.kind === "table" && modelData.rows && modelData.rows.length > 0 ? 280 : 156)
+                        onLoaded: {
+                            item.anchors.fill = cellLoader
+                            if (modelData.type === "header") {
+                                item.label = modelData.label
+                            } else {
+                                item.tileName = modelData.name
+                                item.tileDeviceLabel = modelData.deviceLabel || ""
+                                item.tileValue = modelData.value
+                                item.tileKind = modelData.kind || "scalar"
+                                item.tileRows = modelData.rows || []
+                            }
                         }
                     }
                 }
-            }
 
-            Component {
-                id: headerComponent
-                Rectangle {
-                    property string label: ""
-                    Layout.fillWidth: true
-                    color: app.tokens.surface0
-
+                Component {
+                    id: headerComponent
                     Rectangle {
-                        anchors.bottom: parent.bottom
-                        width: parent.width
-                        height: 1
-                        color: app.tokens.separator
-                    }
+                        property string label: ""
+                        Layout.fillWidth: true
+                        color: app.tokens.surface0
 
-                    Controls.Label {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: app.tokens.spaceM
-                        text: label
-                        font.pixelSize: app.tokens.textCaption
-                        font.weight: app.tokens.weightBold
-                        opacity: 0.6
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            width: parent.width
+                            height: 1
+                            color: app.tokens.separator
+                        }
+
+                        Controls.Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: app.tokens.spaceM
+                            text: label
+                            font.pixelSize: app.tokens.textCaption
+                            font.weight: app.tokens.weightBold
+                            opacity: 0.6
+                        }
                     }
                 }
-            }
 
-            Component {
-                id: tileComponent
-                SensorTile {
-                    Layout.fillWidth: true
+                Component {
+                    id: tileComponent
+                    SensorTile {
+                        Layout.fillWidth: true
+                    }
                 }
             }
         }

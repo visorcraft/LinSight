@@ -27,6 +27,7 @@ fn main() {
             "qml/OverviewPage.qml",
             "qml/CategoryPage.qml",
             "qml/SensorTile.qml",
+            "qml/StorageSectionView.qml",
             "qml/DesignTokens.qml",
             "qml/NavItem.qml",
             "qml/ThemedButton.qml",
