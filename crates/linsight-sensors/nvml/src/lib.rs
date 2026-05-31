@@ -149,7 +149,7 @@ impl NvmlPlugin {
             ));
             sensors.push(scalar(
                 &format!("nvml.gpu{i}.mem_used_bytes"),
-                "GPU memory used",
+                "GPU VRAM used",
                 Unit::Bytes,
                 &device_id,
                 &device_key,
@@ -159,7 +159,7 @@ impl NvmlPlugin {
             ));
             sensors.push(scalar(
                 &format!("nvml.gpu{i}.mem_total_bytes"),
-                "GPU memory total",
+                "GPU VRAM total",
                 Unit::Bytes,
                 &device_id,
                 &device_key,

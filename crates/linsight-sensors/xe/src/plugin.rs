@@ -171,7 +171,7 @@ impl XePlugin {
             if dev.vram_total_bytes().is_some() {
                 sensors.push(SensorDescriptor {
                     id: SensorId::new(format!("xe.gpu{idx}.mem_total_bytes")),
-                    display_name: "GPU memory total".into(),
+                    display_name: "GPU VRAM total".into(),
                     unit: Unit::Bytes,
                     kind: SensorKind::Scalar,
                     category: Category::Gpu,

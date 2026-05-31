@@ -42,6 +42,59 @@ Kirigami.Page {
 
             if (page.groupBy === "") return filtered
 
+            if (page.category === "gpu" && page.groupBy === "deviceLabel") {
+                // GPU-specific sorting: order groups by Total RAM descending,
+                // with no-RAM groups at the end.
+                const groups = new Map()
+                for (const t of filtered) {
+                    const key = t[page.groupBy] || ""
+                    if (!groups.has(key)) groups.set(key, [])
+                    groups.get(key).push(t)
+                }
+
+                const groupKeys = Array.from(groups.keys()).sort((a, b) => {
+                    const getSortValue = (key) => {
+                        const tiles = groups.get(key)
+                        // Match the total-VRAM sensor by its id suffix, which
+                        // is vendor-independent (nvml/amdgpu/xe sensor ids all
+                        // end in ".mem_total_bytes") and survives display-name
+                        // changes — every vendor's tile now shows "GPU VRAM
+                        // total", but matching the id keeps this robust.
+                        const totalRamTile = tiles.find(t => (t.id || "").endsWith("mem_total_bytes"))
+                        if (!totalRamTile) return -1
+
+                        const match = totalRamTile.value.match(/^(\d+(\.\d+)?)\s*(TB|TiB|GB|GiB|MB|MiB|KB|KiB|B)$/)
+                        if (match) {
+                            let val = parseFloat(match[1])
+                            const unit = match[3]
+                            if (unit === "TB" || unit === "TiB") val *= 1024
+                            else if (unit === "GB" || unit === "GiB") val *= 1
+                            else if (unit === "MB" || unit === "MiB") val /= 1024
+                            else if (unit === "KB" || unit === "KiB") val /= (1024 * 1024)
+                            else if (unit === "B") val /= (1024 * 1024 * 1024)
+                            return val
+                        }
+                        return -1
+                    }
+
+                    const valA = getSortValue(a)
+                    const valB = getSortValue(b)
+                    if (valA !== valB) return valB - valA
+                    return a.localeCompare(b)
+                })
+
+                const result = []
+                for (const key of groupKeys) {
+                    result.push({ type: "header", label: key })
+                    const tiles = groups.get(key)
+                    tiles.sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+                    for (const t of tiles) {
+                        result.push(Object.assign({}, t, { type: "tile" }))
+                    }
+                }
+                return result
+            }
+
             filtered.sort((a, b) => {
                 const valA = a[page.groupBy] || ""
                 const valB = b[page.groupBy] || ""
