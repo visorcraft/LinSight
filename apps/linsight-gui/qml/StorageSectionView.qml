@@ -81,7 +81,9 @@ Controls.ScrollView {
                     Repeater {
                         model: modelData.mounts
                         delegate: Rectangle {
+                            id: mountCardRoot
                             required property var modelData
+                            property bool expanded: false
                             Layout.fillWidth: true
                             Layout.leftMargin: app.tokens.spaceL
                             Layout.preferredHeight: mountCard.implicitHeight + app.tokens.spaceM * 2
@@ -96,19 +98,42 @@ Controls.ScrollView {
                                 anchors.margins: app.tokens.spaceM
                                 spacing: app.tokens.spaceM
 
-                                Controls.Label {
-                                    text: modelData.label
-                                    font.pixelSize: app.tokens.textCaption
-                                    font.weight: app.tokens.weightBold
-                                    opacity: 0.7
+                                // Clickable header: chevron + mount label. Toggles `expanded`.
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: mountHeader.implicitHeight
+                                    RowLayout {
+                                        id: mountHeader
+                                        anchors.fill: parent
+                                        spacing: app.tokens.spaceM
+                                        Controls.Label {
+                                            text: mountCardRoot.expanded ? "▾" : "▸"
+                                            font.pixelSize: app.tokens.textCaption
+                                            opacity: 0.7
+                                        }
+                                        Controls.Label {
+                                            text: mountCardRoot.modelData.label
+                                            font.pixelSize: app.tokens.textCaption
+                                            font.weight: app.tokens.weightBold
+                                            opacity: 0.7
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: mountCardRoot.expanded = !mountCardRoot.expanded
+                                    }
                                 }
+
                                 GridLayout {
                                     Layout.fillWidth: true
+                                    visible: mountCardRoot.expanded
                                     columns: Math.max(1, Math.floor((view.availableWidth - app.tokens.spaceL) / 240))
                                     rowSpacing: app.tokens.spaceM
                                     columnSpacing: app.tokens.spaceM
                                     Repeater {
-                                        model: modelData.tiles
+                                        model: mountCardRoot.modelData.tiles
                                         delegate: SensorTile {
                                             required property var modelData
                                             Layout.fillWidth: true
