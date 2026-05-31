@@ -99,6 +99,65 @@ fn read_mtab(sysroot: Option<&Path>) -> Vec<(String, String)> {
     out
 }
 
+/// Resolve a `/proc/mounts` source device (column 0) to the physical device id
+/// that the disk/nvme plugins use as their `device_id`, so fs tiles can be
+/// grouped under their backing disk in the GUI.
+///
+/// Returns `None` when the source is not a real block device, or resolves to a
+/// device the disk/nvme plugins do not expose (zram, dm/LVM, loop, md, network
+/// sources). Such mounts stay as their own top-level sections in the UI.
+fn resolve_parent_device(source: &str, sysroot: Option<&Path>) -> Option<String> {
+    let dev = source.strip_prefix("/dev/")?;
+    // dm/LVM, loop, md, zram are skipped by the disk plugin -> no disk section
+    // to nest under; treat as unresolved.
+    if dev.starts_with("mapper/")
+        || dev.starts_with("dm-")
+        || dev.starts_with("loop")
+        || dev.starts_with("md")
+        || dev.starts_with("zram")
+    {
+        return None;
+    }
+    let sys_block = match sysroot {
+        Some(r) => r.join("sys/block"),
+        None => PathBuf::from("/sys/block"),
+    };
+    let disk = find_block_disk(&sys_block, dev)?;
+    Some(nvme_controller(&disk))
+}
+
+/// Find the whole-disk kernel name that owns block device `dev` by walking
+/// `/sys/block`. A whole disk appears directly (`sda`, `nvme0n1`); a partition
+/// appears as a subdirectory of its disk (`sda/sda3`, `nvme0n1/nvme0n1p2`).
+/// Uses directory topology, not name-stripping, so it is correct across
+/// nvme/mmc/sd naming.
+fn find_block_disk(sys_block: &Path, dev: &str) -> Option<String> {
+    let direct = sys_block.join(dev);
+    if direct.is_dir() && !direct.join("partition").exists() {
+        return Some(dev.to_owned()); // whole disk
+    }
+    for entry in std::fs::read_dir(sys_block).ok()?.flatten() {
+        if entry.path().join(dev).is_dir() {
+            return Some(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+/// Map an NVMe namespace to its controller (`nvme0n1` -> `nvme0`); the nvme
+/// plugin keys its disk by controller name. Non-nvme names pass through.
+fn nvme_controller(disk: &str) -> String {
+    if let Some(rest) = disk.strip_prefix("nvme") {
+        if let Some(npos) = rest.find('n') {
+            let ctrl = &rest[..npos];
+            if !ctrl.is_empty() && ctrl.chars().all(|c| c.is_ascii_digit()) {
+                return format!("nvme{ctrl}");
+            }
+        }
+    }
+    disk.to_owned()
+}
+
 impl FsPlugin {
     fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
         let mut inner = self.inner.lock().expect("FsPlugin poisoned");
@@ -289,6 +348,59 @@ mod tests {
         std::fs::create_dir_all(d.path().join("etc")).unwrap();
         std::fs::write(d.path().join("etc/mtab"), content).unwrap();
         d
+    }
+
+    #[test]
+    fn nvme_namespace_maps_to_controller() {
+        assert_eq!(super::nvme_controller("nvme0n1"), "nvme0");
+        assert_eq!(super::nvme_controller("nvme10n2"), "nvme10");
+        assert_eq!(super::nvme_controller("sda"), "sda");
+        assert_eq!(super::nvme_controller("nvmexn1"), "nvmexn1"); // non-numeric ctrl: passthrough
+    }
+
+    fn block_fixture(disks: &[&str], parts: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        let block = dir.path().join("sys/block");
+        for d in disks {
+            std::fs::create_dir_all(block.join(d)).unwrap();
+        }
+        for (disk, part) in parts {
+            let p = block.join(disk).join(part);
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(p.join("partition"), "1\n").unwrap(); // marks it a partition
+        }
+        dir
+    }
+
+    #[test]
+    fn resolves_sata_partition_to_disk() {
+        let dir = block_fixture(&["sda"], &[("sda", "sda3")]);
+        let got = super::resolve_parent_device("/dev/sda3", Some(dir.path()));
+        assert_eq!(got, Some("sda".to_owned()));
+    }
+
+    #[test]
+    fn resolves_nvme_partition_to_controller() {
+        let dir = block_fixture(&["nvme0n1"], &[("nvme0n1", "nvme0n1p2")]);
+        let got = super::resolve_parent_device("/dev/nvme0n1p2", Some(dir.path()));
+        assert_eq!(got, Some("nvme0".to_owned()));
+    }
+
+    #[test]
+    fn resolves_whole_disk_to_itself() {
+        let dir = block_fixture(&["sdb"], &[]);
+        let got = super::resolve_parent_device("/dev/sdb", Some(dir.path()));
+        assert_eq!(got, Some("sdb".to_owned()));
+    }
+
+    #[test]
+    fn unresolvable_sources_return_none() {
+        let dir = block_fixture(&["sda"], &[("sda", "sda1")]);
+        assert_eq!(super::resolve_parent_device("nas:/export", Some(dir.path())), None);
+        assert_eq!(super::resolve_parent_device("none", Some(dir.path())), None);
+        assert_eq!(super::resolve_parent_device("/dev/mapper/vg-root", Some(dir.path())), None);
+        assert_eq!(super::resolve_parent_device("/dev/zram0", Some(dir.path())), None);
+        assert_eq!(super::resolve_parent_device("/dev/dm-0", Some(dir.path())), None);
     }
 
     #[test]
