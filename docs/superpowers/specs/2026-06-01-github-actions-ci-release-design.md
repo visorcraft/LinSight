@@ -386,10 +386,24 @@ Beyond the three workflow files, this work touches packaging so the
 2. **`Justfile`** — new `appimage` recipe (local parity with §4.7).
 3. **`packaging/flatpak/io.visorcraft.LinSight.yml`** — vendor
    source-replacement config write before the offline build (see §4.8).
-4. **No source edits to the version fields** in PKGBUILDs / specs /
-   changelog are needed — the workflow patches them from the tag at
-   build time. (Optionally, a follow-up could also bump them in-tree for
-   local-build correctness, but that is out of scope here.)
+4. **Sync all in-tree packaging version fields to the workspace
+   version (`1.7.0`).** The workflow patches them from the tag at build
+   time regardless, but the committed files currently disagree
+   (Arch/arch-v3 = `1.7.0`; Fedora/openSUSE = `1.6.0`; Debian changelog
+   = `1.6.0-1`; AppImage = `0.3.0`), which breaks *local* package builds
+   and is just confusing. Bring them all to `1.7.0`:
+   - `packaging/fedora/linsight.spec` — `Version: 1.6.0` → `1.7.0`.
+   - `packaging/opensuse/linsight.spec` — `Version: 1.6.0` → `1.7.0`.
+   - `packaging/debian/changelog` — add a new top entry
+     `linsight (1.7.0-1) unstable; urgency=medium` (don't rewrite
+     history; prepend per Debian convention).
+   - `packaging/appimage/AppImageBuilder.yml` — the stale `0.3.0` is
+     replaced by the dynamic-version fix in §4.7 / item 1 above, so it
+     lands on `1.7.0` too.
+   - `packaging/arch/PKGBUILD`, `packaging/arch-v3/PKGBUILD` — already
+     `1.7.0`; verify, no change expected.
+   - Sanity check: every field should equal the `Cargo.toml`
+     `[workspace.package]` `version` (`1.7.0`).
 
 ---
 
@@ -431,7 +445,5 @@ Beyond the three workflow files, this work touches packaging so the
 - Splitting CI into parallel fmt/lint/test jobs (chosen single lean
   job).
 - macOS / Windows / non-x86_64 targets (LinSight is Linux x86_64).
-- Bumping the in-tree packaging version fields (workflow patches at
-  build time instead).
 - Caching across the per-distro release containers (releases are
   infrequent; not worth the complexity).
