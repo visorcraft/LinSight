@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -87,6 +88,25 @@ impl Drop for SessionGuard {
 static AUTH_TOKEN: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("LINSIGHT_AUTH_TOKEN").ok());
 
+/// Effective UID of the daemon process, read once at first use.
+/// Used to reject connections from other users via `SO_PEERCRED`.
+static DAEMON_UID: LazyLock<u32> = LazyLock::new(|| unsafe { libc::geteuid() });
+
+fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let ret = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut _ as *mut _,
+            &mut len,
+        )
+    };
+    if ret == -1 { Err(io::Error::last_os_error()) } else { Ok(cred.uid) }
+}
+
 /// Simple token-bucket rate limiter for the accept loop.
 /// Refills one token per `interval` up to `capacity`. Enabled at 20/s
 /// by default; configurable via `LINSIGHT_ACCEPT_RATE` env var.
@@ -154,6 +174,21 @@ pub fn accept_loop(
         match listener.accept() {
             Ok((s, _addr)) => {
                 consecutive_err = 0;
+                match peer_uid(&s) {
+                    Ok(uid) if uid == *DAEMON_UID => {}
+                    Ok(uid) => {
+                        warn!(
+                            peer_uid = uid,
+                            daemon_uid = *DAEMON_UID,
+                            "rejecting client: peer UID does not match daemon UID",
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!(error = ?e, "rejecting client: failed to read peer credentials");
+                        continue;
+                    }
+                }
                 let prior = sessions.fetch_add(1, Ordering::AcqRel);
                 if prior >= MAX_CLIENT_SESSIONS {
                     // Reject without spawning a worker. Releasing the counter
