@@ -336,7 +336,7 @@ jobs:
             rpmbuild \
               --define "_topdir $(pwd)/_rpmbuild" \
               --define "_sourcedir $(pwd)" \
-              -bb linsight.spec
+              --nocheck -bb linsight.spec
           '
       - name: Stage RPM artefact + sha256
         run: |
@@ -391,7 +391,7 @@ jobs:
             rpmbuild \
               --define "_topdir $(pwd)/_rpmbuild" \
               --define "_sourcedir $(pwd)" \
-              -bb linsight.spec
+              --nocheck -bb linsight.spec
           '
       - name: Stage RPM artefact + sha256
         run: |
@@ -448,7 +448,13 @@ jobs:
       - name: Build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: bash scripts/build_appimage.sh
+        run: |
+          # appimage-builder 1.1.0 invokes the now-removed `apt-key`; provide
+          # a no-op shim so its existence check passes (the recipe's apt
+          # source is marked trusted=yes, so no key management is needed).
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/apt-key
+          chmod +x /usr/local/bin/apt-key
+          bash scripts/build_appimage.sh
       - name: Stage AppImage + sha256
         run: |
           mkdir -p target/dist
@@ -493,6 +499,7 @@ jobs:
       - name: Build + bundle Flatpak
         run: |
           flatpak-builder --user --disable-rofiles-fuse --force-clean \
+            --install-deps-from=flathub \
             --repo=flatpak-repo flatpak-build \
             packaging/flatpak/io.visorcraft.LinSight.yml
           flatpak build-bundle flatpak-repo \

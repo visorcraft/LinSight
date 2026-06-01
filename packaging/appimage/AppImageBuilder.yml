@@ -33,7 +33,7 @@ AppDir:
     arch:
       - amd64
     sources:
-      - sourceline: deb [arch=amd64] https://deb.debian.org/debian trixie main
+      - sourceline: deb [arch=amd64 trusted=yes] https://deb.debian.org/debian trixie main
     include:
       - libqt6core6
       - libqt6quick6

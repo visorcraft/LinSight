@@ -26,13 +26,18 @@ structure is identical to it.
 %prep
 %autosetup
 
+# Pin CARGO_TARGET_DIR to an absolute path so %build and %install agree
+# regardless of the rpm build-directory layout (see Fedora spec note).
+%global cargo_target %{_builddir}/_cargo_target
+
 %build
+export CARGO_TARGET_DIR=%{cargo_target}
 cargo build --workspace --release --locked
 
 %install
-install -Dm755 target/release/linsight     %{buildroot}%{_bindir}/linsight
-install -Dm755 target/release/linsightd    %{buildroot}%{_bindir}/linsightd
-install -Dm755 target/release/linsight-cli %{buildroot}%{_bindir}/linsight-cli
+install -Dm755 %{cargo_target}/release/linsight     %{buildroot}%{_bindir}/linsight
+install -Dm755 %{cargo_target}/release/linsightd    %{buildroot}%{_bindir}/linsightd
+install -Dm755 %{cargo_target}/release/linsight-cli %{buildroot}%{_bindir}/linsight-cli
 install -Dm644 packaging/io.visorcraft.LinSight.desktop \
     %{buildroot}%{_datadir}/applications/io.visorcraft.LinSight.desktop
 install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml \

@@ -32,16 +32,24 @@ SQLite-backed history and a Prometheus exporter.
 %prep
 %autosetup
 
+# Pin CARGO_TARGET_DIR to an absolute path. Under rpm 6.0's build-dir
+# layout the relative ./target that %install assumed is not always where
+# cargo writes; an absolute, macro-derived path is identical in %build,
+# %check and %install regardless of the working directory.
+%global cargo_target %{_builddir}/_cargo_target
+
 %build
+export CARGO_TARGET_DIR=%{cargo_target}
 cargo build --workspace --release --locked
 
 %check
+export CARGO_TARGET_DIR=%{cargo_target}
 cargo test --workspace --release --locked
 
 %install
-install -Dm755 target/release/linsight     %{buildroot}%{_bindir}/linsight
-install -Dm755 target/release/linsightd    %{buildroot}%{_bindir}/linsightd
-install -Dm755 target/release/linsight-cli %{buildroot}%{_bindir}/linsight-cli
+install -Dm755 %{cargo_target}/release/linsight     %{buildroot}%{_bindir}/linsight
+install -Dm755 %{cargo_target}/release/linsightd    %{buildroot}%{_bindir}/linsightd
+install -Dm755 %{cargo_target}/release/linsight-cli %{buildroot}%{_bindir}/linsight-cli
 install -Dm644 packaging/io.visorcraft.LinSight.desktop \
     %{buildroot}%{_datadir}/applications/io.visorcraft.LinSight.desktop
 install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml \
