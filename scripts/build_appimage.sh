@@ -26,5 +26,5 @@ sed "s/^    version: .*/    version: ${version}/" \
     > target/appimage/AppImageBuilder.yml
 
 rm -rf AppDir
-appimage-builder --recipe target/appimage/AppImageBuilder.yml --skip-test
+appimage-builder --recipe target/appimage/AppImageBuilder.yml --skip-tests
 echo "AppImage built for version ${version}"
