@@ -427,7 +427,7 @@ jobs:
             qt6-tools-dev kirigami2-dev libgl1-mesa-dev \
             pkg-config clang ninja-build \
             python3-pip patchelf desktop-file-utils fakeroot zsync \
-            squashfs-tools gnupg2 libglib2.0-bin
+            squashfs-tools gnupg2 libglib2.0-bin debian-archive-keyring
           pip3 install --break-system-packages appimage-builder==1.1.0
       - name: Install Rust 1.95 via rustup
         env:
@@ -449,10 +449,21 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
-          # appimage-builder 1.1.0 invokes the now-removed `apt-key`; provide
-          # a no-op shim so its existence check passes (the recipe's apt
-          # source is marked trusted=yes, so no key management is needed).
-          printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/apt-key
+          # apt-key was removed in Debian trixie, but appimage-builder 1.1.0
+          # still calls it. Provide a real replacement that securely imports
+          # `apt-key add <file>` keys into apt's trusted keyring dir, so
+          # package-signature verification stays enforced (the recipe's apt
+          # source is pinned with signed-by to the Debian archive keyring).
+          cat > /usr/local/bin/apt-key <<'SHIM'
+          #!/bin/sh
+          if [ "$1" = "add" ]; then
+            src="${2:--}"
+            out="/etc/apt/trusted.gpg.d/appimage-builder-added.gpg"
+            if [ "$src" = "-" ]; then cat; else cat "$src"; fi \
+              | gpg --dearmor >> "$out" 2>/dev/null || true
+          fi
+          exit 0
+          SHIM
           chmod +x /usr/local/bin/apt-key
           bash scripts/build_appimage.sh
       - name: Stage AppImage + sha256
