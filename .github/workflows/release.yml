@@ -285,10 +285,124 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  rpm-pkg:
+    name: Fedora .rpm
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:44
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+      # mold is mandatory here: under Fedora's --as-needed default,
+      # ld.bfd drops -lQt6Quick and the link fails with an undefined
+      # reference to QQuickWindow::grabWindow (see Containerfile.fedora44).
+      RUSTFLAGS: "-Clink-arg=-fuse-ld=mold"
+    steps:
+      - name: Install Fedora build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            rpm-build rpmdevtools git tar gzip make \
+            cargo rust clang mold pkgconf-pkg-config openssl-devel \
+            qt6-qtbase-devel qt6-qtbase-private-devel \
+            qt6-qtdeclarative-devel \
+            qt6-qttools-devel kf6-kirigami-devel sqlite-devel \
+            desktop-file-utils sudo
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Create unprivileged build user
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Patch spec version + build RPM
+        run: |
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" packaging/fedora/linsight.spec
+          # shellcheck disable=SC2016
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            export RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            cd "$GITHUB_WORKSPACE/packaging/fedora"
+            git archive --format=tar.gz \
+              --prefix="linsight-'"${VERSION}"'/" \
+              --output="linsight-'"${VERSION}"'.tar.gz" \
+              -C "$GITHUB_WORKSPACE" HEAD
+            rpmbuild \
+              --define "_topdir $(pwd)/_rpmbuild" \
+              --define "_sourcedir $(pwd)" \
+              -bb linsight.spec
+          '
+      - name: Stage RPM artefact + sha256
+        run: |
+          mkdir -p target/dist
+          find packaging/fedora/_rpmbuild/RPMS -name "linsight-*.rpm" -exec mv {} target/dist/ \;
+          (cd target/dist && sha256sum linsight-*.rpm > sha256sums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  opensuse-pkg:
+    name: openSUSE .rpm
+    runs-on: ubuntu-24.04
+    container:
+      image: opensuse/tumbleweed
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+      RUSTFLAGS: "-Clink-arg=-fuse-ld=mold"
+    steps:
+      - name: Install openSUSE build dependencies
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install --no-recommends \
+            rpm-build git tar gzip make \
+            rust cargo clang mold pkgconf-pkg-config \
+            'cmake(Qt6Core)' 'cmake(Qt6Quick)' 'cmake(KF6Kirigami)' \
+            'pkgconfig(sqlite3)' sudo
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Create unprivileged build user
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Patch spec version + build RPM
+        run: |
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" packaging/opensuse/linsight.spec
+          # shellcheck disable=SC2016
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            export RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            cd "$GITHUB_WORKSPACE/packaging/opensuse"
+            git archive --format=tar.gz \
+              --prefix="linsight-'"${VERSION}"'/" \
+              --output="linsight-'"${VERSION}"'.tar.gz" \
+              -C "$GITHUB_WORKSPACE" HEAD
+            rpmbuild \
+              --define "_topdir $(pwd)/_rpmbuild" \
+              --define "_sourcedir $(pwd)" \
+              -bb linsight.spec
+          '
+      - name: Stage RPM artefact + sha256
+        run: |
+          mkdir -p target/dist
+          find packaging/opensuse/_rpmbuild/RPMS -name "linsight-*.rpm" -exec mv {} target/dist/ \;
+          (cd target/dist && sha256sum linsight-*.rpm > sha256sums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensuse-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg]
+    needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg, rpm-pkg, opensuse-pkg]
     steps:
       - uses: actions/checkout@v4
 
