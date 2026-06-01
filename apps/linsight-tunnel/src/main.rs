@@ -677,3 +677,191 @@ async fn handle_client_conn(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair};
+
+    fn install_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    struct TestCert {
+        ca_der: CertificateDer<'static>,
+        leaf_der: CertificateDer<'static>,
+    }
+
+    fn make_test_cert(cn: &str, sans: Vec<String>) -> TestCert {
+        let ca_key = KeyPair::generate().unwrap();
+        let mut ca_params = CertificateParams::new(vec![]).unwrap();
+        ca_params.distinguished_name = {
+            let mut dn = rcgen::DistinguishedName::new();
+            dn.push(DnType::CommonName, "Test CA");
+            dn
+        };
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+
+        let leaf_key = KeyPair::generate().unwrap();
+        let mut leaf_params = CertificateParams::new(sans).unwrap();
+        leaf_params.distinguished_name = {
+            let mut dn = rcgen::DistinguishedName::new();
+            dn.push(DnType::CommonName, cn);
+            dn
+        };
+        let leaf_cert = leaf_params.signed_by(&leaf_key, &ca_cert, &ca_key).unwrap();
+
+        TestCert {
+            ca_der: ca_cert.der().to_vec().into(),
+            leaf_der: leaf_cert.der().to_vec().into(),
+        }
+    }
+
+    fn build_allowlist_verifier(
+        ca_der: &CertificateDer<'static>,
+        allow_cn: Vec<String>,
+        allow_san: Vec<String>,
+    ) -> AllowlistClientCertVerifier {
+        let mut roots = RootCertStore::empty();
+        roots.add(ca_der.clone()).unwrap();
+        let inner: Arc<dyn ClientCertVerifier> =
+            WebPkiClientVerifier::builder(Arc::new(roots)).build().unwrap();
+        AllowlistClientCertVerifier { inner, allow_cn, allow_san }
+    }
+
+    // ---- wildcard_match ----
+
+    #[test]
+    fn wildcard_exact_match() {
+        assert!(wildcard_match("example.com", "example.com"));
+    }
+
+    #[test]
+    fn wildcard_exact_no_match_different() {
+        assert!(!wildcard_match("example.com", "other.com"));
+    }
+
+    #[test]
+    fn wildcard_exact_case_insensitive() {
+        assert!(wildcard_match("Example.COM", "example.com"));
+        assert!(wildcard_match("example.com", "EXAMPLE.COM"));
+    }
+
+    #[test]
+    fn wildcard_star_matches_single_subdomain() {
+        assert!(wildcard_match("*.example.com", "foo.example.com"));
+        assert!(wildcard_match("*.example.com", "bar.example.com"));
+    }
+
+    #[test]
+    fn wildcard_star_no_match_multi_level() {
+        assert!(!wildcard_match("*.example.com", "foo.bar.example.com"));
+    }
+
+    #[test]
+    fn wildcard_star_no_match_bare_suffix() {
+        assert!(!wildcard_match("*.example.com", "example.com"));
+    }
+
+    #[test]
+    fn wildcard_star_no_match_empty_label() {
+        assert!(!wildcard_match("*.example.com", ".example.com"));
+    }
+
+    #[test]
+    fn wildcard_star_case_insensitive() {
+        assert!(wildcard_match("*.EXAMPLE.COM", "foo.example.com"));
+    }
+
+    #[test]
+    fn wildcard_star_no_match_different_domain() {
+        assert!(!wildcard_match("*.example.com", "foo.other.com"));
+    }
+
+    // ---- extract_cn / extract_dns_sans ----
+
+    #[test]
+    fn extract_cn_from_cert() {
+        let cert = make_test_cert("my-client", vec![]);
+        assert_eq!(extract_cn(&cert.leaf_der), Some("my-client".to_string()));
+    }
+
+    #[test]
+    fn extract_dns_sans_from_cert() {
+        let cert =
+            make_test_cert("test", vec!["host.example.com".into(), "other.example.com".into()]);
+        let sans = extract_dns_sans(&cert.leaf_der);
+        assert_eq!(sans, vec!["host.example.com".to_string(), "other.example.com".to_string()]);
+    }
+
+    #[test]
+    fn extract_dns_sans_empty_when_none() {
+        let cert = make_test_cert("test", vec![]);
+        assert!(extract_dns_sans(&cert.leaf_der).is_empty());
+    }
+
+    // ---- AllowlistClientCertVerifier ----
+
+    #[test]
+    fn allowlist_empty_accepts_any_valid_cert() {
+        install_provider();
+        let cert = make_test_cert("anything", vec![]);
+        let verifier = build_allowlist_verifier(&cert.ca_der, vec![], vec![]);
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_ok());
+    }
+
+    #[test]
+    fn allowlist_cn_exact_match_accepts() {
+        install_provider();
+        let cert = make_test_cert("linsight-client", vec![]);
+        let verifier =
+            build_allowlist_verifier(&cert.ca_der, vec!["linsight-client".into()], vec![]);
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_ok());
+    }
+
+    #[test]
+    fn allowlist_cn_mismatch_rejects() {
+        install_provider();
+        let cert = make_test_cert("other-client", vec![]);
+        let verifier =
+            build_allowlist_verifier(&cert.ca_der, vec!["linsight-client".into()], vec![]);
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_err());
+    }
+
+    #[test]
+    fn allowlist_cn_wildcard_accepts() {
+        install_provider();
+        let cert = make_test_cert("foo.example.com", vec![]);
+        let verifier = build_allowlist_verifier(&cert.ca_der, vec!["*.example.com".into()], vec![]);
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_ok());
+    }
+
+    #[test]
+    fn allowlist_san_match_accepts() {
+        install_provider();
+        let cert = make_test_cert("test", vec!["host.example.com".into()]);
+        let verifier = build_allowlist_verifier(&cert.ca_der, vec![], vec!["*.example.com".into()]);
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_ok());
+    }
+
+    #[test]
+    fn allowlist_san_wildcard_no_match_rejects() {
+        install_provider();
+        let cert = make_test_cert("test", vec!["host.other.com".into()]);
+        let verifier = build_allowlist_verifier(&cert.ca_der, vec![], vec!["*.example.com".into()]);
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_err());
+    }
+
+    #[test]
+    fn allowlist_no_cn_match_no_san_match_rejects() {
+        install_provider();
+        let cert = make_test_cert("test", vec![]);
+        let verifier = build_allowlist_verifier(
+            &cert.ca_der,
+            vec!["other".into()],
+            vec!["*.example.com".into()],
+        );
+        assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_err());
+    }
+}
