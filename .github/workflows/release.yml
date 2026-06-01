@@ -225,10 +225,70 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  deb-pkg:
+    name: Debian .deb
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie-slim
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+    steps:
+      - name: Install Debian build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git curl \
+            build-essential debhelper devscripts dpkg-dev \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            qt6-tools-dev kirigami2-dev libgl1-mesa-dev \
+            pkg-config clang ninja-build
+      - name: Install Rust 1.95 via rustup
+        env:
+          RUSTUP_HOME: /usr/local/rustup
+          CARGO_HOME: /usr/local/cargo
+          HOME: /root
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.95 --profile minimal --no-modify-path
+          {
+            echo "RUSTUP_HOME=/usr/local/rustup"
+            echo "CARGO_HOME=/usr/local/cargo"
+          } >> "$GITHUB_ENV"
+          echo "/usr/local/cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Patch changelog version
+        env:
+          DEBEMAIL: "29009015+visorcraft@users.noreply.github.com"
+          DEBFULLNAME: "VisorCraft"
+        run: |
+          ln -sfn packaging/debian debian
+          if [ "$(dpkg-parsechangelog -S Version)" != "${VERSION}-1" ]; then
+            dch -b -v "${VERSION}-1" --distribution unstable \
+              "Release ${VERSION}."
+          fi
+      - name: Build .deb
+        run: dpkg-buildpackage -d -us -uc -b
+      - name: Stage Debian artefact + sha256
+        run: |
+          mkdir -p target/dist
+          mv ../linsight_*.deb target/dist/
+          (cd target/dist && sha256sum linsight_*.deb > sha256sums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: [linux-tarball, arch-pkg, arch-v3-pkg]
+    needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg]
     steps:
       - uses: actions/checkout@v4
 
