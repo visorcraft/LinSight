@@ -108,6 +108,11 @@ impl Client {
         let target = url
             .strip_prefix("ssh://")
             .ok_or_else(|| anyhow::anyhow!("expected ssh:// prefix, got {url}"))?;
+        if target.starts_with('-') {
+            anyhow::bail!(
+                "invalid SSH target: {target:?} starts with '-'; possible option injection"
+            );
+        }
         let remote_socket = discover_remote_socket(target)?;
         let local_socket =
             std::env::temp_dir().join(format!("linsight-remote-{}.sock", std::process::id()));
