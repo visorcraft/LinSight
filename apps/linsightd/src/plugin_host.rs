@@ -193,6 +193,13 @@ impl PluginHost {
             if path.extension().and_then(|e| e.to_str()) != Some("so") {
                 continue;
             }
+            let path = match std::fs::canonicalize(&path) {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "canonicalize failed; skipping");
+                    continue;
+                }
+            };
             let LoadedPlugin { plugin, library } = match unsafe { load_one(&path) } {
                 Ok(p) => p,
                 Err(e) => {
