@@ -27,6 +27,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -34,10 +35,47 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use evalexpr::{ContextWithMutableVariables, HashMapContext, Value, eval_boolean_with_context};
+
+const MAX_EXPR_LEN: usize = 4096;
+const EVAL_TIMEOUT: Duration = Duration::from_millis(500);
+
 use linsight_core::{Reading, Sample};
 use linsight_protocol::AlertRuleJson;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+
+pub enum EvalOutcome {
+    Ok(bool),
+    Err(String),
+    Timeout,
+    Panic,
+}
+
+pub(crate) fn eval_limited(rewritten_expr: &str, ctx: &HashMapContext) -> EvalOutcome {
+    if rewritten_expr.len() > MAX_EXPR_LEN {
+        return EvalOutcome::Err(format!(
+            "expression too long ({} bytes, limit {MAX_EXPR_LEN})",
+            rewritten_expr.len()
+        ));
+    }
+
+    let expr_owned = rewritten_expr.to_owned();
+    let ctx_clone = ctx.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            eval_boolean_with_context(&expr_owned, &ctx_clone)
+        }));
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(EVAL_TIMEOUT) {
+        Ok(Ok(Ok(b))) => EvalOutcome::Ok(b),
+        Ok(Ok(Err(e))) => EvalOutcome::Err(e.to_string()),
+        Ok(Err(_)) => EvalOutcome::Panic,
+        Err(_) => EvalOutcome::Timeout,
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct AlertsConfig {
@@ -255,10 +293,18 @@ impl AlertEngine {
             let _ = ctx.set_value(k.replace('.', "__"), Value::Float(*v));
         }
         let rewritten_expr = rule.expr.replace('.', "__");
-        let truthy = match eval_boolean_with_context(&rewritten_expr, &ctx) {
-            Ok(b) => b,
-            Err(e) => {
+        let truthy = match eval_limited(&rewritten_expr, &ctx) {
+            EvalOutcome::Ok(b) => b,
+            EvalOutcome::Err(e) => {
                 warn!(rule = %rule.name, error = %e, "alert expression failed to evaluate");
+                return;
+            }
+            EvalOutcome::Timeout => {
+                warn!(rule = %rule.name, "alert expression timed out");
+                return;
+            }
+            EvalOutcome::Panic => {
+                warn!(rule = %rule.name, "alert expression panicked");
                 return;
             }
         };

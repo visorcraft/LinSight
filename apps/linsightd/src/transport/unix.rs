@@ -784,9 +784,8 @@ fn handle_request(
             }
         }
         RequestOp::TestAlertExpr { expr } => {
-            use evalexpr::{
-                ContextWithMutableVariables, HashMapContext, eval_boolean_with_context,
-            };
+            use crate::alerts::{EvalOutcome, eval_limited};
+            use evalexpr::{ContextWithMutableVariables, HashMapContext};
             let mut ctx = HashMapContext::new();
             // Populate context from all current sensor values in the
             // scheduler. Substitute `.` -> `__` for evalexpr compatibility.
@@ -802,22 +801,41 @@ fn handle_request(
                 }
             }
             let rewritten = expr.replace('.', "__");
-            let is_true = match eval_boolean_with_context(&rewritten, &ctx) {
-                Ok(b) => b,
-                Err(e) => {
-                    return writer.lock().unwrap().write_server(&ServerMsg::Response {
+            match eval_limited(&rewritten, &ctx) {
+                EvalOutcome::Ok(is_true) => {
+                    writer.lock().unwrap().write_server(&ServerMsg::Response {
+                        req_id,
+                        result: Ok(ResponsePayload::AlertTestResult { is_true, error: None }),
+                    })
+                }
+                EvalOutcome::Err(e) => {
+                    writer.lock().unwrap().write_server(&ServerMsg::Response {
                         req_id,
                         result: Ok(ResponsePayload::AlertTestResult {
                             is_true: false,
                             error: Some(format!("eval failed: {e}")),
                         }),
-                    });
+                    })
                 }
-            };
-            writer.lock().unwrap().write_server(&ServerMsg::Response {
-                req_id,
-                result: Ok(ResponsePayload::AlertTestResult { is_true, error: None }),
-            })
+                EvalOutcome::Timeout => {
+                    writer.lock().unwrap().write_server(&ServerMsg::Response {
+                        req_id,
+                        result: Ok(ResponsePayload::AlertTestResult {
+                            is_true: false,
+                            error: Some("expression evaluation timed out".into()),
+                        }),
+                    })
+                }
+                EvalOutcome::Panic => {
+                    writer.lock().unwrap().write_server(&ServerMsg::Response {
+                        req_id,
+                        result: Ok(ResponsePayload::AlertTestResult {
+                            is_true: false,
+                            error: Some("expression evaluation panicked".into()),
+                        }),
+                    })
+                }
+            }
         }
     }
 }
