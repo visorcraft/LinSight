@@ -89,6 +89,12 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          # LinSight's GUI needs a writable XDG_RUNTIME_DIR for the daemon
+          # socket ($XDG_RUNTIME_DIR/linsight.sock); it refuses to start
+          # without one rather than fall back to /tmp.
+          XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          export XDG_RUNTIME_DIR
           set +e
           timeout --preserve-status 5 target/release/linsight
           code=$?
