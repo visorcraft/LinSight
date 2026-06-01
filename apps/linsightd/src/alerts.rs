@@ -26,6 +26,7 @@
 //! Table samples are skipped (could be revisited later).
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -325,8 +326,65 @@ fn fire(name: &str, expr: &str, notify: &[String]) {
     }
 }
 
+fn validate_webhook_url(raw: &str) -> Result<(), String> {
+    let rest = raw
+        .strip_prefix("http://")
+        .or_else(|| raw.strip_prefix("https://"))
+        .ok_or_else(|| "webhook URL must start with http:// or https://".to_owned())?;
+
+    let host_port = rest.split('/').next().unwrap_or(rest);
+    let host = if host_port.starts_with('[') {
+        let end = host_port.find(']').unwrap_or(host_port.len());
+        &host_port[..end + 1]
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+
+    let brackets = host.starts_with('[') && host.ends_with(']');
+    let host_inner = if brackets { &host[1..host.len() - 1] } else { host };
+
+    if let Ok(ip) = host_inner.parse::<IpAddr>()
+        && is_restricted_ip(&ip)
+    {
+        return Err(format!(
+            "webhook URL host {ip} is a restricted address (loopback / link-local / private / unspecified)"
+        ));
+    }
+
+    Ok(())
+}
+
+fn is_restricted_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_private()
+                || *v4 == Ipv4Addr::UNSPECIFIED
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || is_ipv6_link_local(v6)
+                || is_ipv6_unique_local(v6)
+                || *v6 == Ipv6Addr::UNSPECIFIED
+        }
+    }
+}
+
+fn is_ipv6_link_local(v6: &Ipv6Addr) -> bool {
+    let segments = v6.segments();
+    (segments[0] & 0xffc0) == 0xfe80
+}
+
+fn is_ipv6_unique_local(v6: &Ipv6Addr) -> bool {
+    let segments = v6.segments();
+    (segments[0] & 0xfe00) == 0xfc00
+}
+
 /// Fire a webhook notification via a simple HTTP POST.
 fn fire_webhook(name: &str, expr: &str, url: &str) -> Result<(), String> {
+    validate_webhook_url(url)?;
+
     let payload = serde_json::json!({
         "name": name,
         "expr": expr,
@@ -335,7 +393,6 @@ fn fire_webhook(name: &str, expr: &str, url: &str) -> Result<(), String> {
     let body = serde_json::to_string(&payload).map_err(|e| format!("serialize: {e}"))?;
     let url = url.to_owned();
     let body_clone = body.clone();
-    // Spawn a thread so we don't block the alert engine
     std::thread::spawn(move || {
         if let Err(e) = do_webhook_post(&url, &body_clone) {
             tracing::warn!(url = %url, error = %e, "webhook POST failed");
@@ -563,8 +620,47 @@ mod tests {
     }
 
     #[test]
-    fn fire_webhook_returns_ok_for_any_url() {
+    fn fire_webhook_rejects_loopback() {
         let result = fire_webhook("test-rule", "cpu.util > 90", "http://127.0.0.1:1");
-        assert!(result.is_ok());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_allows_public_ip() {
+        assert!(validate_webhook_url("http://203.0.113.5:8080/hook").is_ok());
+        assert!(validate_webhook_url("https://example.com/webhook").is_ok());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_loopback() {
+        assert!(validate_webhook_url("http://127.0.0.1/hook").is_err());
+        assert!(validate_webhook_url("http://127.0.0.1:9090/hook").is_err());
+        assert!(validate_webhook_url("http://[::1]/hook").is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_link_local() {
+        assert!(validate_webhook_url("http://169.254.169.254/latest/meta-data/").is_err());
+        assert!(validate_webhook_url("http://[fe80::1]/hook").is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_private() {
+        assert!(validate_webhook_url("http://10.0.0.1/hook").is_err());
+        assert!(validate_webhook_url("http://172.16.0.1/hook").is_err());
+        assert!(validate_webhook_url("http://192.168.1.1/hook").is_err());
+        assert!(validate_webhook_url("http://[fc00::1]/hook").is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_unspecified() {
+        assert!(validate_webhook_url("http://0.0.0.0/hook").is_err());
+        assert!(validate_webhook_url("http://[::]/hook").is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_bad_scheme() {
+        assert!(validate_webhook_url("ftp://example.com/hook").is_err());
+        assert!(validate_webhook_url("gopher://example.com/hook").is_err());
     }
 }
