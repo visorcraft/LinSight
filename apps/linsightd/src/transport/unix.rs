@@ -10,6 +10,8 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use subtle::ConstantTimeEq;
+
 use linsight_protocol::{
     ClientMsg, FrameError, FrameReader, FrameWriter, PROTOCOL_VERSION, PluginInfo, ServerMsg,
     verify_hello,
@@ -290,7 +292,7 @@ fn serve(
 
     // Optional auth check: if LINSIGHT_AUTH_TOKEN is set, verify token match.
     if let Some(ref expected) = *AUTH_TOKEN
-        && auth_token.as_deref() != Some(expected.as_str())
+        && !auth_token.as_deref().is_some_and(|t| t.as_bytes().ct_eq(expected.as_bytes()).into())
     {
         let _ = writer
             .lock()
