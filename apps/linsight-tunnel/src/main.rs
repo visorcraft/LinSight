@@ -227,9 +227,19 @@ fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
 }
 
 fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(
-        File::open(path).with_context(|| format!("opening key {}", path.display()))?,
-    );
+    let file = File::open(path).with_context(|| format!("opening key {}", path.display()))?;
+    let meta = file.metadata().with_context(|| format!("stat {}", path.display()))?;
+    let mode = std::os::unix::fs::PermissionsExt::mode(&meta.permissions());
+    if mode & 0o077 != 0 {
+        bail!(
+            "private key {} has overly permissive mode {:04o} (group/other bits set); \
+             run: chmod 600 {}",
+            path.display(),
+            mode,
+            path.display(),
+        );
+    }
+    let mut reader = BufReader::new(file);
     rustls_pemfile::private_key(&mut reader)
         .with_context(|| format!("parsing key from {}", path.display()))?
         .ok_or_else(|| anyhow!("no private key found in {}", path.display()))
