@@ -163,10 +163,28 @@ fn plugins_config_path() -> PathBuf {
     }
 }
 
+const MAX_PLUGINS_CONFIG_BYTES: u64 = 1 << 20;
+
 fn load_plugin_configs() -> std::collections::HashMap<String, serde_json::Value> {
     let path = plugins_config_path();
     let mut out = std::collections::HashMap::new();
     if !path.exists() {
+        return out;
+    }
+    let meta = match std::fs::metadata(&path) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(path = %path.display(), error = %e, "failed to stat plugins.toml");
+            return out;
+        }
+    };
+    if meta.len() > MAX_PLUGINS_CONFIG_BYTES {
+        warn!(
+            path = %path.display(),
+            size = meta.len(),
+            limit = MAX_PLUGINS_CONFIG_BYTES,
+            "plugins.toml exceeds size limit, refusing to load"
+        );
         return out;
     }
     let content = match std::fs::read_to_string(&path) {
