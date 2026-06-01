@@ -87,8 +87,9 @@ panic = "unwind"
 strip = "symbols"
 opt-level = 3
 
-# TEMP: verifying upstream fix for cxx-qt issue (rcc "potential duplicate
-# alias detected: 'qmldir'" warning during build). Remove this patch
-# table once the fix is merged into a published crate version.
+# TEMP: verifying upstream fix for a cxx-qt issue (rcc "potential duplicate
+# alias detected: 'qmldir'" warning during build). Points at the published
+# visorcraft/cxx-qt fork (pinned by rev); remove this patch table once the
+# fix is merged into a published crate version.
 [patch.crates-io]
-qt-build-utils = { path = "/work/repos/cxx-qt-fork/crates/qt-build-utils" }
+qt-build-utils = { git = "https://github.com/visorcraft/cxx-qt.git", rev = "33bdd8209cf23a3b482e8d5cd8869eb9909c2f12" }

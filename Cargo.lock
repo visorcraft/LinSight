@@ -1962,6 +1962,7 @@ dependencies = [
 [[package]]
 name = "qt-build-utils"
 version = "0.8.1"
+source = "git+https://github.com/visorcraft/cxx-qt.git?rev=33bdd8209cf23a3b482e8d5cd8869eb9909c2f12#33bdd8209cf23a3b482e8d5cd8869eb9909c2f12"
 dependencies = [
  "anyhow",
  "cc",
