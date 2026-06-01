@@ -61,6 +61,10 @@ const DEFAULT_MAX_CONNECTIONS: usize = 64;
 /// their bidirectional copy cleanly. Past this we abort outstanding tasks
 /// so we don't hang the process forever on a wedged connection.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
+/// Maximum time a single connection may sit idle before the tunnel closes it.
+/// Prevents slow-loris attacks where an authenticated client holds all
+/// connection slots by opening connections and going silent.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Parser, Debug)]
 #[command(version, about = "LinSight mTLS remote tunnel")]
@@ -514,12 +518,16 @@ async fn handle_server_conn(
         )
     })?;
 
-    match copy_bidirectional(&mut tls, &mut unix).await {
-        Ok((c2s, s2c)) => {
+    match tokio::time::timeout(IDLE_TIMEOUT, copy_bidirectional(&mut tls, &mut unix)).await {
+        Ok(Ok((c2s, s2c))) => {
             info!(%peer, bytes_c2s = c2s, bytes_s2c = s2c, "tunnel closed");
             Ok(())
         }
-        Err(e) => Err(anyhow!(e)).context("bidirectional copy failed"),
+        Ok(Err(e)) => Err(anyhow!(e)).context("bidirectional copy failed"),
+        Err(_) => {
+            warn!(%peer, "idle timeout ({:?}), closing connection", IDLE_TIMEOUT);
+            Ok(())
+        }
     }
 }
 
@@ -657,11 +665,15 @@ async fn handle_client_conn(
         .with_context(|| format!("TLS handshake with {server_addr}"))?;
     info!(server = %server_addr, "TLS connected upstream");
 
-    match copy_bidirectional(&mut unix, &mut tls).await {
-        Ok((c2s, s2c)) => {
+    match tokio::time::timeout(IDLE_TIMEOUT, copy_bidirectional(&mut unix, &mut tls)).await {
+        Ok(Ok((c2s, s2c))) => {
             info!(bytes_c2s = c2s, bytes_s2c = s2c, "tunnel closed");
             Ok(())
         }
-        Err(e) => Err(anyhow!(e)).context("bidirectional copy failed"),
+        Ok(Err(e)) => Err(anyhow!(e)).context("bidirectional copy failed"),
+        Err(_) => {
+            warn!(server = %server_addr, "idle timeout ({:?}), closing connection", IDLE_TIMEOUT);
+            Ok(())
+        }
     }
 }
