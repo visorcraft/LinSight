@@ -399,6 +399,102 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie-slim
+    needs: [linux-tarball]
+    steps:
+      - name: Install build + appimage-builder dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git curl file \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            qt6-tools-dev kirigami2-dev libgl1-mesa-dev \
+            pkg-config clang ninja-build \
+            python3-pip patchelf desktop-file-utils fakeroot zsync \
+            squashfs-tools gnupg2 libglib2.0-bin
+          pip3 install --break-system-packages appimage-builder==1.1.0
+      - name: Install Rust 1.95 via rustup
+        env:
+          RUSTUP_HOME: /usr/local/rustup
+          CARGO_HOME: /usr/local/cargo
+          HOME: /root
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.95 --profile minimal --no-modify-path
+          {
+            echo "RUSTUP_HOME=/usr/local/rustup"
+            echo "CARGO_HOME=/usr/local/cargo"
+          } >> "$GITHUB_ENV"
+          echo "/usr/local/cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: bash scripts/build_appimage.sh
+      - name: Stage AppImage + sha256
+        run: |
+          mkdir -p target/dist
+          mv ./*.AppImage target/dist/
+          (cd target/dist && sha256sum ./*.AppImage > sha256sums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  flatpak:
+    name: Flatpak bundle
+    runs-on: ubuntu-24.04
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak + builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+      - name: Add flathub + install KDE 6.10 runtime/SDK
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub \
+            org.kde.Platform//6.10 \
+            org.kde.Sdk//6.10 \
+            org.freedesktop.Sdk.Extension.rust-stable//24.08
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Vendor crates
+        run: |
+          rm -rf packaging/flatpak/vendor
+          cargo vendor --locked packaging/flatpak/vendor >/dev/null
+          tar -C packaging/flatpak -cf packaging/flatpak/vendor.tar.gz vendor/
+      - name: Build + bundle Flatpak
+        run: |
+          flatpak-builder --user --disable-rofiles-fuse --force-clean \
+            --repo=flatpak-repo flatpak-build \
+            packaging/flatpak/io.visorcraft.LinSight.yml
+          flatpak build-bundle flatpak-repo \
+            "linsight-${VERSION}.flatpak" io.visorcraft.LinSight master
+      - name: Stage Flatpak + sha256
+        run: |
+          mkdir -p target/dist
+          mv "linsight-${VERSION}.flatpak" target/dist/
+          (cd target/dist && sha256sum linsight-*.flatpak > sha256sums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Create GitHub release
     runs-on: ubuntu-latest
