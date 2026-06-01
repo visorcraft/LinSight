@@ -1,0 +1,167 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Tag-triggered release: build every artifact LinSight ships and attach
+# them to a GitHub Release. The tag is the source of version truth — the
+# version step verifies it against Cargo.toml and each package job patches
+# its version field from it. No `${{ github.event.* }}` interpolation in
+# run blocks (injection-safe): tag/version flow through env vars.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  QMAKE: /usr/bin/qmake6
+  QT_VERSION_MAJOR: "6"
+
+jobs:
+  linux-tarball:
+    name: Linux x86_64 tarball
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Install Arch dependencies
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Syu --noconfirm --needed \
+            git curl ca-certificates pkgconf \
+            qt6-base qt6-declarative qt6-tools kirigami \
+            clang ninja mesa file desktop-file-utils appstream
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Resolve + verify version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          workspace_version="$(awk -F'"' '
+              /^\[workspace\.package\]/ { in_section = 1; next }
+              in_section && /^\[/ { exit }
+              in_section && $1 ~ /^version[[:space:]]*=/ { print $2; exit }
+          ' Cargo.toml)"
+          tag_version="${TAG#v}"
+          tag_release_version="${tag_version%%-*}"
+          if [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]] \
+              && [[ "$tag_release_version" != "$workspace_version" ]]; then
+            echo "tag ${TAG} (release ${tag_release_version}) != workspace ${workspace_version}" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$workspace_version" >> "$GITHUB_OUTPUT"
+          echo "Building LinSight ${workspace_version} from tag ${TAG}"
+
+      - name: Format + clippy sanity gate
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Validate desktop file + metainfo
+        run: |
+          desktop-file-validate packaging/io.visorcraft.LinSight.desktop
+          appstreamcli validate --no-net packaging/io.visorcraft.LinSight.metainfo.xml
+
+      - name: Build release binaries
+        run: cargo build --workspace --release --locked
+
+      - name: Offscreen GUI smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set +e
+          timeout --preserve-status 5 target/release/linsight
+          code=$?
+          set -e
+          if [[ "$code" -ne 124 && "$code" -ne 143 && "$code" -ne 0 ]]; then
+            echo "GUI exited unexpectedly with ${code}" >&2
+            exit "$code"
+          fi
+
+      - name: Stage portable tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          root="linsight-${VERSION}-linux-x86_64"
+          staging="target/release-dist/${root}"
+          dist="target/dist"
+          rm -rf "$staging" "$dist"
+          mkdir -p \
+            "$staging/bin" \
+            "$staging/share/applications" \
+            "$staging/share/metainfo" \
+            "$staging/lib/systemd/user" \
+            "$dist"
+          install -m755 target/release/linsight     "$staging/bin/linsight"
+          install -m755 target/release/linsightd    "$staging/bin/linsightd"
+          install -m755 target/release/linsight-cli "$staging/bin/linsight-cli"
+          install -m644 packaging/io.visorcraft.LinSight.desktop \
+            "$staging/share/applications/io.visorcraft.LinSight.desktop"
+          install -m644 packaging/io.visorcraft.LinSight.metainfo.xml \
+            "$staging/share/metainfo/io.visorcraft.LinSight.metainfo.xml"
+          install -m644 packaging/systemd/linsight.service \
+            "$staging/lib/systemd/user/linsight.service"
+          install -m644 README.md "$staging/README.md"
+          install -m644 LICENSE   "$staging/LICENSE"
+          tar -C target/release-dist \
+            --sort=name --mtime="@${SOURCE_DATE_EPOCH:-0}" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "${dist}/${root}.tar.gz" "$root"
+          (cd "$dist" && sha256sum "${root}.tar.gz" >> sha256sums.txt)
+
+      - name: Upload tarball artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: [linux-tarball]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-staging
+
+      - name: Aggregate artefacts + checksums
+        run: |
+          mkdir -p dist
+          find dist-staging -type f ! -name "sha256sums.txt" -exec mv {} dist/ \;
+          (cd dist && sha256sum ./* > sha256sums.txt)
+          echo "Release payload:" && ls -la dist/
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "LinSight $TAG" \
+            --generate-notes \
+            --verify-tag
