@@ -13,6 +13,12 @@
 //! is one URL, one method, plain-text response — a few hundred LOC of
 //! `TcpListener` + manual parse beats a transitive megabyte of deps.
 //!
+//! **Trust boundary:** the exporter binds to `127.0.0.1` by default and
+//! performs no authentication. Only hosts that should see all sensor data
+//! may reach the bind address. A concurrent connection cap (`MAX_PROM_CONNECTIONS`)
+//! limits slow-loris exposure but is not a substitute for network-level access
+//! control.
+//!
 //! On each scrape we synchronously call into the [`Scheduler`] to grab a
 //! fresh sample for every registered sensor under a SINGLE lock acquisition
 //! so the whole scrape represents one consistent snapshot — Prometheus
@@ -20,7 +26,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -34,6 +40,7 @@ use crate::hardware::HardwareRegistry;
 use crate::scheduler::Scheduler;
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const MAX_PROM_CONNECTIONS: usize = 10;
 
 /// Spawn the exporter accept loop. Returns the shutdown flag — flip it to
 /// `true` to stop the accept loop on the next poll interval. The runtime
@@ -63,15 +70,27 @@ fn accept_loop(
     registry: Arc<RwLock<HardwareRegistry>>,
     shutdown: Arc<AtomicBool>,
 ) {
+    let active = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((s, _addr)) => {
+                if active.load(Ordering::Relaxed) >= MAX_PROM_CONNECTIONS {
+                    warn!("prom connection cap reached, dropping new connection");
+                    let _ = s
+                        .try_clone()
+                        .and_then(|mut w| w.write_all(b"HTTP/1.0 503 Service Unavailable\r\n\r\n"));
+                    drop(s);
+                    continue;
+                }
+                active.fetch_add(1, Ordering::Relaxed);
                 let sched = Arc::clone(&scheduler);
                 let reg = Arc::clone(&registry);
+                let conn_active = Arc::clone(&active);
                 thread::spawn(move || {
                     if let Err(e) = serve_one(s, sched, reg) {
                         warn!(error = %e, "prom request failed");
                     }
+                    conn_active.fetch_sub(1, Ordering::Relaxed);
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

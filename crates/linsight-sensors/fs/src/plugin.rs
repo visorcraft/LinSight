@@ -184,9 +184,8 @@ impl FsPlugin {
             // counts via statvfs (f_files == 0), so inodes_total/inodes_used are
             // perpetually 0. Skip those sensors for such mounts. A statvfs error
             // (e.g. a mount that vanished) defaults to keeping them.
-            let reports_inodes = statvfs_raw(mountpoint)
-                .map(|(_, _, inodes, _)| inodes > 0)
-                .unwrap_or(true);
+            let reports_inodes =
+                statvfs_raw(mountpoint).map(|(_, _, inodes, _)| inodes > 0).unwrap_or(true);
             let base = mount_safekey(mountpoint);
             let safe =
                 if taken.insert(base.clone()) { base } else { format!("{base}_{}", mtab_idx + 1) };
