@@ -62,10 +62,14 @@ impl HistoryWriter {
 pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
+        // Make the data dir owner-only: this closes the brief window in which
+        // the db and its SQLite-created `-wal`/`-shm` sidecars exist at the
+        // umask default before the chmods below, since no other user can
+        // traverse into a 0700 directory to open them.
+        std::fs::set_permissions(parent, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .with_context(|| format!("chmod dir {}", parent.display()))?;
     }
     let conn = Connection::open(&db_path).with_context(|| format!("open {}", db_path.display()))?;
-    std::fs::set_permissions(&db_path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-        .with_context(|| format!("chmod {}", db_path.display()))?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
@@ -81,16 +85,18 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
     )
     .context("init schema")?;
 
-    // WAL mode creates `-wal` / `-shm` sidecars holding the same sample data;
-    // they are born under the process umask, so tighten them to 0600 too. They
-    // exist once WAL is active and the schema writes above have run.
-    for suffix in ["-wal", "-shm"] {
-        let mut sidecar = db_path.clone().into_os_string();
-        sidecar.push(suffix);
-        let sidecar = PathBuf::from(sidecar);
-        if sidecar.exists() {
-            std::fs::set_permissions(&sidecar, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-                .with_context(|| format!("chmod {}", sidecar.display()))?;
+    // Restrict the db AND the `-wal`/`-shm` sidecars (created by WAL mode in
+    // the schema writes above) to owner-only — they hold the same sample data.
+    // chmod-after rather than a umask clamp: umask is process-global and would
+    // corrupt file modes in concurrent threads (e.g. the test harness). `""`
+    // covers the db file itself.
+    for suffix in ["", "-wal", "-shm"] {
+        let mut p = db_path.clone().into_os_string();
+        p.push(suffix);
+        let p = PathBuf::from(p);
+        if p.exists() {
+            std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+                .with_context(|| format!("chmod {}", p.display()))?;
         }
     }
 

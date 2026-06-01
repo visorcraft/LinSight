@@ -494,8 +494,6 @@ impl From<RReading> for Reading {
                 Reading::State(opt.map(|s| s.as_str().to_owned()).unwrap_or_default())
             }
             RReadingKind::Table => Reading::Table(svec_into_std(r.table)),
-            #[allow(unreachable_patterns)]
-            _ => Reading::Scalar(0.0),
         }
     }
 }

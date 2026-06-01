@@ -6,7 +6,7 @@
 /// Pass the type that implements [`LinsightPlugin`](crate::LinsightPlugin).
 /// The type must implement `Default`.
 ///
-/// ABI v5: the factory returns a stabby dyn-ptr
+/// ABI v6: the factory returns a stabby dyn-ptr
 /// (`stabby::dynptr!(Box<dyn LinsightPlugin + Send + Sync>)`) annotated
 /// with `#[stabby::export]`. The host loads the symbol via
 /// [`StabbyLibrary::get_stabbied`](stabby::libloading::StabbyLibrary::get_stabbied)
@@ -15,10 +15,10 @@
 /// A plain `extern "C" fn() -> u32` named `linsight_plugin_abi_version`
 /// is emitted alongside so loaders can do a cheap version-compatibility
 /// short-circuit before paying the stabby cost. The factory symbol is
-/// `linsight_plugin_v5` — renamed from `linsight_plugin_v4` so a v4
+/// `linsight_plugin_v6` — renamed from `linsight_plugin_v5` so a v5
 /// plugin's `.so` will fail symbol lookup at load time rather than
-/// silently exchanging incompatible `RPluginCtx` shapes (v5 adds
-/// `config_json: SString` to the context struct).
+/// silently exchanging vtables whose methods differ in unwind ABI (v6
+/// switches the trait methods to `extern "C-unwind"` for panic isolation).
 #[macro_export]
 macro_rules! export_plugin {
     ($ty:ty) => {
@@ -28,7 +28,7 @@ macro_rules! export_plugin {
         }
 
         #[$crate::stabby::export]
-        pub extern "C" fn linsight_plugin_v5() -> $crate::stabby::dynptr!(
+        pub extern "C" fn linsight_plugin_v6() -> $crate::stabby::dynptr!(
             $crate::stabby::boxed::Box<dyn $crate::LinsightPlugin + Send + Sync>
         ) {
             let boxed: $crate::stabby::boxed::Box<$ty> =
@@ -52,7 +52,7 @@ mod tests {
     struct EchoPlugin;
 
     impl LinsightPlugin for EchoPlugin {
-        extern "C" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
+        extern "C-unwind" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
             let m = PluginManifest {
                 plugin_id: "echo".into(),
                 display_name: "Echo".into(),
@@ -64,7 +64,7 @@ mod tests {
             SResult::Ok(r)
         }
 
-        extern "C" fn sample(&self, _: RSensorId) -> RSampleResult {
+        extern "C-unwind" fn sample(&self, _: RSensorId) -> RSampleResult {
             let r: RReading = linsight_core::Reading::Scalar(1.0).into();
             SResult::Ok(r)
         }

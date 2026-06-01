@@ -193,10 +193,15 @@ impl From<&RPluginCtx> for PluginCtx {
 // ---------------------------------------------------------------------------
 // The stabbified plugin trait.
 //
-// Every method uses `extern "C"` plus R-mirror types so the resulting
-// vtable is FFI-safe across rustc minor versions. Plugins typically
-// construct linsight-core values internally and call `.into()` at the
-// return.
+// Every method uses `extern "C-unwind"` plus R-mirror types so the resulting
+// vtable is FFI-safe across rustc minor versions. `C-unwind` (rather than
+// plain `C`) lets a panic inside a plugin method unwind across the FFI
+// boundary so the host's `catch_unwind` (in `host_init`/`host_sample`) can
+// turn it into a `PluginError::Panic` instead of the plugin force-aborting
+// the whole daemon at the boundary. (Panic isolation also requires the
+// daemon to be built with `panic = "unwind"`; see the release profile.)
+// Plugins typically construct linsight-core values internally and call
+// `.into()` at the return.
 // ---------------------------------------------------------------------------
 
 pub type RInitResult = SResult<RPluginManifest, RPluginError>;
@@ -204,9 +209,9 @@ pub type RSampleResult = SResult<RReading, RPluginError>;
 
 #[stabby::stabby]
 pub trait LinsightPlugin: Send + Sync {
-    extern "C" fn init(&self, ctx: &RPluginCtx) -> RInitResult;
-    extern "C" fn sample(&self, sensor: RSensorId) -> RSampleResult;
-    extern "C" fn shutdown(&self) {}
+    extern "C-unwind" fn init(&self, ctx: &RPluginCtx) -> RInitResult;
+    extern "C-unwind" fn sample(&self, sensor: RSensorId) -> RSampleResult;
+    extern "C-unwind" fn shutdown(&self) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +289,7 @@ mod tests {
     struct NoopPlugin;
 
     impl LinsightPlugin for NoopPlugin {
-        extern "C" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
+        extern "C-unwind" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
             let m = PluginManifest {
                 plugin_id: "test".into(),
                 display_name: "Test".into(),
@@ -296,7 +301,7 @@ mod tests {
             SResult::Ok(r)
         }
 
-        extern "C" fn sample(&self, _sensor: RSensorId) -> RSampleResult {
+        extern "C-unwind" fn sample(&self, _sensor: RSensorId) -> RSampleResult {
             let e: RPluginError = PluginError::Unsupported("no sensors".into()).into();
             SResult::Err(e)
         }
@@ -324,7 +329,7 @@ mod tests {
     struct BadIdPlugin;
 
     impl LinsightPlugin for BadIdPlugin {
-        extern "C" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
+        extern "C-unwind" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
             // We deliberately bypass `SensorId::try_new` here to construct
             // a value that violates the invariant — this is what a
             // misbehaving plugin compiled in release mode could produce
@@ -358,7 +363,7 @@ mod tests {
             SResult::Ok(r)
         }
 
-        extern "C" fn sample(&self, _: RSensorId) -> RSampleResult {
+        extern "C-unwind" fn sample(&self, _: RSensorId) -> RSampleResult {
             let e: RPluginError = PluginError::Unsupported("no".into()).into();
             SResult::Err(e)
         }
@@ -381,6 +386,35 @@ mod tests {
             }
             other => panic!("expected PluginError::Parse, got {other:?}"),
         }
+    }
+
+    /// Plugin whose `init`/`sample` panic. With the `extern "C-unwind"`
+    /// trait ABI, the panic unwinds across the boundary and `host_init` /
+    /// `host_sample` catch it into `PluginError::Panic`. Under the old
+    /// `extern "C"` ABI this would force-abort the process instead — so
+    /// this is the regression guard for M3 (plugin panic isolation).
+    struct PanicPlugin;
+
+    impl LinsightPlugin for PanicPlugin {
+        extern "C-unwind" fn init(&self, _ctx: &RPluginCtx) -> RInitResult {
+            panic!("boom in init");
+        }
+
+        extern "C-unwind" fn sample(&self, _: RSensorId) -> RSampleResult {
+            panic!("boom in sample");
+        }
+    }
+
+    #[test]
+    fn host_init_catches_plugin_panic() {
+        let err = host_init(&PanicPlugin, &PluginCtx::default()).unwrap_err();
+        assert!(matches!(err, PluginError::Panic(_)), "expected Panic, got {err:?}");
+    }
+
+    #[test]
+    fn host_sample_catches_plugin_panic() {
+        let err = host_sample(&PanicPlugin, SensorId::new("x")).unwrap_err();
+        assert!(matches!(err, PluginError::Panic(_)), "expected Panic, got {err:?}");
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //!   * The `linsight_plugin_abi_version` symbol is present and returns
 //!     [`LINSIGHT_PLUGIN_ABI_VERSION`].
 //!   * `StabbyLibrary::get_stabbied` resolves the
-//!     `linsight_plugin_v5` factory with a type signature that matches
+//!     `linsight_plugin_v6` factory with a type signature that matches
 //!     the SDK's expectation.
 //!   * `host_init` succeeds and returns the expected `plugin_id`.
 //!   * `host_sample` returns the expected `Reading::Scalar(42.0)`.
@@ -83,7 +83,7 @@ fn dynamic_load_exercises_get_stabbied_factory() {
     let library = unsafe { Library::new(so) }.expect("dlopen example plugin");
     let factory = unsafe {
         library
-            .get_stabbied::<PluginFactory>(b"linsight_plugin_v5")
+            .get_stabbied::<PluginFactory>(b"linsight_plugin_v6")
             .expect("stabby reflection accepts the factory")
     };
     let _dyn_box = factory();
@@ -97,21 +97,21 @@ unsafe impl Send for DynBoxPlugin {}
 unsafe impl Sync for DynBoxPlugin {}
 
 impl LinsightPlugin for DynBoxPlugin {
-    extern "C" fn init(
+    extern "C-unwind" fn init(
         &self,
         ctx: &linsight_plugin_sdk::RPluginCtx,
     ) -> linsight_plugin_sdk::RInitResult {
         self.0.init(ctx)
     }
 
-    extern "C" fn sample(
+    extern "C-unwind" fn sample(
         &self,
         sensor: linsight_plugin_sdk::RSensorId,
     ) -> linsight_plugin_sdk::RSampleResult {
         self.0.sample(sensor)
     }
 
-    extern "C" fn shutdown(&self) {
+    extern "C-unwind" fn shutdown(&self) {
         self.0.shutdown()
     }
 }
@@ -121,7 +121,7 @@ fn dynamic_load_init_and_sample_round_trip() {
     let so = echo_plugin_so();
     let library = unsafe { Library::new(so) }.expect("dlopen example plugin");
     let factory = unsafe {
-        library.get_stabbied::<PluginFactory>(b"linsight_plugin_v5").expect("get_stabbied")
+        library.get_stabbied::<PluginFactory>(b"linsight_plugin_v6").expect("get_stabbied")
     };
     let dyn_box = factory();
     let plugin = DynBoxPlugin(dyn_box);

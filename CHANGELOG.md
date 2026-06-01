@@ -9,6 +9,34 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-06-01
+
+- **Plugin panic isolation now actually works (plugin ABI v5 → v6).** A
+  panic inside a plugin's `init`/`sample` is caught by the daemon
+  (`PluginError::Panic`) instead of taking the whole process down. This
+  required two changes that bump the plugin ABI: the trait methods are now
+  `extern "C-unwind"` (so a panic can unwind across the FFI boundary rather
+  than force-aborting at it), and the release profile is now
+  `panic = "unwind"` (so `catch_unwind` is not a no-op). **Out-of-tree
+  plugins must be rebuilt against the v6 SDK** — the factory symbol is
+  renamed `linsight_plugin_v5` → `_v6`, so a stale `.so` is rejected at load
+  with an actionable "rebuild against v6" log (the daemon skips it and keeps
+  running; it does not crash). Porting a plugin's source is mechanical:
+  change each `extern "C" fn init/sample/shutdown` in your
+  `impl LinsightPlugin` to `extern "C-unwind" fn` (the compiler flags any you
+  miss) and rebuild. See `docs/plugin-sdk.md` for the migration note.
+- **Security hardening (audit follow-ups).** Fixed a panic in webhook URL
+  validation on a malformed IPv6 literal (it ran under the alert-engine lock
+  and would poison it); a use-after-`dlclose` on the duplicate-plugin-ID
+  rejection path; the tunnel's misnamed "idle timeout" that was actually a
+  hard 5-minute cap on every connection (now a true idle timeout that resets
+  on activity); a leaked Prometheus connection slot on a worker panic; and
+  WAL/`-shm` sidecar files inheriting the umask. Webhook SSRF validation now
+  also rejects `userinfo@`-masked hosts, obfuscated numeric-IP encodings, and
+  no longer follows redirects. Alert-rule evaluation no longer spawns a
+  worker thread per rule per sample tick (the timeout sandbox is reserved for
+  the ad-hoc `TestAlertExpr` RPC).
+
 ## [1.6.0] — 2026-05-31
 
 - **Storage page: mount points are nested inside their physical disk.** Each

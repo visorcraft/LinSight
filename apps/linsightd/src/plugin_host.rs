@@ -393,7 +393,7 @@ type PluginFactory =
 
 /// SAFETY: the caller asserts the file at `path` exports the
 /// `linsight_plugin_abi_version` symbol and a `#[stabby::export]`-annotated
-/// `linsight_plugin_v5` factory whose return type is
+/// `linsight_plugin_v6` factory whose return type is
 /// `dynptr!(Box<dyn LinsightPlugin + Send + Sync>)`. Type compatibility is
 /// verified via stabby's reflection (`StabbyLibrary::get_stabbied`).
 unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
@@ -406,7 +406,9 @@ unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
     let version = unsafe { version_fn() };
     if version != LINSIGHT_PLUGIN_ABI_VERSION {
         return Err(format!(
-            "ABI mismatch: plugin reports v{version}, daemon expects v{LINSIGHT_PLUGIN_ABI_VERSION}"
+            "ABI mismatch: plugin reports v{version}, daemon expects \
+             v{LINSIGHT_PLUGIN_ABI_VERSION}; rebuild the plugin against \
+             linsight-plugin-sdk v{LINSIGHT_PLUGIN_ABI_VERSION}"
         ));
     }
     let plugin = unsafe { instantiate(&library) }?;
@@ -419,13 +421,13 @@ unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
 /// (to re-`init` with per-plugin config) without re-opening the library.
 ///
 /// SAFETY: `library` must export the `#[stabby::export]`-annotated
-/// `linsight_plugin_v5` factory whose return type is
+/// `linsight_plugin_v6` factory whose return type is
 /// `dynptr!(Box<dyn LinsightPlugin + Send + Sync>)`. Type compatibility is
 /// verified by stabby's reflection (`get_stabbied`).
 unsafe fn instantiate(library: &Library) -> Result<Arc<dyn LinsightPlugin>, String> {
     let factory = unsafe {
         library
-            .get_stabbied::<PluginFactory>(b"linsight_plugin_v5")
+            .get_stabbied::<PluginFactory>(b"linsight_plugin_v6")
             .map_err(|e| format!("stabbied symbol load failed: {e}"))?
     };
     let dyn_box = factory();
@@ -447,21 +449,21 @@ unsafe impl Send for DynBoxPlugin {}
 unsafe impl Sync for DynBoxPlugin {}
 
 impl LinsightPlugin for DynBoxPlugin {
-    extern "C" fn init(
+    extern "C-unwind" fn init(
         &self,
         ctx: &linsight_plugin_sdk::RPluginCtx,
     ) -> linsight_plugin_sdk::RInitResult {
         self.0.init(ctx)
     }
 
-    extern "C" fn sample(
+    extern "C-unwind" fn sample(
         &self,
         sensor: linsight_plugin_sdk::RSensorId,
     ) -> linsight_plugin_sdk::RSampleResult {
         self.0.sample(sensor)
     }
 
-    extern "C" fn shutdown(&self) {
+    extern "C-unwind" fn shutdown(&self) {
         self.0.shutdown()
     }
 }

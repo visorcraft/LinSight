@@ -39,6 +39,12 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
 
     let listener =
         UnixListener::bind(&socket).with_context(|| format!("binding {}", socket.display()))?;
+    // chmod after bind rather than clamping the umask: umask is process-global
+    // and would corrupt file modes in any concurrent thread (notably the test
+    // harness). The brief window between bind() and this chmod is not
+    // exploitable in practice — the socket lives in $XDG_RUNTIME_DIR (mode
+    // 0700 per the XDG spec, so no other user can traverse to it) and every
+    // accepted connection is SO_PEERCRED-checked regardless of socket mode.
     std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))
         .with_context(|| format!("setting permissions on {}", socket.display()))?;
     listener.set_nonblocking(true).context("setting listener non-blocking")?;

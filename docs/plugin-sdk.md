@@ -52,7 +52,7 @@ use linsight_plugin_sdk::linsight_core::SensorId;
 pub struct MyPlugin;
 
 impl LinsightPlugin for MyPlugin {
-    extern "C" fn init(
+    extern "C-unwind" fn init(
         &self,
         _ctx: &RPluginCtx,
     ) -> stabby::result::Result<RPluginManifest, RPluginError> {
@@ -76,7 +76,7 @@ impl LinsightPlugin for MyPlugin {
         stabby::result::Result::Ok(manifest)
     }
 
-    extern "C" fn sample(
+    extern "C-unwind" fn sample(
         &self,
         sensor: &linsight_plugin_sdk::RSensorId,
     ) -> stabby::result::Result<RReading, RPluginError> {
@@ -93,18 +93,32 @@ impl LinsightPlugin for MyPlugin {
 export_plugin!(MyPlugin);
 ```
 
-The `extern "C" fn` calling convention on every trait method is a
-stabby requirement; bodies stay plain Rust. The conversion glue
+The `extern "C-unwind" fn` calling convention on every trait method is a
+stabby requirement; bodies stay plain Rust. `C-unwind` (as of ABI v6,
+rather than plain `C`) lets a panic inside a plugin method unwind across the
+FFI boundary so the daemon can catch it instead of aborting — your impl
+signatures must say `extern "C-unwind" fn`. The conversion glue
 between R-mirror types and the host's std-typed `linsight-core`
 values lives in `linsight-plugin-sdk::mirror` and runs at the FFI
 boundary only.
 
 ## ABI compatibility
 
-`linsight_plugin_sdk::LINSIGHT_PLUGIN_ABI_VERSION` is `2` as of
-v0.3.x. The daemon refuses to load a `.so` whose reported version
-doesn't match. Bump it on every breaking change to the trait, the
-mirror types, the manifest, or the export macro.
+`linsight_plugin_sdk::LINSIGHT_PLUGIN_ABI_VERSION` is `6`. The daemon
+refuses to load a `.so` whose reported version doesn't match — it logs an
+actionable error ("rebuild the plugin against linsight-plugin-sdk v6") and
+**skips** that plugin; it does not crash, and a mismatched vtable is a
+second backstop via stabby's reflection check. Bump the version on every
+breaking change to the trait, the mirror types, the manifest, or the export
+macro; the `export_plugin!` macro renames the factory symbol on each bump
+(`linsight_plugin_v5` → `_v6`) so a stale `.so` fails the symbol lookup
+rather than loading with an incompatible vtable.
+
+**v6 migration:** v6 only changed the trait-method ABI from `extern "C"` to
+`extern "C-unwind"` (for panic isolation). To port a v5 plugin, change each
+`extern "C" fn init/sample/shutdown` in your `impl LinsightPlugin` to
+`extern "C-unwind" fn` and rebuild — the compiler flags any you miss. No
+other source changes are required.
 
 ABI v3 uses **R-mirror types** in `linsight_plugin_sdk::mirror`
 (`RUnit`, `RSensorKind`, `RCategory`, `RReading`, `RTableRow`,
@@ -148,7 +162,7 @@ Sensor-id collisions log a warning; first registration wins.
   as constants in `linsight_plugin_sdk::manifest`). Pick the rate
   that matches how often the underlying data changes meaningfully.
 - Keep plugin bodies in private `init_inner` / `sample_inner` helpers
-  with plain Rust types if you find the `extern "C" fn` signatures
+  with plain Rust types if you find the `extern "C-unwind" fn` signatures
   noisy — the in-tree sensors and `examples/echo-plugin/` all follow
   this pattern.
 - **Sensor IDs**: every ID a plugin returns is run through

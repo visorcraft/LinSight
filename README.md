@@ -76,7 +76,7 @@ It is built around three goals:
   memory, power, and processes, per device.
 - **Extensible and scriptable.** Everything the GUI shows is also a
   `linsight-cli` subcommand, and new metric sources drop in as runtime
-  `.so` plugins (ABI v5) without recompiling the daemon.
+  `.so` plugins (ABI v6) without recompiling the daemon.
 
 What it monitors today:
 
@@ -223,7 +223,7 @@ Settings page shows each subsystem's env-var status.
 - **`crates/linsight-core/`** — shared types and dashboard model (no I/O).
 - **`crates/linsight-protocol/`** — postcard wire format + framing.
 - **`crates/linsight-plugin-sdk/`** — public `LinsightPlugin` trait +
-  `export_plugin!` macro. ABI v5 uses R-mirror types on the FFI boundary
+  `export_plugin!` macro. ABI v6 uses R-mirror types on the FFI boundary
   for cross-rustc safety; see
   [`docs/adr/0001-plugin-abi-stabby-deferral.md`](docs/adr/0001-plugin-abi-stabby-deferral.md).
 - **`crates/linsight-sensors/*`** — one in-tree plugin per hardware

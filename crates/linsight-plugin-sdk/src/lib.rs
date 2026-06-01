@@ -52,7 +52,13 @@ pub use stabby;
 ///   per-plugin config blob read from `plugins.toml` by the daemon.
 ///   Plugins opt in by deserializing it. v4 plugins fail the symbol
 ///   lookup at load (`linsight_plugin_v4` → `_v5`).
-pub const LINSIGHT_PLUGIN_ABI_VERSION: u32 = 5;
+/// * v6: the trait methods change from `extern "C"` to `extern "C-unwind"`
+///   so a panic inside a plugin's `init`/`sample` unwinds across the FFI
+///   boundary and is caught by the daemon (`host_init`/`host_sample`)
+///   instead of force-aborting at the boundary. The vtable signature
+///   differs, so v5 plugins fail the symbol lookup at load
+///   (`linsight_plugin_v5` → `_v6`).
+pub const LINSIGHT_PLUGIN_ABI_VERSION: u32 = 6;
 
 /// Re-export of [`linsight_core::STATIC_TAG`] — the canonical sensor tag
 /// marking a value as constant for the process lifetime. Defined in

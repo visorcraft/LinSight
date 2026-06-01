@@ -87,7 +87,7 @@ impl EchoPlugin {
 }
 
 impl LinsightPlugin for EchoPlugin {
-    extern "C" fn init(&self, ctx: &RPluginCtx) -> RInitResult {
+    extern "C-unwind" fn init(&self, ctx: &RPluginCtx) -> RInitResult {
         let host_ctx: PluginCtx = ctx.into();
         match self.init_inner(&host_ctx) {
             Ok(m) => SResult::Ok(<PluginManifest as Into<RPluginManifest>>::into(m)),
@@ -95,7 +95,7 @@ impl LinsightPlugin for EchoPlugin {
         }
     }
 
-    extern "C" fn sample(&self, sensor: RSensorId) -> RSampleResult {
+    extern "C-unwind" fn sample(&self, sensor: RSensorId) -> RSampleResult {
         let id: SensorId = sensor.into();
         match self.sample_inner(id) {
             Ok(r) => SResult::Ok(<Reading as Into<RReading>>::into(r)),

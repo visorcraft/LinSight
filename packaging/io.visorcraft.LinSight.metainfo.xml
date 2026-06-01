@@ -42,6 +42,15 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.7.0" date="2026-06-01">
+      <description>
+        <p>Security and robustness hardening: a panicking plugin is now
+        isolated from the daemon instead of crashing it (plugin ABI v6); the
+        remote tunnel's idle timeout no longer drops healthy long-lived
+        sessions; and webhook alert targets are validated against SSRF.
+        Out-of-tree plugins must be rebuilt against the v6 SDK.</p>
+      </description>
+    </release>
     <release version="1.6.0" date="2026-05-31">
       <description>
         <p>Storage page nests mount points inside their physical disk as

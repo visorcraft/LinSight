@@ -51,6 +51,42 @@ pub enum EvalOutcome {
     Panic,
 }
 
+/// Evaluate a rewritten alert expression **inline**, with no worker thread.
+///
+/// Used by the alert engine's per-tick [`AlertEngine::evaluate_rule`], which
+/// runs on the daemon's synchronous sample path. Spawning a thread and
+/// cloning the whole context for every rule on every tick (as
+/// [`eval_limited`] does) is exactly the hot-path churn the daemon avoids.
+/// Config rules come from a same-user `alerts.toml`, so they are trusted; the
+/// `MAX_EXPR_LEN` cap plus `catch_unwind` (effective under the daemon's
+/// `panic = "unwind"` build) bound the worst case without needing a timeout.
+/// This path therefore never yields [`EvalOutcome::Timeout`].
+pub(crate) fn eval_inline(rewritten_expr: &str, ctx: &HashMapContext) -> EvalOutcome {
+    if rewritten_expr.len() > MAX_EXPR_LEN {
+        return EvalOutcome::Err(format!(
+            "expression too long ({} bytes, limit {MAX_EXPR_LEN})",
+            rewritten_expr.len()
+        ));
+    }
+    match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        eval_boolean_with_context(rewritten_expr, ctx)
+    })) {
+        Ok(Ok(b)) => EvalOutcome::Ok(b),
+        Ok(Err(e)) => EvalOutcome::Err(e.to_string()),
+        Err(_) => EvalOutcome::Panic,
+    }
+}
+
+/// Evaluate a rewritten expression in a worker thread with a wall-clock
+/// timeout. Used only by the `TestAlertExpr` RPC, where the expression is
+/// supplied ad hoc by a client (not from trusted config) and the call is
+/// occasional, so a thread + timeout is affordable and guarantees a bounded
+/// response even for a pathological expression. The per-tick alert engine
+/// uses [`eval_inline`] instead, to stay off the daemon hot path.
+///
+/// Note: a timed-out evaluation leaves its worker thread running until the
+/// expression finishes on its own — Rust cannot cancel a thread — so the
+/// `MAX_EXPR_LEN` cap is what ultimately bounds how expensive that can get.
 pub(crate) fn eval_limited(rewritten_expr: &str, ctx: &HashMapContext) -> EvalOutcome {
     if rewritten_expr.len() > MAX_EXPR_LEN {
         return EvalOutcome::Err(format!(
@@ -219,7 +255,20 @@ impl AlertEngineHandle {
             }
         };
         let toml_str = toml::to_string(&config).map_err(|e| format!("serialize: {e}"))?;
-        std::fs::write(path, toml_str).map_err(|e| format!("write: {e}"))?;
+        // Create with owner-only perms in one step (mode applies on creation),
+        // so there is no window where a freshly-created file is world-readable
+        // before a separate chmod. The explicit set_permissions afterwards
+        // also tightens a pre-existing file that was created with looser perms.
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| format!("open: {e}"))?;
+        f.write_all(toml_str.as_bytes()).map_err(|e| format!("write: {e}"))?;
         std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
             .map_err(|e| format!("chmod: {e}"))?;
         Ok(())
@@ -293,7 +342,9 @@ impl AlertEngine {
             let _ = ctx.set_value(k.replace('.', "__"), Value::Float(*v));
         }
         let rewritten_expr = rule.expr.replace('.', "__");
-        let truthy = match eval_limited(&rewritten_expr, &ctx) {
+        // Inline (no per-tick worker thread) — see `eval_inline`. Trusted
+        // config + length cap + catch_unwind; never returns `Timeout`.
+        let truthy = match eval_inline(&rewritten_expr, &ctx) {
             EvalOutcome::Ok(b) => b,
             EvalOutcome::Err(e) => {
                 warn!(rule = %rule.name, error = %e, "alert expression failed to evaluate");
@@ -378,7 +429,12 @@ fn validate_webhook_url(raw: &str) -> Result<(), String> {
         .or_else(|| raw.strip_prefix("https://"))
         .ok_or_else(|| "webhook URL must start with http:// or https://".to_owned())?;
 
-    let host_port = rest.split('/').next().unwrap_or(rest);
+    let authority = rest.split('/').next().unwrap_or(rest);
+    // Strip any `userinfo@` prefix so it can't mask the real host from the
+    // checks below: `http://user@127.0.0.1/` would otherwise leave the host
+    // parsing as `user@127.0.0.1` (not an IP) and slip through, while the
+    // HTTP client connects to the real `127.0.0.1`.
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
     // Extract the bare host. A bracketed IPv6 literal (`[::1]:8080`) needs its
     // brackets stripped before parsing; a missing closing bracket is rejected
     // rather than panicking on an out-of-range slice.
@@ -395,15 +451,42 @@ fn validate_webhook_url(raw: &str) -> Result<(), String> {
         host_port.split(':').next().unwrap_or(host_port)
     };
 
-    if let Ok(ip) = host_inner.parse::<IpAddr>()
-        && is_restricted_ip(&ip)
-    {
+    if let Ok(ip) = host_inner.parse::<IpAddr>() {
+        if is_restricted_ip(&ip) {
+            return Err(format!(
+                "webhook URL host {ip} is a restricted address (loopback / link-local / private / unspecified)"
+            ));
+        }
+    } else if looks_like_numeric_host(host_inner) {
+        // A host that isn't a valid IpAddr literal but is all-numeric (or
+        // hex `0x...`) is almost certainly an obfuscated integer/octal IP
+        // encoding (e.g. `2130706433` or `0177.0.0.1`) that the resolver
+        // would still turn into an IP, bypassing the check above. Reject it.
         return Err(format!(
-            "webhook URL host {ip} is a restricted address (loopback / link-local / private / unspecified)"
+            "webhook URL host {host_inner:?} looks like an obfuscated numeric IP; \
+             use a hostname, dotted-decimal IPv4, or bracketed IPv6"
         ));
     }
 
     Ok(())
+}
+
+/// Heuristic: does this host (which already failed `IpAddr` parsing) look
+/// like an obfuscated numeric IP rather than a real DNS name? A legitimate
+/// hostname's rightmost label (the TLD) contains a non-digit, so an
+/// all-digit final label means a decimal/octal integer-IP encoding
+/// (`2130706433`, `0177.0.0.1`), and a `0x` prefix means a hex one.
+fn looks_like_numeric_host(host: &str) -> bool {
+    if host.is_empty() {
+        return false;
+    }
+    if host.len() >= 2 && (host.starts_with("0x") || host.starts_with("0X")) {
+        return true;
+    }
+    match host.rsplit('.').next() {
+        Some(last) => !last.is_empty() && last.bytes().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
 }
 
 fn is_restricted_ip(ip: &IpAddr) -> bool {
@@ -726,5 +809,26 @@ mod tests {
         assert!(validate_webhook_url("http://[::1").is_err());
         assert!(validate_webhook_url("http://[::1/hook").is_err());
         assert!(validate_webhook_url("http://[fe80::1:8080/hook").is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_userinfo_masking_restricted_ip() {
+        // userinfo must not hide a restricted host from the IP check.
+        assert!(validate_webhook_url("http://user@127.0.0.1/hook").is_err());
+        assert!(validate_webhook_url("http://user:pass@169.254.169.254/").is_err());
+        assert!(validate_webhook_url("http://user@[::1]/hook").is_err());
+        // ...but legitimate userinfo on a public host still passes.
+        assert!(validate_webhook_url("http://user@example.com/hook").is_ok());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_obfuscated_numeric_ip() {
+        // Integer / octal / hex IP encodings that getaddrinfo resolves to an
+        // IP but `IpAddr::parse` rejects must not slip through.
+        assert!(validate_webhook_url("http://2130706433/hook").is_err()); // 127.0.0.1
+        assert!(validate_webhook_url("http://0177.0.0.1/hook").is_err()); // octal
+        assert!(validate_webhook_url("http://0x7f000001/hook").is_err()); // hex
+        // A normal hostname (alphabetic TLD) is still allowed.
+        assert!(validate_webhook_url("https://hooks.example.com/x").is_ok());
     }
 }
