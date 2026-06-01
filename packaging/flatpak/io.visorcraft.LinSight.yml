@@ -35,6 +35,14 @@ modules:
   - name: linsight
     buildsystem: simple
     build-commands:
+      - mkdir -p "${CARGO_HOME}"
+      - |
+        cat > "${CARGO_HOME}/config.toml" <<EOF
+        [source.crates-io]
+        replace-with = "vendored-sources"
+        [source.vendored-sources]
+        directory = "$(pwd)/vendor"
+        EOF
       - cargo --offline build --workspace --release --locked
       - install -Dm755 target/release/linsight     /app/bin/linsight
       - install -Dm755 target/release/linsightd    /app/bin/linsightd
@@ -52,4 +60,4 @@ modules:
         # the vendor step automatically.
         path: vendor.tar.gz
         dest: vendor
-        strip-components: 0
+        strip-components: 1

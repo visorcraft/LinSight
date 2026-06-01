@@ -117,6 +117,7 @@ flatpak: flatpak-vendor
 
 # Vendor all cargo dependencies for the Flatpak sandboxed build.
 flatpak-vendor:
+    rm -rf packaging/flatpak/vendor
     cargo vendor --locked packaging/flatpak/vendor
     tar -C packaging/flatpak -cf packaging/flatpak/vendor.tar.gz vendor/
 
