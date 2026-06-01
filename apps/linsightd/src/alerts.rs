@@ -181,6 +181,8 @@ impl AlertEngineHandle {
         };
         let toml_str = toml::to_string(&config).map_err(|e| format!("serialize: {e}"))?;
         std::fs::write(path, toml_str).map_err(|e| format!("write: {e}"))?;
+        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .map_err(|e| format!("chmod: {e}"))?;
         Ok(())
     }
 }

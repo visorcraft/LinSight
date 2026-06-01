@@ -147,12 +147,12 @@ fn find_block_disk(sys_block: &Path, dev: &str) -> Option<String> {
 /// Map an NVMe namespace to its controller (`nvme0n1` -> `nvme0`); the nvme
 /// plugin keys its disk by controller name. Non-nvme names pass through.
 fn nvme_controller(disk: &str) -> String {
-    if let Some(rest) = disk.strip_prefix("nvme") {
-        if let Some(npos) = rest.find('n') {
-            let ctrl = &rest[..npos];
-            if !ctrl.is_empty() && ctrl.chars().all(|c| c.is_ascii_digit()) {
-                return format!("nvme{ctrl}");
-            }
+    if let Some(rest) = disk.strip_prefix("nvme")
+        && let Some(npos) = rest.find('n')
+    {
+        let ctrl = &rest[..npos];
+        if !ctrl.is_empty() && ctrl.chars().all(|c| c.is_ascii_digit()) {
+            return format!("nvme{ctrl}");
         }
     }
     disk.to_owned()

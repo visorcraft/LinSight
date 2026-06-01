@@ -64,6 +64,8 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     let conn = Connection::open(&db_path).with_context(|| format!("open {}", db_path.display()))?;
+    std::fs::set_permissions(&db_path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+        .with_context(|| format!("chmod {}", db_path.display()))?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
