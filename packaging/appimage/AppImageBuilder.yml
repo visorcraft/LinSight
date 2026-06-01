@@ -1,11 +1,24 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Minimal appimage-builder recipe. Run from the repo root after
-# `cargo build --workspace --release`.
+# appimage-builder recipe. Driven by `just appimage` /
+# `scripts/build_appimage.sh`, which injects the workspace version and
+# runs appimage-builder (the script: section below builds + stages AppDir).
 
 version: 1
-script: []  # filled by `just appimage`
+script:
+  - cargo build --workspace --release --locked
+  - install -Dm755 target/release/linsight     AppDir/usr/bin/linsight
+  - install -Dm755 target/release/linsightd    AppDir/usr/bin/linsightd
+  - install -Dm755 target/release/linsight-cli AppDir/usr/bin/linsight-cli
+  - install -Dm644 packaging/io.visorcraft.LinSight.desktop
+      AppDir/usr/share/applications/io.visorcraft.LinSight.desktop
+  - install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml
+      AppDir/usr/share/metainfo/io.visorcraft.LinSight.metainfo.xml
+  - install -Dm644 packaging/icons/scalable/apps/io.visorcraft.LinSight.svg
+      AppDir/usr/share/icons/hicolor/scalable/apps/io.visorcraft.LinSight.svg
+  - install -Dm644 packaging/icons/256x256/apps/io.visorcraft.LinSight.png
+      AppDir/usr/share/icons/hicolor/256x256/apps/io.visorcraft.LinSight.png
 
 AppDir:
   path: ./AppDir
@@ -13,7 +26,7 @@ AppDir:
     id: io.visorcraft.LinSight
     name: LinSight
     icon: io.visorcraft.LinSight
-    version: 0.3.0
+    version: 1.7.0
     exec: usr/bin/linsight
     exec_args: $@
   apt:

@@ -121,6 +121,11 @@ flatpak-vendor:
     cargo vendor --locked packaging/flatpak/vendor
     tar -C packaging/flatpak -cf packaging/flatpak/vendor.tar.gz vendor/
 
+# Build the AppImage via appimage-builder. Injects the workspace version
+# dynamically. Requires `appimage-builder` on PATH.
+appimage:
+    bash scripts/build_appimage.sh
+
 # Regenerate the bundled third-party credits markdown from Cargo.lock.
 # The Credits page in the GUI points users at this command; runs
 # `cargo about generate about.hbs > docs/credits-third-party.md`.
