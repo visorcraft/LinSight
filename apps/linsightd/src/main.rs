@@ -32,13 +32,21 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let socket = cli.socket.unwrap_or_else(default_socket_path);
+    let socket = match cli.socket {
+        Some(s) => s,
+        None => default_socket_path()?,
+    };
     runtime::run(socket)
 }
 
-fn default_socket_path() -> std::path::PathBuf {
-    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+fn default_socket_path() -> anyhow::Result<std::path::PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    runtime_dir.join("linsight.sock")
+        .map(|dir| dir.join("linsight.sock"))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "$XDG_RUNTIME_DIR is not set; refusing to fall back to /tmp. \
+                 Set XDG_RUNTIME_DIR or pass --socket explicitly."
+            )
+        })
 }
