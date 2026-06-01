@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -22,8 +23,18 @@ use crate::transport;
 
 pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     if socket.exists() {
-        std::fs::remove_file(&socket)
-            .with_context(|| format!("removing stale socket at {}", socket.display()))?;
+        match UnixStream::connect(&socket) {
+            Ok(_) => {
+                anyhow::bail!(
+                    "{} is already in use by a live listener; refusing to overwrite",
+                    socket.display(),
+                );
+            }
+            Err(_) => {
+                std::fs::remove_file(&socket)
+                    .with_context(|| format!("removing stale socket at {}", socket.display()))?;
+            }
+        }
     }
 
     let listener =
