@@ -28,6 +28,8 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
 
     let listener =
         UnixListener::bind(&socket).with_context(|| format!("binding {}", socket.display()))?;
+    std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+        .with_context(|| format!("setting permissions on {}", socket.display()))?;
     listener.set_nonblocking(true).context("setting listener non-blocking")?;
     info!(socket = %socket.display(), "linsightd listening");
 
