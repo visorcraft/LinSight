@@ -160,14 +160,14 @@ jobs:
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
       - name: Patch pkgver to the release version
-        run: sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+        run: sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD.local
       - name: Build pacman package
         run: |
           # shellcheck disable=SC2016
           runuser -u builder -- bash -lc '
             set -euo pipefail
             cd "$GITHUB_WORKSPACE/packaging/arch"
-            makepkg -sf --noconfirm --syncdeps
+            makepkg -sf --noconfirm --syncdeps -p PKGBUILD.local
           '
       - name: Stage artefact + sha256
         run: |
@@ -204,14 +204,14 @@ jobs:
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
       - name: Patch pkgver to the release version
-        run: sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch-v3/PKGBUILD
+        run: sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch-v3/PKGBUILD.local
       - name: Build pacman package
         run: |
           # shellcheck disable=SC2016
           runuser -u builder -- bash -lc '
             set -euo pipefail
             cd "$GITHUB_WORKSPACE/packaging/arch-v3"
-            makepkg -sf --noconfirm --syncdeps
+            makepkg -sf --noconfirm --syncdeps -p PKGBUILD.local
           '
       - name: Stage artefact + sha256
         run: |
