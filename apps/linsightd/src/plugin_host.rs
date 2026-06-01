@@ -279,6 +279,15 @@ impl PluginHost {
         library: Option<Library>,
         manifest: PluginManifest,
     ) {
+        if self.plugins.iter().any(|e| e.meta.plugin_id == manifest.plugin_id) {
+            warn!(
+                plugin_id = %manifest.plugin_id,
+                "plugin reports an ID already registered; skipping (possible ID spoofing)"
+            );
+            plugin.shutdown();
+            drop(library);
+            return;
+        }
         let idx = self.plugins.len();
         let meta = PluginMeta {
             plugin_id: manifest.plugin_id.clone(),
