@@ -808,33 +808,27 @@ fn handle_request(
                         result: Ok(ResponsePayload::AlertTestResult { is_true, error: None }),
                     })
                 }
-                EvalOutcome::Err(e) => {
-                    writer.lock().unwrap().write_server(&ServerMsg::Response {
-                        req_id,
-                        result: Ok(ResponsePayload::AlertTestResult {
-                            is_true: false,
-                            error: Some(format!("eval failed: {e}")),
-                        }),
-                    })
-                }
-                EvalOutcome::Timeout => {
-                    writer.lock().unwrap().write_server(&ServerMsg::Response {
-                        req_id,
-                        result: Ok(ResponsePayload::AlertTestResult {
-                            is_true: false,
-                            error: Some("expression evaluation timed out".into()),
-                        }),
-                    })
-                }
-                EvalOutcome::Panic => {
-                    writer.lock().unwrap().write_server(&ServerMsg::Response {
-                        req_id,
-                        result: Ok(ResponsePayload::AlertTestResult {
-                            is_true: false,
-                            error: Some("expression evaluation panicked".into()),
-                        }),
-                    })
-                }
+                EvalOutcome::Err(e) => writer.lock().unwrap().write_server(&ServerMsg::Response {
+                    req_id,
+                    result: Ok(ResponsePayload::AlertTestResult {
+                        is_true: false,
+                        error: Some(format!("eval failed: {e}")),
+                    }),
+                }),
+                EvalOutcome::Timeout => writer.lock().unwrap().write_server(&ServerMsg::Response {
+                    req_id,
+                    result: Ok(ResponsePayload::AlertTestResult {
+                        is_true: false,
+                        error: Some("expression evaluation timed out".into()),
+                    }),
+                }),
+                EvalOutcome::Panic => writer.lock().unwrap().write_server(&ServerMsg::Response {
+                    req_id,
+                    result: Ok(ResponsePayload::AlertTestResult {
+                        is_true: false,
+                        error: Some("expression evaluation panicked".into()),
+                    }),
+                }),
             }
         }
     }

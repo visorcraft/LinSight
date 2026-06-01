@@ -41,7 +41,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::server::WebPkiClientVerifier;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{CertificateError, ClientConfig, DigitallySignedStruct, RootCertStore, ServerConfig};
-use tokio::io::copy_bidirectional;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -61,9 +61,12 @@ const DEFAULT_MAX_CONNECTIONS: usize = 64;
 /// their bidirectional copy cleanly. Past this we abort outstanding tasks
 /// so we don't hang the process forever on a wedged connection.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
-/// Maximum time a single connection may sit idle before the tunnel closes it.
-/// Prevents slow-loris attacks where an authenticated client holds all
-/// connection slots by opening connections and going silent.
+/// Maximum time a single connection may sit idle (no bytes in *either*
+/// direction) before the tunnel closes it. This is a true idle timeout — the
+/// timer resets on every transfer (see [`copy_bidirectional_idle`]) — so an
+/// actively-streaming session (the daemon pushes samples continuously) is
+/// never cut off. Prevents slow-loris attacks where an authenticated client
+/// holds connection slots by opening connections and going silent.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Parser, Debug)]
@@ -518,16 +521,16 @@ async fn handle_server_conn(
         )
     })?;
 
-    match tokio::time::timeout(IDLE_TIMEOUT, copy_bidirectional(&mut tls, &mut unix)).await {
-        Ok(Ok((c2s, s2c))) => {
+    match copy_bidirectional_idle(&mut tls, &mut unix, IDLE_TIMEOUT).await {
+        Ok((c2s, s2c)) => {
             info!(%peer, bytes_c2s = c2s, bytes_s2c = s2c, "tunnel closed");
             Ok(())
         }
-        Ok(Err(e)) => Err(anyhow!(e)).context("bidirectional copy failed"),
-        Err(_) => {
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
             warn!(%peer, "idle timeout ({:?}), closing connection", IDLE_TIMEOUT);
             Ok(())
         }
+        Err(e) => Err(anyhow!(e)).context("bidirectional copy failed"),
     }
 }
 
@@ -665,17 +668,77 @@ async fn handle_client_conn(
         .with_context(|| format!("TLS handshake with {server_addr}"))?;
     info!(server = %server_addr, "TLS connected upstream");
 
-    match tokio::time::timeout(IDLE_TIMEOUT, copy_bidirectional(&mut unix, &mut tls)).await {
-        Ok(Ok((c2s, s2c))) => {
+    match copy_bidirectional_idle(&mut unix, &mut tls, IDLE_TIMEOUT).await {
+        Ok((c2s, s2c)) => {
             info!(bytes_c2s = c2s, bytes_s2c = s2c, "tunnel closed");
             Ok(())
         }
-        Ok(Err(e)) => Err(anyhow!(e)).context("bidirectional copy failed"),
-        Err(_) => {
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
             warn!(server = %server_addr, "idle timeout ({:?}), closing connection", IDLE_TIMEOUT);
             Ok(())
         }
+        Err(e) => Err(anyhow!(e)).context("bidirectional copy failed"),
     }
+}
+
+/// Copy bytes in both directions between `a` and `b` until both sides reach
+/// EOF, enforcing a true *idle* timeout: the connection is closed only if no
+/// bytes flow in either direction for `idle`. Every transfer resets the timer,
+/// so an actively-streaming connection (the daemon pushes samples
+/// continuously) is never cut off — unlike wrapping the whole copy in a single
+/// `tokio::time::timeout`, which caps total connection lifetime and would kill
+/// healthy long-lived sessions every `idle`. An idle expiry returns an error
+/// with `ErrorKind::TimedOut`.
+async fn copy_bidirectional_idle<A, B>(
+    a: &mut A,
+    b: &mut B,
+    idle: Duration,
+) -> std::io::Result<(u64, u64)>
+where
+    A: AsyncRead + AsyncWrite + Unpin,
+    B: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut a_to_b: u64 = 0;
+    let mut b_to_a: u64 = 0;
+    let mut buf_a = vec![0u8; 16 * 1024];
+    let mut buf_b = vec![0u8; 16 * 1024];
+    let mut a_done = false;
+    let mut b_done = false;
+
+    while !(a_done && b_done) {
+        tokio::select! {
+            r = tokio::time::timeout(idle, a.read(&mut buf_a)), if !a_done => match r {
+                Err(_) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "idle timeout"));
+                }
+                Ok(Ok(0)) => {
+                    a_done = true;
+                    let _ = b.shutdown().await;
+                }
+                Ok(Ok(n)) => {
+                    b.write_all(&buf_a[..n]).await?;
+                    a_to_b += n as u64;
+                }
+                Ok(Err(e)) => return Err(e),
+            },
+            r = tokio::time::timeout(idle, b.read(&mut buf_b)), if !b_done => match r {
+                Err(_) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "idle timeout"));
+                }
+                Ok(Ok(0)) => {
+                    b_done = true;
+                    let _ = a.shutdown().await;
+                }
+                Ok(Ok(n)) => {
+                    a.write_all(&buf_b[..n]).await?;
+                    b_to_a += n as u64;
+                }
+                Ok(Err(e)) => return Err(e),
+            },
+        }
+    }
+
+    Ok((a_to_b, b_to_a))
 }
 
 #[cfg(test)]
@@ -863,5 +926,50 @@ mod tests {
             vec!["*.example.com".into()],
         );
         assert!(verifier.verify_client_cert(&cert.leaf_der, &[], UnixTime::now()).is_err());
+    }
+
+    // ---- copy_bidirectional_idle ----
+
+    #[tokio::test]
+    async fn idle_copy_times_out_when_silent() {
+        // Both endpoints stay open but never send: the copy must give up after
+        // the idle period with a TimedOut error rather than blocking forever.
+        let (mut a, _client) = tokio::io::duplex(1024);
+        let (mut b, _server) = tokio::io::duplex(1024);
+        let err = copy_bidirectional_idle(&mut a, &mut b, Duration::from_millis(50))
+            .await
+            .expect_err("expected idle timeout");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[tokio::test]
+    async fn idle_copy_forwards_both_directions_then_eof() {
+        // Data must be forwarded both ways, and the copy returns cleanly once
+        // both endpoints close — proving the idle timer does NOT cap an active
+        // connection's lifetime.
+        let (mut a, mut client) = tokio::io::duplex(1024);
+        let (mut b, mut server) = tokio::io::duplex(1024);
+
+        let pump = tokio::spawn(async move {
+            copy_bidirectional_idle(&mut a, &mut b, Duration::from_secs(30)).await
+        });
+
+        client.write_all(b"ping").await.unwrap();
+        server.write_all(b"pong!!").await.unwrap();
+
+        let mut from_client = [0u8; 4];
+        server.read_exact(&mut from_client).await.unwrap();
+        assert_eq!(&from_client, b"ping");
+
+        let mut from_server = [0u8; 6];
+        client.read_exact(&mut from_server).await.unwrap();
+        assert_eq!(&from_server, b"pong!!");
+
+        drop(client);
+        drop(server);
+
+        let (a_to_b, b_to_a) = pump.await.unwrap().expect("clean completion");
+        assert_eq!(a_to_b, 4);
+        assert_eq!(b_to_a, 6);
     }
 }

@@ -64,6 +64,16 @@ pub fn spawn(
     Ok(shutdown)
 }
 
+/// Decrements the active-connection counter on drop so a slot is freed even
+/// if the worker thread panics.
+struct SlotGuard(Arc<AtomicUsize>);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 fn accept_loop(
     listener: TcpListener,
     scheduler: Arc<Mutex<Scheduler>>,
@@ -87,10 +97,13 @@ fn accept_loop(
                 let reg = Arc::clone(&registry);
                 let conn_active = Arc::clone(&active);
                 thread::spawn(move || {
+                    // Release the slot on every exit path, including a panic in
+                    // serve_one (e.g. a poisoned scheduler/registry lock), so a
+                    // slot is never leaked and the cap can't wedge permanently.
+                    let _slot = SlotGuard(conn_active);
                     if let Err(e) = serve_one(s, sched, reg) {
                         warn!(error = %e, "prom request failed");
                     }
-                    conn_active.fetch_sub(1, Ordering::Relaxed);
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

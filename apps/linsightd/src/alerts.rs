@@ -379,15 +379,21 @@ fn validate_webhook_url(raw: &str) -> Result<(), String> {
         .ok_or_else(|| "webhook URL must start with http:// or https://".to_owned())?;
 
     let host_port = rest.split('/').next().unwrap_or(rest);
-    let host = if host_port.starts_with('[') {
-        let end = host_port.find(']').unwrap_or(host_port.len());
-        &host_port[..end + 1]
+    // Extract the bare host. A bracketed IPv6 literal (`[::1]:8080`) needs its
+    // brackets stripped before parsing; a missing closing bracket is rejected
+    // rather than panicking on an out-of-range slice.
+    let host_inner = if let Some(after_lbracket) = host_port.strip_prefix('[') {
+        match after_lbracket.find(']') {
+            Some(end) => &after_lbracket[..end],
+            None => {
+                return Err(
+                    "webhook URL has a malformed IPv6 host literal (missing ']')".to_owned()
+                );
+            }
+        }
     } else {
         host_port.split(':').next().unwrap_or(host_port)
     };
-
-    let brackets = host.starts_with('[') && host.ends_with(']');
-    let host_inner = if brackets { &host[1..host.len() - 1] } else { host };
 
     if let Ok(ip) = host_inner.parse::<IpAddr>()
         && is_restricted_ip(&ip)
@@ -448,7 +454,11 @@ fn fire_webhook(name: &str, expr: &str, url: &str) -> Result<(), String> {
 }
 
 fn do_webhook_post(url: &str, body: &str) -> std::result::Result<(), std::io::Error> {
-    match ureq::post(url).header("Content-Type", "application/json").send(body) {
+    // Disable redirect following: `validate_webhook_url` only vets the initial
+    // URL, so a public endpoint that 3xx-redirects to a restricted address
+    // (e.g. http://169.254.169.254/) would otherwise bypass the SSRF check.
+    let agent: ureq::Agent = ureq::Agent::config_builder().max_redirects(0).build().into();
+    match agent.post(url).header("Content-Type", "application/json").send(body) {
         Ok(_) => Ok(()),
         Err(ureq::Error::StatusCode(code)) => {
             Err(std::io::Error::other(format!("webhook returned HTTP {code}")))
@@ -708,5 +718,13 @@ mod tests {
     fn validate_webhook_url_rejects_bad_scheme() {
         assert!(validate_webhook_url("ftp://example.com/hook").is_err());
         assert!(validate_webhook_url("gopher://example.com/hook").is_err());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_unclosed_ipv6_bracket() {
+        // A missing ']' must be rejected, not panic on an out-of-range slice.
+        assert!(validate_webhook_url("http://[::1").is_err());
+        assert!(validate_webhook_url("http://[::1/hook").is_err());
+        assert!(validate_webhook_url("http://[fe80::1:8080/hook").is_err());
     }
 }

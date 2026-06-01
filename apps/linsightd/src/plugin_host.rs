@@ -285,6 +285,11 @@ impl PluginHost {
                 "plugin reports an ID already registered; skipping (possible ID spoofing)"
             );
             plugin.shutdown();
+            // Drop the plugin (whose vtable lives inside `library`) BEFORE
+            // dlclose-ing the library, per PluginEntry's drop-order invariant.
+            // `drop(library)` first would unmap the `.so` while the Arc still
+            // holds a vtable pointer into it -> use-after-dlclose on Arc drop.
+            drop(plugin);
             drop(library);
             return;
         }

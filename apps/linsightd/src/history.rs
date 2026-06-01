@@ -81,6 +81,19 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
     )
     .context("init schema")?;
 
+    // WAL mode creates `-wal` / `-shm` sidecars holding the same sample data;
+    // they are born under the process umask, so tighten them to 0600 too. They
+    // exist once WAL is active and the schema writes above have run.
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = db_path.clone().into_os_string();
+        sidecar.push(suffix);
+        let sidecar = PathBuf::from(sidecar);
+        if sidecar.exists() {
+            std::fs::set_permissions(&sidecar, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+                .with_context(|| format!("chmod {}", sidecar.display()))?;
+        }
+    }
+
     let (tx, rx) = channel::<Sample>();
     let handle = thread::spawn(move || {
         if let Err(e) = run_writer(conn, rx) {
