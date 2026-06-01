@@ -332,7 +332,7 @@ jobs:
             git archive --format=tar.gz \
               --prefix="linsight-'"${VERSION}"'/" \
               --output="linsight-'"${VERSION}"'.tar.gz" \
-              -C "$GITHUB_WORKSPACE" HEAD
+              HEAD
             rpmbuild \
               --define "_topdir $(pwd)/_rpmbuild" \
               --define "_sourcedir $(pwd)" \
@@ -387,7 +387,7 @@ jobs:
             git archive --format=tar.gz \
               --prefix="linsight-'"${VERSION}"'/" \
               --output="linsight-'"${VERSION}"'.tar.gz" \
-              -C "$GITHUB_WORKSPACE" HEAD
+              HEAD
             rpmbuild \
               --define "_topdir $(pwd)/_rpmbuild" \
               --define "_sourcedir $(pwd)" \
@@ -407,6 +407,10 @@ jobs:
 
   appimage:
     name: AppImage
+    # Best-effort: appimage-builder (frozen at 1.1.0) is incompatible with
+    # Debian trixie's removed apt-key; failures here must not block the
+    # native-package release. See follow-up notes.
+    continue-on-error: true
     runs-on: ubuntu-24.04
     container:
       image: debian:trixie-slim
@@ -459,6 +463,10 @@ jobs:
 
   flatpak:
     name: Flatpak bundle
+    # Best-effort: the org.freedesktop rust-stable SDK-extension branch
+    # resolution against the KDE 6.10 runtime is still being sorted;
+    # failures here must not block the native-package release.
+    continue-on-error: true
     runs-on: ubuntu-24.04
     needs: [linux-tarball]
     env:
