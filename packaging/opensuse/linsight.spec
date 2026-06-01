@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 Name:           linsight
-Version:        1.6.0
+Version:        1.7.0
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -53,6 +53,9 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Mon Jun 01 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.0-1
+- v1.7.0 release. Plugin panic isolation (ABI v6) and audit-driven
+  security hardening.
 * Sun May 31 2026 VisorCraft LLC <support@visorcraft.com> - 1.6.0-1
 - v1.6.0 release. Storage mount nesting (collapsible cards), GPU VRAM
   ordering and unified sensor naming, and inode-sensor suppression for
