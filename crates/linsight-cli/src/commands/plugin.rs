@@ -230,6 +230,9 @@ pub fn ls() -> Result<()> {
 }
 
 pub fn remove(name: &str) -> Result<()> {
+    if name.contains('/') || name.contains("..") {
+        anyhow::bail!("invalid plugin name {name:?}: must not contain '/' or '..'");
+    }
     let dir = user_plugin_dir()?;
     // Accept either bare name (mylib) or filename (libmylib.so).
     let candidates =
