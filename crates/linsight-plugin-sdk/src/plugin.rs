@@ -31,6 +31,10 @@ pub enum PluginError {
     /// through `Io` / `Parse` / `Unsupported` / `Transient` instead.
     #[error("manifest: {0}")]
     Manifest(String),
+    /// Plugin code panicked during `init` or `sample`. Caught by
+    /// `catch_unwind` so the daemon stays alive.
+    #[error("plugin panicked: {0}")]
+    Panic(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +73,7 @@ impl From<PluginError> for RPluginError {
             // with the message preserved, so the operator still sees
             // the diagnostic text.
             PluginError::Manifest(s) => (RPluginErrorKind::Io, format!("manifest: {s}")),
+            PluginError::Panic(s) => (RPluginErrorKind::Io, format!("plugin panicked: {s}")),
         };
         Self { kind, message: message.as_str().into() }
     }
@@ -224,7 +229,8 @@ pub fn host_init(
     ctx: &PluginCtx,
 ) -> Result<PluginManifest, PluginError> {
     let rctx: RPluginCtx = ctx.into();
-    let r = plugin.init(&rctx);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.init(&rctx)))
+        .map_err(|_| PluginError::Panic("plugin init panicked".into()))?;
     let std_res: core::result::Result<RPluginManifest, RPluginError> = r.into();
     let r_manifest = std_res.map_err(PluginError::from)?;
     // Validate every sensor ID's raw FFI string BEFORE the From-conversion
@@ -258,7 +264,8 @@ pub fn host_init(
 #[must_use = "host_sample returns the sampled Reading; ignoring it drops the value the plugin produced"]
 pub fn host_sample(plugin: &dyn LinsightPlugin, id: SensorId) -> Result<Reading, PluginError> {
     let rid: RSensorId = id.into();
-    let r = plugin.sample(rid);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.sample(rid)))
+        .map_err(|_| PluginError::Panic("plugin sample panicked".into()))?;
     let std_res: core::result::Result<RReading, RPluginError> = r.into();
     match std_res {
         Ok(r) => Ok(r.into()),
