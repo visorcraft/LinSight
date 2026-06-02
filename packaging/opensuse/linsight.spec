@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
+# Rust binaries have no usable separable debug info for openSUSE's debug
+# extraction; disable the debug subpackages to avoid shipping empty ones.
+%global debug_package %{nil}
+
 Name:           linsight
 Version:        1.7.0
 Release:        0

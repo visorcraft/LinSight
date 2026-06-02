@@ -29,7 +29,7 @@ makedepends=('rust' 'cargo' 'qt6-tools' 'clang' 'mold' 'sccache')
 optdepends=('cuda: NVML diagnostics via nvidia-smi')
 # Disable makepkg's LTO: its -flto corrupts the `ring` crate's asm objects
 # (undefined ring_core_* at link). Cargo's Rust-side lto="fat" still applies.
-options=('!lto')
+options=('!lto' '!debug')
 
 # No source=(): build straight from the checkout two levels above this file.
 # $startdir is the directory holding this PKGBUILD; it is reliably set during

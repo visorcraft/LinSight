@@ -55,8 +55,10 @@ modules:
           /app/share/applications/io.visorcraft.LinSight.desktop
       - install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml
           /app/share/metainfo/io.visorcraft.LinSight.metainfo.xml
-      - install -Dm644 packaging/icons/scalable/apps/io.visorcraft.LinSight.svg
-          /app/share/icons/hicolor/scalable/apps/io.visorcraft.LinSight.svg
+      - install -Dm644 packaging/icons/64x64/apps/io.visorcraft.LinSight.png
+          /app/share/icons/hicolor/64x64/apps/io.visorcraft.LinSight.png
+      - install -Dm644 packaging/icons/128x128/apps/io.visorcraft.LinSight.png
+          /app/share/icons/hicolor/128x128/apps/io.visorcraft.LinSight.png
       - install -Dm644 packaging/icons/256x256/apps/io.visorcraft.LinSight.png
           /app/share/icons/hicolor/256x256/apps/io.visorcraft.LinSight.png
     sources:

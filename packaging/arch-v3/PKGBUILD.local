@@ -24,7 +24,7 @@ optdepends=('cuda: NVML diagnostics via nvidia-smi')
 conflicts=('linsight')
 provides=('linsight')
 # See ../arch/PKGBUILD: makepkg's -flto breaks the `ring` crate's asm link.
-options=('!lto')
+options=('!lto' '!debug')
 
 _srcdir="${startdir}/../.."
 _targetdir="${startdir}/../../target-v3"
