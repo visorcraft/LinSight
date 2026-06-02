@@ -9,6 +9,15 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.7.2] — 2026-06-02
+
+- **Third-party notices renamed + regenerated.** `docs/credits-third-party.md`
+  is now `docs/third-party-notices.md`, regenerated via `cargo-about` against
+  the current dependency set (343 crates); the in-app Credits / Licenses pages
+  and every reference were updated to match.
+- **Translation catalogs refreshed** (`just i18n-extract`) for the updated
+  About-page string.
+
 ## [1.7.1] — 2026-06-02
 
 - **GitHub Actions CI + release automation.** A lean per-push CI gate

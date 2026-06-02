@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Maintainer: VisorCraft <support@visorcraft.com>
 pkgname=linsight
-pkgver=1.7.1
+pkgver=1.7.2
 pkgrel=1
 pkgdesc='Fast, beautiful Linux system-monitoring dashboard with multi-GPU support'
 arch=('x86_64')

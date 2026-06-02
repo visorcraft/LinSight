@@ -70,7 +70,7 @@ pub mod ffi {
         fn layout_path(self: Pin<&mut OverviewModel>) -> QString;
 
         /// Returns the bundled-at-build-time third-party credits markdown
-        /// (`docs/credits-third-party.md`). Used by the Credits page —
+        /// (`docs/third-party-notices.md`). Used by the Credits page —
         /// QML's `XMLHttpRequest` against `qrc:/` URLs does not reliably
         /// reach the `DONE` ready-state on local resources, so we plumb
         /// the same content through a `Q_INVOKABLE` instead.
@@ -519,13 +519,13 @@ impl ffi::OverviewModel {
     }
 }
 
-const BUNDLED_CREDITS: &str = include_str!("../../../../docs/credits-third-party.md");
+const BUNDLED_CREDITS: &str = include_str!("../../../../docs/third-party-notices.md");
 const BUNDLED_GPL: &str = include_str!("../../../../LICENSE");
 const BUNDLED_NARRATIVE_CREDITS: &str = include_str!("../../../../CREDITS.md");
 
 // --- cargo-about parser ----------------------------------------
 //
-// `docs/credits-third-party.md` follows cargo-about's standard
+// `docs/third-party-notices.md` follows cargo-about's standard
 // layout: an outer "## License Texts" section, with one "###
 // <Human-readable license name>" subsection per license group, each
 // containing a "Used by:" markdown list of `- [`crate version`](url)`

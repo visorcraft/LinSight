@@ -42,6 +42,13 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.7.2" date="2026-06-02">
+      <description>
+        <p>Maintenance update: the bundled third-party license notices were
+        renamed to third-party-notices.md and regenerated against the current
+        dependency set, and the translation catalogs were refreshed.</p>
+      </description>
+    </release>
     <release version="1.7.1" date="2026-06-02">
       <description>
         <p>Packaging and release-automation update: continuous integration

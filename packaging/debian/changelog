@@ -1,3 +1,9 @@
+linsight (1.7.2-1) unstable; urgency=medium
+
+  * v1.7.2 release. Rename bundled third-party credits to third-party-notices.md and regenerate; refresh translation catalogs.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 13:00:00 +0000
+
 linsight (1.7.1-1) unstable; urgency=medium
 
   * v1.7.1 release. GitHub Actions CI + multi-format release automation; packaging fixes and launcher icons.

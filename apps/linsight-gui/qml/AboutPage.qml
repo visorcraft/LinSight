@@ -333,7 +333,7 @@ Kirigami.ScrollablePage {
             Layout.rightMargin: app.tokens.spaceXL
             Layout.topMargin: app.tokens.spaceL
             title: qsTr("Licenses & Credits")
-            subtitle: qsTr("Every direct + transitive crate, with version and license expression, is documented in docs/credits-third-party.md.")
+            subtitle: qsTr("Every direct + transitive crate, with version and license expression, is documented in docs/third-party-notices.md.")
 
             RowLayout {
                 Layout.fillWidth: true

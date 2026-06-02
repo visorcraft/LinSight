@@ -12,7 +12,7 @@ fn main() {
     println!("cargo:rerun-if-changed=i18n/linsight_ja.qm");
     println!("cargo:rerun-if-changed=../../LICENSE");
     println!("cargo:rerun-if-changed=../../CREDITS.md");
-    println!("cargo:rerun-if-changed=../../docs/credits-third-party.md");
+    println!("cargo:rerun-if-changed=../../docs/third-party-notices.md");
     println!("cargo:rerun-if-changed=resources/linsight.svg");
     println!("cargo:rerun-if-changed=resources/linsight-32.png");
     println!("cargo:rerun-if-changed=resources/linsight-64.png");
@@ -63,8 +63,8 @@ fn main() {
                 // About / Licenses / Credits pages can XHR them at runtime.
                 .file(QResourceFile::new("../../LICENSE").alias("docs/LICENSE"))
                 .file(
-                    QResourceFile::new("../../docs/credits-third-party.md")
-                        .alias("docs/credits-third-party.md"),
+                    QResourceFile::new("../../docs/third-party-notices.md")
+                        .alias("docs/third-party-notices.md"),
                 )
                 // Brand icon set. Main.qml's sidebar header references
                 // `resources/linsight-128.png`; the rest are included for

@@ -126,12 +126,13 @@ flatpak-vendor:
 appimage:
     bash scripts/build_appimage.sh
 
-# Regenerate the bundled third-party credits markdown from Cargo.lock.
+# Regenerate the bundled third-party notices markdown from Cargo.lock.
 # The Credits page in the GUI points users at this command; runs
-# `cargo about generate about.hbs > docs/credits-third-party.md`.
-# Requires `cargo install cargo-about`.
+# `cargo about generate about.hbs` and normalizes to LF (cargo-about
+# emits CRLF, which the repo stores as LF). Requires `cargo install
+# cargo-about`.
 credits:
-    cargo about generate about.hbs > docs/credits-third-party.md
+    cargo about generate about.hbs | sed 's/\r$//' > docs/third-party-notices.md
 
 # Full pre-release gate.
 preflight: ci deny audit

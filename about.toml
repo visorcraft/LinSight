@@ -5,7 +5,7 @@
 # changes here should land in both files in the same change.
 #
 # Generate the supplement: `just credits`.
-# Output: docs/credits-third-party.md (auto-regenerated, do not edit).
+# Output: docs/third-party-notices.md (auto-regenerated, do not edit).
 
 accepted = [
     "0BSD",

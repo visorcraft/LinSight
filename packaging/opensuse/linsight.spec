@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.7.1
+Version:        1.7.2
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,10 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.2-1
+- v1.7.2 release. Rename the bundled third-party credits to
+  docs/third-party-notices.md and regenerate against the current dependency
+  set; refresh translation catalogs.
 * Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.1-1
 - v1.7.1 release. GitHub Actions CI + multi-format release automation;
   packaging fixes and launcher icons in the RPM/DEB packages.

@@ -44,48 +44,245 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="64"/>
+        <location filename="../qml/AboutPage.qml" line="69"/>
         <source>About</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="70"/>
+        <location filename="../qml/AboutPage.qml" line="75"/>
         <source>Built on Rust + Qt 6 / Kirigami via cxx-qt.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="135"/>
+        <location filename="../qml/AboutPage.qml" line="140"/>
         <source>A Linux system-monitoring dashboard with multi-GPU support and runtime plugins.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="155"/>
+        <location filename="../qml/AboutPage.qml" line="161"/>
         <source>v%1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="172"/>
-        <source>GPL-3.0-only · VisorCraft</source>
+        <location filename="../qml/AboutPage.qml" line="179"/>
+        <source>GPL v3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="249"/>
+        <location filename="../qml/AboutPage.qml" line="197"/>
+        <source>Linux · Qt 6</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="301"/>
+        <source>LinSight is built for real-time system monitoring.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="309"/>
+        <source>Watch CPU, memory, GPU, NVMe, and network sensors live through a Rust daemon with a Qt/Kirigami shell.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="319"/>
+        <source>Visit LinSight</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="335"/>
+        <source>Licenses &amp; Credits</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="336"/>
+        <source>Every direct + transitive crate, with version and license expression, is documented in docs/third-party-notices.md.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="365"/>
+        <source>Built by &lt;b&gt;VisorCraft&lt;/b&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="365"/>
+        <source>Powered by Rust, Qt 6, and Kirigami</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AboutPage.qml" line="344"/>
         <source>Credits</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="244"/>
+        <location filename="../qml/AboutPage.qml" line="350"/>
         <source>Licenses</source>
         <translation type="unfinished"></translation>
     </message>
+</context>
+<context>
+    <name>AlertsPage</name>
     <message>
-        <location filename="../qml/AboutPage.qml" line="256"/>
-        <source>github.com/visorcraft/linsight</source>
+        <location filename="../qml/AlertsPage.qml" line="14"/>
+        <source>Alerts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AboutPage.qml" line="263"/>
-        <source>Open project repository on GitHub</source>
+        <location filename="../qml/AlertsPage.qml" line="17"/>
+        <location filename="../qml/AlertsPage.qml" line="78"/>
+        <source>Alert Rules</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="85"/>
+        <source>Set conditions that trigger notifications</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="93"/>
+        <source>Add Rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="98"/>
+        <source>Reload</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="116"/>
+        <source>No alert rules configured.
+Add one using the button above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="206"/>
+        <source>Notify:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="224"/>
+        <location filename="../qml/AlertsPage.qml" line="440"/>
+        <source>Test</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="236"/>
+        <source>Edit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="247"/>
+        <source>Delete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="261"/>
+        <location filename="../qml/AlertsPage.qml" line="272"/>
+        <source>Add Alert Rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="282"/>
+        <source>Edit Rule: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="290"/>
+        <source>Name and expression are required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="299"/>
+        <source>Saving rule &apos;%1&apos;...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="308"/>
+        <source>Rule Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="315"/>
+        <source>e.g. high-cpu</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="319"/>
+        <source>Expression</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="326"/>
+        <source>e.g. cpu.util &gt; 90 &amp;&amp; mem.used_bytes &gt; 8e9</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="335"/>
+        <source>Insert:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="411"/>
+        <source>Sensor:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="460"/>
+        <source>Expression Syntax</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="470"/>
+        <source>Sensor IDs are variables (e.g. &lt;b&gt;cpu.util&lt;/b&gt;, &lt;b&gt;mem.used_bytes&lt;/b&gt;).&lt;br&gt;Compare: &lt;b&gt;&gt;&lt;/b&gt; &lt;b&gt;&lt;&lt;/b&gt; &lt;b&gt;&gt;=&lt;/b&gt; &lt;b&gt;&lt;=&lt;/b&gt; &lt;b&gt;==&lt;/b&gt; &lt;b&gt;!=&lt;/b&gt;&lt;br&gt;Combine: &lt;b&gt;&amp;&amp;&lt;/b&gt; (AND) &lt;b&gt;||&lt;/b&gt; (OR) &lt;b&gt;!&lt;/b&gt; (NOT)&lt;br&gt;Group: &lt;b&gt;( )&lt;/b&gt; parentheses for precedence&lt;br&gt;&lt;br&gt;Examples:&lt;br&gt;  cpu.util &gt; 90&lt;br&gt;  cpu.util &gt; 80 &amp;&amp; mem.used_bytes &gt; 8e9&lt;br&gt;  (xe.gpu0.temp_c &gt; 85 || xe.gpu1.temp_c &gt; 85)&lt;br&gt;  !(cpu.util &gt; 10) &amp;&amp; system.load_1m &gt; 4</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="490"/>
+        <source>Hide Syntax Help</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="490"/>
+        <source>Show Syntax Help</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="495"/>
+        <source>Notification Targets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="502"/>
+        <source>desktop, webhook:https://...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="506"/>
+        <source>Comma-separated. Supported: desktop, exec:/path, webhook:url</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="517"/>
+        <source>Test Expression</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="526"/>
+        <source>Waiting for result...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="535"/>
+        <source>Delete Rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="542"/>
+        <source>Delete rule &apos;%1&apos;?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="554"/>
+        <source>Deleted rule &apos;%1&apos;</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -93,7 +290,7 @@
     <name>CanvasEditorPage</name>
     <message>
         <location filename="../qml/CanvasEditorPage.qml" line="24"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="405"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="416"/>
         <source>Editor</source>
         <translation type="unfinished"></translation>
     </message>
@@ -108,199 +305,269 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="181"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="198"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="190"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="207"/>
         <source>CPU Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="182"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="199"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="191"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="208"/>
         <source>Memory Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="183"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="200"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="192"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="209"/>
         <source>GPU Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="184"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="201"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="193"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="210"/>
         <source>Storage Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="185"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="202"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="194"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="211"/>
         <source>Network Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="186"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="205"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="195"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="214"/>
         <source>Battery Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="187"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="203"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="196"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="212"/>
         <source>Thermal Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="188"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="204"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="197"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="213"/>
         <source>Power Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="189"/>
-        <location filename="../qml/CanvasEditorPage.qml" line="206"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="198"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="215"/>
         <source>Other Sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="295"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="304"/>
         <source>%1 is already on the canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="349"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="360"/>
         <source>Load failed: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="404"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="415"/>
         <source>Editor — %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="412"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="423"/>
         <source>Drag sensors from the left rail onto the canvas. Resize from the bottom-right corner.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="421"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="432"/>
         <source>Dashboard actions</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="430"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="441"/>
         <source>Rename…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="435"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="446"/>
         <source>Duplicate</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="443"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="454"/>
         <source>Duplicate failed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="448"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="459"/>
         <source>Delete…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="462"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="473"/>
         <source>Rename Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="479"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="490"/>
         <source>Rename failed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="505"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="516"/>
         <source>Delete Dashboard?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="514"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="525"/>
         <source>Delete failed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="536"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="547"/>
         <source>&quot;%1&quot; will be permanently deleted from disk.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="566"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="577"/>
         <source>SENSORS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="705"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="719"/>
         <source>Drop sensors here to build your dashboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="730"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="744"/>
         <source>LAYOUT</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="739"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="753"/>
         <source>Save</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="752"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="766"/>
         <source>Save failed.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="754"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="768"/>
         <source>Saved %1 (%2 tile(s))</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="762"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="776"/>
         <source>Reload</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="766"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="780"/>
         <source>Reloaded %1 tile(s) from %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="773"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="787"/>
         <source>Clear</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="780"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="794"/>
         <source>STATUS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CanvasEditorPage.qml" line="800"/>
+        <location filename="../qml/CanvasEditorPage.qml" line="814"/>
         <source>%1 tile(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1279"/>
+        <source>Tile Options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1286"/>
+        <source>Label Override</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1294"/>
+        <source>Custom display name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1298"/>
+        <source>Text Accent Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1306"/>
+        <source>e.g. #4fc3f7</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1310"/>
+        <source>Visibility Condition</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1318"/>
+        <source>e.g. cpu.util &gt; 50</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1323"/>
+        <source>Enable Threshold Colors</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1327"/>
+        <source>OK Threshold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1336"/>
+        <source>e.g. 50</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1341"/>
+        <source>Warning Threshold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1350"/>
+        <source>e.g. 80</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1360"/>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/CanvasEditorPage.qml" line="1365"/>
+        <source>Cancel</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>CategoryPage</name>
     <message>
-        <location filename="../qml/CategoryPage.qml" line="86"/>
+        <location filename="../qml/CategoryPage.qml" line="289"/>
         <source>%1 sensor</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CategoryPage.qml" line="87"/>
+        <location filename="../qml/CategoryPage.qml" line="290"/>
         <source>%1 sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CategoryPage.qml" line="127"/>
+        <location filename="../qml/CategoryPage.qml" line="388"/>
         <source>No %1 sensors detected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -407,24 +674,83 @@
 <context>
     <name>DashboardViewPage</name>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="16"/>
-        <location filename="../qml/DashboardViewPage.qml" line="109"/>
+        <location filename="../qml/DashboardViewPage.qml" line="366"/>
         <source>Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="116"/>
-        <source>%1 tile(s) — open in Editor to modify.</source>
+        <location filename="../qml/DashboardViewPage.qml" line="19"/>
+        <source>Dashboards</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="124"/>
+        <location filename="../qml/DashboardViewPage.qml" line="89"/>
+        <source>Dashboard layout copied to clipboard — paste into a file to share.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="99"/>
+        <source>Invalid dashboard file: missing name or layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="115"/>
+        <source>Imported dashboard: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="118"/>
+        <source>Failed to import: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="166"/>
+        <source>Import Dashboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="194"/>
+        <source>Your Dashboards</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="208"/>
+        <source>Import</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="213"/>
+        <source>New Dashboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="373"/>
+        <source>%1 tile(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="381"/>
+        <source>Export</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="386"/>
         <source>Edit</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="141"/>
+        <location filename="../qml/DashboardViewPage.qml" line="391"/>
+        <source>Gallery</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="408"/>
         <source>This dashboard is empty. Open it in the Editor to add sensors.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/DashboardViewPage.qml" line="467"/>
+        <source> (hidden)</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -446,42 +772,42 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="70"/>
+        <location filename="../qml/HardwarePage.qml" line="71"/>
         <source>%1 device</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="71"/>
+        <location filename="../qml/HardwarePage.qml" line="72"/>
         <source>%1 devices</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="97"/>
+        <location filename="../qml/HardwarePage.qml" line="99"/>
         <source>Detecting hardware…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="98"/>
+        <location filename="../qml/HardwarePage.qml" line="100"/>
         <source>No hardware detected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="138"/>
+        <location filename="../qml/HardwarePage.qml" line="141"/>
         <source>Unknown device</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="171"/>
+        <location filename="../qml/HardwarePage.qml" line="175"/>
         <source>sensors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="182"/>
+        <location filename="../qml/HardwarePage.qml" line="187"/>
         <source>Nickname:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HardwarePage.qml" line="189"/>
+        <location filename="../qml/HardwarePage.qml" line="195"/>
         <source>(none)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -603,85 +929,90 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="306"/>
+        <location filename="../qml/Main.qml" line="313"/>
         <source>Open Sidebar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="307"/>
+        <location filename="../qml/Main.qml" line="314"/>
         <source>Close Sidebar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="343"/>
+        <location filename="../qml/Main.qml" line="350"/>
         <source>Multi-GPU system insight</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="358"/>
+        <location filename="../qml/Main.qml" line="365"/>
         <source>WORKSPACE</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="367"/>
+        <location filename="../qml/Main.qml" line="374"/>
         <source>Overview</source>
         <translation type="unfinished">概要</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="375"/>
-        <location filename="../qml/Main.qml" line="580"/>
+        <location filename="../qml/Main.qml" line="382"/>
+        <location filename="../qml/Main.qml" line="595"/>
         <source>GPUs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="383"/>
-        <location filename="../qml/Main.qml" line="581"/>
+        <location filename="../qml/Main.qml" line="390"/>
+        <location filename="../qml/Main.qml" line="596"/>
         <source>Storage</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="391"/>
-        <location filename="../qml/Main.qml" line="582"/>
+        <location filename="../qml/Main.qml" line="398"/>
+        <location filename="../qml/Main.qml" line="597"/>
         <source>Network</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="399"/>
+        <location filename="../qml/Main.qml" line="406"/>
         <source>Hardware</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="412"/>
+        <location filename="../qml/Main.qml" line="419"/>
         <source>New Window</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="431"/>
+        <location filename="../qml/Main.qml" line="438"/>
         <source>DASHBOARDS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="471"/>
+        <location filename="../qml/Main.qml" line="478"/>
+        <source>Alerts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="486"/>
         <source>New Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="485"/>
+        <location filename="../qml/Main.qml" line="500"/>
         <source>SYSTEM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="494"/>
+        <location filename="../qml/Main.qml" line="509"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="502"/>
+        <location filename="../qml/Main.qml" line="517"/>
         <source>About</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="573"/>
+        <location filename="../qml/Main.qml" line="588"/>
         <source>Disconnected from linsightd — values shown are last known.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -719,32 +1050,32 @@
     <message>
         <location filename="../qml/OverviewPage.qml" line="11"/>
         <location filename="../qml/OverviewPage.qml" line="14"/>
-        <location filename="../qml/OverviewPage.qml" line="50"/>
+        <location filename="../qml/OverviewPage.qml" line="71"/>
         <source>Overview</source>
         <translation>概要</translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="56"/>
+        <location filename="../qml/OverviewPage.qml" line="77"/>
         <source>Live CPU and memory at a glance.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="77"/>
+        <location filename="../qml/OverviewPage.qml" line="98"/>
         <source>CPU</source>
         <translation>CPU</translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="83"/>
+        <location filename="../qml/OverviewPage.qml" line="105"/>
         <source>Memory</source>
         <translation>メモリ</translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="94"/>
+        <location filename="../qml/OverviewPage.qml" line="113"/>
         <source>CPU temperature</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="100"/>
+        <location filename="../qml/OverviewPage.qml" line="120"/>
         <source>CPU frequency</source>
         <translation type="unfinished"></translation>
     </message>
@@ -767,98 +1098,142 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="83"/>
+        <location filename="../qml/SettingsPage.qml" line="82"/>
         <source>Re-read preferences.json from disk.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="110"/>
+        <location filename="../qml/SettingsPage.qml" line="109"/>
         <source>Start page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="111"/>
+        <location filename="../qml/SettingsPage.qml" line="110"/>
         <source>Which page LinSight opens on launch. A deleted dashboard falls back to Overview automatically.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="116"/>
+        <location filename="../qml/SettingsPage.qml" line="115"/>
         <source>Sample interval</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="117"/>
+        <location filename="../qml/SettingsPage.qml" line="116"/>
         <source>How often the daemon checks for new sensor data. Lower values feel smoother; higher values reduce daemon CPU usage. The setting is per-client — changing it only affects this LinSight window.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="172"/>
+        <location filename="../qml/SettingsPage.qml" line="171"/>
         <source>Default is 150 ms. The daemon clamps to %1–%2 ms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="180"/>
+        <location filename="../qml/SettingsPage.qml" line="179"/>
         <source>Always-on mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="181"/>
+        <location filename="../qml/SettingsPage.qml" line="180"/>
         <source>History, alerts, and Prometheus continue running after the GUI closes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="185"/>
+        <location filename="../qml/SettingsPage.qml" line="184"/>
         <source>Today these subsystems are enabled via environment variables and the systemd user unit at &lt;code&gt;packaging/systemd/linsight.service&lt;/code&gt;. Edit + &lt;code&gt;systemctl --user daemon-reload &amp;&amp; systemctl --user restart linsight&lt;/code&gt; to flip them.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="193"/>
+        <location filename="../qml/SettingsPage.qml" line="192"/>
         <source>SQLite history (~/.local/share/linsight/history.db)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="194"/>
+        <location filename="../qml/SettingsPage.qml" line="193"/>
         <source>Alert rules (~/.config/linsight/alerts.toml)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="195"/>
+        <location filename="../qml/SettingsPage.qml" line="194"/>
         <source>Prometheus exporter (default 127.0.0.1:9777)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="218"/>
+        <location filename="../qml/SettingsPage.qml" line="217"/>
         <source>enabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="219"/>
+        <location filename="../qml/SettingsPage.qml" line="218"/>
         <source>disabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="238"/>
+        <location filename="../qml/SettingsPage.qml" line="237"/>
         <source>Command-line tools</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="239"/>
+        <location filename="../qml/SettingsPage.qml" line="238"/>
         <source>The CLI and daemon ship alongside the GUI.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="243"/>
+        <location filename="../qml/SettingsPage.qml" line="242"/>
         <source>&lt;code&gt;linsight-cli list&lt;/code&gt; shows every sensor the daemon advertises.&lt;br&gt;&lt;code&gt;linsight-cli read &amp;lt;sensor&amp;gt; --count N&lt;/code&gt; streams live values.&lt;br&gt;&lt;code&gt;linsight-cli plugin new &amp;lt;name&amp;gt;&lt;/code&gt; scaffolds a third-party plugin crate.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="104"/>
+        <location filename="../qml/SettingsPage.qml" line="103"/>
         <source>Appearance</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="105"/>
+        <location filename="../qml/SettingsPage.qml" line="104"/>
         <source>Pick a built-in palette or follow your KDE Plasma color scheme.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>StartPagePicker</name>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="25"/>
+        <source>Overview</source>
+        <translation type="unfinished">概要</translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="26"/>
+        <source>GPUs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="27"/>
+        <source>Storage</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="28"/>
+        <source>Network</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="29"/>
+        <source>Hardware</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="30"/>
+        <location filename="../qml/StartPagePicker.qml" line="120"/>
+        <source>Dashboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="79"/>
+        <source>Open on launch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/StartPagePicker.qml" line="146"/>
+        <source>No dashboards yet. Use the sidebar&apos;s New Dashboard entry to create one.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

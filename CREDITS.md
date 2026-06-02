@@ -26,7 +26,7 @@ LinSight pulls in the following directly-used crates from crates.io. The
 full machine-generated transitive supplement — every crate, its exact
 version, and the full text of every distinct license — lives in the
 in-app **Licenses → Third-party** page and is mirrored at
-[`docs/credits-third-party.md`](docs/credits-third-party.md). Regenerate
+[`docs/third-party-notices.md`](docs/third-party-notices.md). Regenerate
 it via `just credits` (which runs `cargo about` over `Cargo.lock`).
 `cargo deny check` (configured in `deny.toml`) enforces license
 compatibility on every CI run.

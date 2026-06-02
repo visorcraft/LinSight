@@ -169,7 +169,7 @@ Optional preflight (install with
 
 ```bash
 just preflight       # ci + deny + audit
-just credits         # cargo about generate → docs/credits-third-party.md
+just credits         # cargo about generate → docs/third-party-notices.md
 ```
 
 ---
@@ -265,11 +265,11 @@ Bugs / feature requests:
 - [Remote tunnel](apps/linsight-tunnel/README.md)
 - [Security](docs/security.md)
 - [Changelog](CHANGELOG.md)
-- [Third-party credits](docs/credits-third-party.md)
+- [Third-party credits](docs/third-party-notices.md)
 
 ---
 
 ## License
 
 GPL-3.0-only. See [`LICENSE`](LICENSE). Third-party license credits live
-in [`docs/credits-third-party.md`](docs/credits-third-party.md).
+in [`docs/third-party-notices.md`](docs/third-party-notices.md).

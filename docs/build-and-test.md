@@ -35,7 +35,7 @@ just build-release-v3    # x86_64-v3 tuned release (CachyOS-friendly)
 just test                # cargo test --workspace
 just lint                # cargo clippy --workspace --all-targets -- -D warnings
 just fmt                 # cargo fmt --all
-just credits             # cargo about generate → docs/credits-third-party.md
+just credits             # cargo about generate → docs/third-party-notices.md
 just run-daemon          # cargo run -p linsightd
 just run-cli ARGS        # cargo run -p linsight-cli -- ARGS
 ```
