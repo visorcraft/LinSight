@@ -44,7 +44,7 @@ jobs:
             qt6-base qt6-declarative qt6-tools kirigami \
             clang ninja mesa file desktop-file-utils appstream
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
@@ -136,7 +136,7 @@ jobs:
           (cd "$dist" && sha256sum "${root}.tar.gz" >> sha256sums.txt)
 
       - name: Upload tarball artefact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: linux-tarball
           path: target/dist/*
@@ -159,7 +159,7 @@ jobs:
             git sudo pkgconf \
             qt6-base qt6-declarative qt6-tools kirigami \
             clang ninja mesa rust cargo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Create unprivileged build user
         run: |
           useradd -m -G wheel builder
@@ -180,7 +180,7 @@ jobs:
           mkdir -p target/dist
           mv packaging/arch/linsight-*.pkg.tar.zst target/dist/
           (cd target/dist && sha256sum linsight-*.pkg.tar.zst > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: arch-pkg
           path: target/dist/*
@@ -203,7 +203,7 @@ jobs:
             git sudo pkgconf \
             qt6-base qt6-declarative qt6-tools kirigami \
             clang ninja mesa rust cargo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Create unprivileged build user
         run: |
           useradd -m -G wheel builder
@@ -224,7 +224,7 @@ jobs:
           mkdir -p target/dist
           mv packaging/arch-v3/linsight-*.pkg.tar.zst target/dist/
           (cd target/dist && sha256sum linsight-*.pkg.tar.zst > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: arch-v3-pkg
           path: target/dist/*
@@ -264,7 +264,7 @@ jobs:
             echo "CARGO_HOME=/usr/local/cargo"
           } >> "$GITHUB_ENV"
           echo "/usr/local/cargo/bin" >> "$GITHUB_PATH"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Patch changelog version
@@ -284,7 +284,7 @@ jobs:
           mkdir -p target/dist
           mv ../linsight_*.deb target/dist/
           (cd target/dist && sha256sum linsight_*.deb > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: deb-pkg
           path: target/dist/*
@@ -313,7 +313,7 @@ jobs:
             qt6-qtdeclarative-devel \
             qt6-qttools-devel kf6-kirigami-devel sqlite-devel \
             desktop-file-utils sudo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Create unprivileged build user
@@ -347,7 +347,7 @@ jobs:
           mkdir -p target/dist
           find packaging/fedora/_rpmbuild/RPMS -name "linsight-*.rpm" -exec mv {} target/dist/ \;
           (cd target/dist && sha256sum linsight-*.rpm > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: rpm-pkg
           path: target/dist/*
@@ -386,7 +386,7 @@ jobs:
           done
           rpm -q rpm-build >/dev/null 2>&1 \
             || { echo "openSUSE deps not installed after retries" >&2; exit 1; }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Create unprivileged build user
@@ -419,7 +419,7 @@ jobs:
           mkdir -p target/dist
           find packaging/opensuse/_rpmbuild/RPMS -name "linsight-*.rpm" -exec mv {} target/dist/ \;
           (cd target/dist && sha256sum linsight-*.rpm > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: opensuse-pkg
           path: target/dist/*
@@ -464,7 +464,7 @@ jobs:
             echo "CARGO_HOME=/usr/local/cargo"
           } >> "$GITHUB_ENV"
           echo "/usr/local/cargo/bin" >> "$GITHUB_PATH"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build AppImage
@@ -493,7 +493,7 @@ jobs:
           mkdir -p target/dist
           mv ./*.AppImage target/dist/
           (cd target/dist && sha256sum ./*.AppImage > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: appimage
           path: target/dist/*
@@ -511,7 +511,7 @@ jobs:
     env:
       VERSION: ${{ needs.linux-tarball.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install flatpak + builder
         run: |
           sudo apt-get update
@@ -542,7 +542,7 @@ jobs:
           mkdir -p target/dist
           mv "linsight-${VERSION}.flatpak" target/dist/
           (cd target/dist && sha256sum linsight-*.flatpak > sha256sums.txt)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: flatpak
           path: target/dist/*
@@ -554,10 +554,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg, rpm-pkg, opensuse-pkg]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist-staging
 
