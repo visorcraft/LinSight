@@ -365,13 +365,27 @@ jobs:
       RUSTFLAGS: "-Clink-arg=-fuse-ld=mold"
     steps:
       - name: Install openSUSE build dependencies
+        env:
+          # The Tumbleweed OSS CDN intermittently times out fetching repo
+          # metadata (appdata.xml.gz); give each attempt a longer curl budget.
+          ZYPP_CURL_TIMEOUT: "300"
         run: |
-          zypper --non-interactive refresh
-          zypper --non-interactive install --no-recommends \
-            rpm-build git tar gzip make \
-            rust cargo clang mold pkgconf-pkg-config \
-            'cmake(Qt6Core)' 'cmake(Qt6Quick)' 'cmake(KF6Kirigami)' \
-            'pkgconfig(sqlite3)' sudo
+          # ...and retry the whole refresh+install a few times to ride out
+          # transient mirror timeouts.
+          for attempt in 1 2 3 4 5; do
+            if zypper --non-interactive --gpg-auto-import-keys refresh \
+               && zypper --non-interactive install --no-recommends \
+                    rpm-build git tar gzip make \
+                    rust cargo clang mold pkgconf-pkg-config \
+                    'cmake(Qt6Core)' 'cmake(Qt6Quick)' 'cmake(KF6Kirigami)' \
+                    'pkgconfig(sqlite3)' sudo; then
+              break
+            fi
+            echo "zypper attempt ${attempt} failed; retrying in 20s..."
+            sleep 20
+          done
+          rpm -q rpm-build >/dev/null 2>&1 \
+            || { echo "openSUSE deps not installed after retries" >&2; exit 1; }
       - uses: actions/checkout@v4
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
