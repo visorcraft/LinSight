@@ -35,6 +35,9 @@ export CARGO_TARGET_DIR=%{cargo_target}
 cargo build --workspace --release --locked
 
 %install
+# Under modern rpm's build layout %install's working directory is not
+# reliably the extracted source root, so cd into it explicitly.
+cd %{_builddir}/%{name}-%{version}
 install -Dm755 %{cargo_target}/release/linsight     %{buildroot}%{_bindir}/linsight
 install -Dm755 %{cargo_target}/release/linsightd    %{buildroot}%{_bindir}/linsightd
 install -Dm755 %{cargo_target}/release/linsight-cli %{buildroot}%{_bindir}/linsight-cli
