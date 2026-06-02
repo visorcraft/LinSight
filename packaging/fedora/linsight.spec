@@ -1,6 +1,12 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
 
+# Rust release binaries carry no separable debug info that Fedora's
+# automatic debuginfo/debugsource extraction can use (cargo builds into an
+# out-of-tree target), so disable the debug packages — otherwise rpmbuild
+# fails on an empty debugsourcefiles.list.
+%global debug_package %{nil}
+
 Name:           linsight
 Version:        1.7.0
 Release:        1%{?dist}
