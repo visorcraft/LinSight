@@ -9,6 +9,25 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-06-02
+
+- **New application icon.** The placeholder is replaced with the final
+  LinSight mark — a layered hardware stack with a wavelength "L" and a
+  thermometer accent — rendered across every packaged size (16–512 px
+  hicolor + scalable SVG), embedded in the GUI (sidebar, About, window
+  icon), and shipped as a 1024×1024 master, a multi-resolution `.ico`,
+  and a 1024×512 GitHub social banner under `assets/`. Every size is
+  regenerated from `assets/LinSight.svg` by `scripts/dev_render_icons.sh`.
+- **Accurate third-party license credits.** Our own first-party crates
+  were being listed among the third-party dependencies on the Credits /
+  Licenses pages. Internal crates are now `publish = false` and excluded
+  via cargo-about's `private.ignore`, so the in-app Credits page and
+  `docs/third-party-notices.md` now list only genuine third-party crates
+  (318, with full license texts).
+- **Documentation cleanup.** Removed obsolete draft and build-history
+  material and corrected stale version / ABI / CI references across the
+  docs set.
+
 ## [1.7.3] — 2026-06-02
 
 - **Application ID renamed to `com.visorcraft.LinSight`** to match the
@@ -578,9 +597,7 @@ Surfaced by actually running the v3 release binary on the Editor page:
 Two consecutive in-depth peer reviews followed by a hardening sprint:
 a file-by-file audit and a commit-by-commit audit. Together they
 raised the test count from **87 → 117** and closed every Critical and
-High finding. Full punch lists:
-- File-by-file: [`docs/superpowers/plans/2026-05-25-code-review-punch-list.md`](docs/superpowers/plans/2026-05-25-code-review-punch-list.md)
-- Commit-by-commit: [`docs/superpowers/plans/2026-05-25-commit-review-punch-list.md`](docs/superpowers/plans/2026-05-25-commit-review-punch-list.md)
+High finding.
 
 #### Security
 - Removed the `shell:<cmd>` alert notify target that passed user-config
@@ -822,11 +839,7 @@ flagged a separate batch of issues. Resolved here:
 
 ## [0.3.0] — 2026-05-25
 
-All 10 spec phases plus the post-v0.3.0 polish sprint. See
-[`docs/superpowers/plans/2026-05-25-phases-roadmap.md`](docs/superpowers/plans/2026-05-25-phases-roadmap.md)
-for the rollout history and
-[`docs/superpowers/plans/2026-05-25-v0.3.0-followups-completion-notes.md`](docs/superpowers/plans/2026-05-25-v0.3.0-followups-completion-notes.md)
-for what shipped and what was originally deferred.
+All 10 spec phases plus the post-v0.3.0 polish sprint.
 
 Highlights:
 - Daemon, CLI, Qt 6 / Kirigami GUI with sidebar navigation

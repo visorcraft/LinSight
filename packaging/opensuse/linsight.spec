@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.7.3
+Version:        1.8.0
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.8.0-1
+- New application icon across all packaged sizes and the in-app pages.
+- Third-party license credits now exclude first-party crates (publish = false),
+  so the Credits page lists only genuine dependencies.
+- Documentation cleanup.
+
 * Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.3-1
 - v1.7.3 release. Rename the application ID from io.visorcraft.LinSight to
   com.visorcraft.LinSight (desktop entry, AppStream metainfo, icons, Flatpak

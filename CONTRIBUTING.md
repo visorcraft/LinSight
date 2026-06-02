@@ -14,12 +14,13 @@ Thanks for your interest. LinSight accepts:
 ## Dev loop
 
 ```bash
-just ci   # must be green before opening a PR (117 tests at HEAD)
+just ci   # must be green before opening a PR
 ```
 
 `just ci` runs fmt-check, clippy with `-D warnings`, and
-`cargo test --workspace`. There's no hosted CI yet, so this is the
-only automatic gate — please run it locally before sending a PR.
+`cargo test --workspace` — the same gate the GitHub Actions CI
+(`.github/workflows/ci.yml`) runs on every push and PR. Run it
+locally first so the PR lands green.
 
 ## Commit messages
 
@@ -40,9 +41,8 @@ making explicit:
 - **Don't ship speculative upstream-bug docs with code that's
   meant to work around them.** Verify with the compositor-bypass
   screenshot tool (or whatever your bypass channel is) before
-  writing the bug report. This caught us once; see the
-  "Misdiagnoses" block in
-  [`docs/superpowers/plans/2026-05-25-v0.3.0-followups-completion-notes.md`](docs/superpowers/plans/2026-05-25-v0.3.0-followups-completion-notes.md).
+  writing the bug report. This caught us once: a Wayland
+  stale-surface cache was misread as a QML binding bug.
 - **"Done" means tested.** A network-facing binary or a public
   ABI surface with no test coverage is not done regardless of how
   clean the code looks. The dynamic-load test for

@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
 <p align="center">
-  <img src="assets/linsight.svg" alt="LinSight logo" width="160" />
+  <img src="assets/LinSight.svg" alt="LinSight logo" width="200" />
 </p>
 
 <h1 align="center">LinSight</h1>
@@ -93,9 +93,7 @@ What it monitors today:
   exporter with a stable `device_key` label.
 - **Remote:** an mTLS bridge (`linsight-tunnel`) for non-SSH topologies.
 
-See [`docs/superpowers/specs/2026-05-25-linsight-design.md`](docs/superpowers/specs/2026-05-25-linsight-design.md)
-for the v1 design and [`CHANGELOG.md`](CHANGELOG.md) for the full
-per-release history.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full per-release history.
 
 ---
 
@@ -258,8 +256,6 @@ Bugs / feature requests:
 
 ## Documentation
 
-- [v1 design spec](docs/superpowers/specs/2026-05-25-linsight-design.md)
-- [Phase rollout history](docs/superpowers/plans/2026-05-25-phases-roadmap.md)
 - [Architecture](docs/architecture.md)
 - [Plugin ABI ADR-0001](docs/adr/0001-plugin-abi-stabby-deferral.md)
 - [Remote tunnel](apps/linsight-tunnel/README.md)

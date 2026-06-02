@@ -73,6 +73,7 @@ perf.data.old
 
 # Local agent / tooling state
 /.superpowers
+/docs/superpowers/
 /.claude/
 /.aider*
 # Agent-guidance entry points — kept local, not version-controlled.

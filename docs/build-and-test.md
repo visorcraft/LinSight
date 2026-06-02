@@ -28,7 +28,7 @@ Distro packages:
 ## Dev loop
 
 ```
-just ci                  # fmt-check + clippy -D warnings + tests (117 pass)
+just ci                  # fmt-check + clippy -D warnings + cargo test --workspace
 just build               # debug
 just build-release       # release with lto=fat, codegen-units=1, strip
 just build-release-v3    # x86_64-v3 tuned release (CachyOS-friendly)
@@ -55,14 +55,12 @@ linsight/
 ├── crates/
 │   ├── linsight-core/          # types, no I/O
 │   ├── linsight-protocol/      # wire format
-│   ├── linsight-plugin-sdk/    # public plugin API (ABI v3, stabby R-mirror)
-│   ├── linsight-sensors/
-│   │   ├── cpu/
-│   │   ├── mem/
-│   │   ├── xe/
-│   │   ├── nvml/
-│   │   ├── nvme/
-│   │   └── net/
+│   ├── linsight-plugin-sdk/    # public plugin API (ABI v6, stabby R-mirror)
+│   ├── linsight-sensors/       # one in-tree plugin per hardware family
+│   │   ├── cpu/  mem/  net/  nvme/  nvml/
+│   │   ├── xe/  i915/  amdgpu/         # GPUs
+│   │   ├── disk/  fs/  hwmon/  zram/
+│   │   └── proc/  system/  systemd/  containers/  sock/
 │   └── linsight-cli/
 ├── examples/
 │   └── echo-plugin/            # minimal third-party plugin cdylib;
@@ -76,7 +74,7 @@ linsight/
 ## Tests
 
 ```
-cargo test --workspace   # 117 pass at HEAD; 1 ignored hardware-gated
+cargo test --workspace   # run for the current count; a few hardware-gated tests are #[ignore]d
 ```
 
 Sensor crates use `tempfile::TempDir` to build synthetic `/sys`
@@ -90,7 +88,7 @@ The SDK has a real end-to-end integration test at
 `crates/linsight-plugin-sdk/tests/dynamic_load.rs`. It builds
 `examples/echo-plugin/` as a `.so`, dlopens it via the same
 `StabbyLibrary::get_stabbied` path the daemon uses, and asserts
-the full ABI v3 handshake — closing the "fabricated test claim"
+the full ABI v6 handshake — closing the "fabricated test claim"
 gap flagged in the post-v0.3.0 peer review.
 
 `linsight-tunnel` ships a paired mTLS smoke at
@@ -105,10 +103,10 @@ A GUI boot-smoke test (`scripts/gui_smoke.sh`, invoked via
 handshake log line within 12 s. It distinguishes timeout (exit
 124) from clean exit, uses GNU automake's exit-77 skip
 convention when `xvfb-run` is missing, and is **not** part of
-`just ci` — it's a local dev tool. There is no hosted CI yet; if
-you add one, port this to a runner that has Qt + Mesa available
-(the offscreen platform still wants a GPU). Until then, run
-`just gui-smoke` manually before shipping QML changes.
+`just ci` or the GitHub Actions CI — it's a local dev tool, since the
+offscreen platform still wants Qt + Mesa / a GPU that the CI runner
+doesn't provide. Run `just gui-smoke` manually before shipping QML
+changes.
 
 For visual iteration, `scripts/dev_screenshot.sh <page> [out.png]`
 kills any running GUI, makes sure the daemon is up, launches

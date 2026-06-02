@@ -67,9 +67,11 @@ sudo dnf install rpm-build cargo rust clang \
                  qt6-qttools-devel \
                  kf6-kirigami-devel sqlite-devel pkgconf-pkg-config
 
-# Stage a source tarball matching the spec's Source0 expectation.
+# Stage a source tarball matching the spec's Source0 expectation
+# (prefix/name must match the workspace version in Cargo.toml).
+ver=$(grep -m1 '^version' ../../Cargo.toml | cut -d'"' -f2)
 ( cd ../.. && git archive --format=tar.gz \
-    --prefix=linsight-1.0.0/ --output=packaging/fedora/linsight-1.0.0.tar.gz HEAD )
+    --prefix=linsight-$ver/ --output=packaging/fedora/linsight-$ver.tar.gz HEAD )
 
 rpmbuild --define "_topdir $(pwd)/_rpmbuild" \
          --define "_sourcedir $(pwd)" \

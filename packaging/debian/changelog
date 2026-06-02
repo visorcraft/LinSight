@@ -1,3 +1,11 @@
+linsight (1.8.0-1) unstable; urgency=medium
+
+  * New application icon across all sizes and the in-app About/Credits pages.
+  * Third-party license credits now exclude first-party crates (internal crates are publish = false), so the Credits page lists only genuine dependencies.
+  * Documentation cleanup.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 18:00:00 +0000
+
 linsight (1.7.3-1) unstable; urgency=medium
 
   * v1.7.3 release. Rename the application ID to com.visorcraft.LinSight (desktop entry, metainfo, icons, Flatpak, window id) to match the visorcraft.com domain, and sensor plugin-ids to com.visorcraft.linsight.*. A pinned launcher must be re-pinned after upgrading.

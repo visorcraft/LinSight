@@ -120,7 +120,7 @@ rather than loading with an incompatible vtable.
 `extern "C-unwind" fn` and rebuild — the compiler flags any you miss. No
 other source changes are required.
 
-ABI v3 uses **R-mirror types** in `linsight_plugin_sdk::mirror`
+The ABI uses **R-mirror types** in `linsight_plugin_sdk::mirror`
 (`RUnit`, `RSensorKind`, `RCategory`, `RReading`, `RTableRow`,
 `RCell`) that cross the FFI vtable. Unit-only enums are
 `#[repr(u8)]`; payload-bearing types (`RUnit`, `RReading`, `RCell`)

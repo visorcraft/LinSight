@@ -42,6 +42,15 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.8.0" date="2026-06-02">
+      <description>
+        <p>New application icon: the final LinSight mark (a layered hardware
+        stack with a wavelength "L" and a thermometer accent) replaces the
+        placeholder across all icon sizes and the in-app About and Credits
+        pages. The in-app third-party license credits now list only genuine
+        dependencies, and the documentation set was cleaned up.</p>
+      </description>
+    </release>
     <release version="1.7.3" date="2026-06-02">
       <description>
         <p>Identity update: the application ID is now com.visorcraft.LinSight

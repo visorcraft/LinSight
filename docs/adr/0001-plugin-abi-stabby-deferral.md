@@ -128,9 +128,7 @@ Accepted as part of shipping v2:
   the FFI seam were identified post-merge** in the 2026-05-25 audit
   and corrected: `PluginCtx::new_with_sysroot` now rejects non-UTF-8
   paths up front, and `host_init` validates every plugin-returned
-  sensor ID with `SensorId::try_new`. See
-  `docs/superpowers/plans/2026-05-25-code-review-punch-list.md`
-  CR-3 and CR-4.
+  sensor ID with `SensorId::try_new`.
 
 ## What we learned at v3 — the stabby release-mode matcher bug
 

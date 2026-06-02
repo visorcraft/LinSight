@@ -14,12 +14,12 @@ Loaded `.so` plugins run in-process inside `linsightd`. They have
 the daemon's full filesystem and network access. There is no
 sandbox today.
 
-ABI v3 (R-mirror types — stabby-marked structs over `#[repr(u8)]`
+ABI v6 (R-mirror types — stabby-marked structs over `#[repr(u8)]`
 discriminants) hardens the FFI seam against vtable-layout drift
 between rustc releases. A mis-built plugin fails loudly at load
-time: the `linsight_plugin_v3` symbol is missing on a v2 `.so`, and
+time: the `linsight_plugin_v6` symbol is missing on an older `.so`, and
 stabby's `_stabbied_v3_report` type check rejects any shape
-mismatch on a v3 `.so` built against an incompatible SDK. ADR-0001
+mismatch on a v6 `.so` built against an incompatible SDK. ADR-0001
 records why we moved off stabby's tagged-enum encoding for the
 payload-bearing mirrors (release-mode `match_owned` misdispatch on
 `#[repr(stabby)]` enums; see ADR-0001 § "What we learned at v3").
@@ -38,6 +38,12 @@ at the boundary:
 
 These are integrity guarantees, not a sandbox; a malicious plugin
 still runs with the daemon's full capabilities.
+
+Since ABI v6 the daemon also catches panics that unwind out of a
+plugin's `init`/`sample`/`shutdown` (the trait methods are
+`extern "C-unwind"` and the release profile is `panic = "unwind"`),
+so a buggy plugin is isolated and dropped instead of taking the whole
+daemon down — robustness hardening, still not a security sandbox.
 
 - Plugins from `/usr/lib/linsight/plugins/` are distro-trust —
   they were vetted by the packager.

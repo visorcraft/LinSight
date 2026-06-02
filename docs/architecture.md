@@ -25,11 +25,11 @@ integration test.
 |  linsight-cli       |                                 v
 |  list / read /      | <-------- same -----+-----------------------+
 |  plugin {new,...}   |          socket     | in-tree sensors:      |
-+---------------------+                     |   cpu, mem, xe, nvml, |
-                                            |   nvme, net           |
++---------------------+                     |   cpu, mem, net, nvme,|
+                                            |   +13 sensor crates   |
                                             | runtime .so plugins   |
-                                            | (ABI v3, R-mirror     |
-                                            |  R-mirror types)      |
+                                            | (ABI v6, R-mirror     |
+                                            |  types)               |
                                             +-----------------------+
 
 +---------------------+   mTLS    +---------------------+
@@ -71,7 +71,7 @@ without subscribing.
   `FrameReader`/`FrameWriter` + version handshake helper.
 - `linsight-plugin-sdk` — public `LinsightPlugin` trait, manifest
   types, and the `export_plugin!` macro. Plugins compile against
-  this crate alone (plus a direct `stabby = "36"` dep for ABI v3's
+  this crate alone (plus a direct `stabby = "36"` dep for its
   proc-macros). The `mirror` submodule holds the FFI-boundary
   R-types (`RUnit`, `RSensorKind`, `RCategory`, `RReading`, …).
   v3 encodes payload-bearing mirrors as `(kind, payload)` structs
@@ -91,8 +91,9 @@ without subscribing.
   `StabbyLibrary::get_stabbied` path the daemon uses and asserts
   the full handshake works. Also the canonical reference for
   third-party plugin authors.
-- `linsight-sensors/{cpu,mem,xe,nvml,nvme,net}` — one in-tree plugin
-  per hardware family. All are statically linked into `linsightd`;
+- `linsight-sensors/{cpu,mem,net,nvme,nvml,xe,i915,amdgpu,disk,fs,hwmon,zram,proc,system,systemd,containers,sock}`
+  — one in-tree plugin per hardware family (17 at present). All are
+  statically linked into `linsightd`;
   same code path as a runtime-loaded `.so`.
 - `linsight-cli` — thin CLI: `list`, `read`, `plugin {new,install,
   ls,remove}`. Uses the postcard client like the GUI.

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
+publish = false  # internal workspace crate; not published to crates.io
 name = "linsightd"
 version.workspace = true
 edition.workspace = true

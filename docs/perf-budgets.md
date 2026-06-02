@@ -3,11 +3,12 @@
 
 # Performance budgets
 
-Targets enforced by the architecture (subscription-driven sampling,
-no async runtime in the hot path, `lto=fat` + `codegen-units=1` +
-`panic=abort` + stripped) and verified periodically by
-`cargo bench` in CI. A regression > +20% on any of these is treated
-as a perf bug, not just slow code.
+Design targets the architecture is built to hit (subscription-driven
+sampling, no async runtime in the daemon hot path, `lto=fat` +
+`codegen-units=1` + `panic=unwind` + stripped). These are goals and
+periodic by-hand spot-checks, not yet gated by an automated benchmark
+suite; a regression worse than ~20% on any of them is treated as a
+perf bug, not just slow code.
 
 ## Daemon
 
@@ -47,17 +48,19 @@ as a perf bug, not just slow code.
 
 ## Methodology
 
-Each metric is exercised by a `cargo bench` group in
-`crates/<crate>/benches/`. We bias toward fewer, well-named benchmarks
-that catch real regressions over many small ones that drown signal
-in noise. The bench harness is `criterion` for everything except the
-end-to-end latency tests, which use raw `std::time::Instant`.
+There is no committed benchmark suite yet — the figures above are
+by-hand spot measurements (RSS from `/proc/<pid>/status`, latency
+from ad-hoc `std::time::Instant` probes, binary sizes from `size` on
+a `just build-release` artifact). If a `cargo bench` group is added
+under `crates/<crate>/benches/`, bias toward fewer, well-named
+benchmarks that catch real regressions over many small ones that
+drown signal in noise.
 
 When a budget is violated:
 
 1. First check whether `RUSTFLAGS` accidentally diverged
    (`target-cpu`, debug overrides) — the release profile baseline
-   is `lto=fat, codegen-units=1, panic=abort, strip=symbols,
+   is `lto=fat, codegen-units=1, panic=unwind, strip=symbols,
    opt-level=3`.
 2. Then check whether a new dependency landed that pulls in heavier
    defaults (e.g. enabling Tokio default features).
