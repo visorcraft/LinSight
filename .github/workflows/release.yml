@@ -330,7 +330,7 @@ jobs:
             git config --global --add safe.directory "$GITHUB_WORKSPACE"
             # git archive must run from the repo root: from a subdirectory it
             # only captures that subtree (dropping packaging/), which breaks
-            # the spec's %install.
+            # the %install step.
             cd "$GITHUB_WORKSPACE"
             git archive --format=tar.gz \
               --prefix="linsight-'"${VERSION}"'/" \
