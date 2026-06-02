@@ -149,7 +149,7 @@ impl NvmePlugin {
             }
         }
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.nvme".into(),
+            plugin_id: "com.visorcraft.linsight.nvme".into(),
             display_name: "NVMe".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

@@ -62,7 +62,7 @@ impl NvmlPlugin {
                 Err(e) => {
                     info!(error = ?e, "NVML init failed — assuming no NVIDIA hardware");
                     return Ok(PluginManifest {
-                        plugin_id: "io.visorcraft.linsight.nvml".into(),
+                        plugin_id: "com.visorcraft.linsight.nvml".into(),
                         display_name: "NVIDIA NVML".into(),
                         version: env!("CARGO_PKG_VERSION").into(),
                         sensors: vec![],
@@ -207,7 +207,7 @@ impl NvmlPlugin {
         }
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.nvml".into(),
+            plugin_id: "com.visorcraft.linsight.nvml".into(),
             display_name: "NVIDIA NVML".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

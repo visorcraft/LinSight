@@ -195,7 +195,7 @@ impl NetPlugin {
             });
         }
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.net".into(),
+            plugin_id: "com.visorcraft.linsight.net".into(),
             display_name: "Network".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

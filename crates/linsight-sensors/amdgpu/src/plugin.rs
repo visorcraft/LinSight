@@ -142,7 +142,7 @@ impl AmdgpuPlugin {
             }
         }
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.amdgpu".into(),
+            plugin_id: "com.visorcraft.linsight.amdgpu".into(),
             display_name: "AMD GPU".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

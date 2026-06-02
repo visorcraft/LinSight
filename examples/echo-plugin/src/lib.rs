@@ -26,7 +26,7 @@ pub struct EchoPlugin;
 impl EchoPlugin {
     fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
         let key =
-            HardwareDeviceKey::try_new("plugin:io.visorcraft.linsight.example.echo:demo").unwrap();
+            HardwareDeviceKey::try_new("plugin:com.visorcraft.linsight.example.echo:demo").unwrap();
         let mut sensors = vec![SensorDescriptor {
             id: SensorId::new("example.echo.value"),
             display_name: "Echo value".into(),
@@ -60,7 +60,7 @@ impl EchoPlugin {
             });
         }
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.example.echo".into(),
+            plugin_id: "com.visorcraft.linsight.example.echo".into(),
             display_name: "Echo example".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

@@ -121,7 +121,7 @@ fn main() -> anyhow::Result<()> {
         app.as_mut().set_organization_name(&QString::from("VisorCraft"));
         app.as_mut().set_organization_domain(&QString::from("visorcraft.com"));
     }
-    cxx_qt_lib::QGuiApplication::set_desktop_file_name(&QString::from("io.visorcraft.LinSight"));
+    cxx_qt_lib::QGuiApplication::set_desktop_file_name(&QString::from("com.visorcraft.LinSight"));
 
     if translator::install_system_translator() {
         tracing::info!("installed Qt translator for system locale");

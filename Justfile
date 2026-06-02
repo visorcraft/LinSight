@@ -113,7 +113,7 @@ fedora-pkg:
 flatpak: flatpak-vendor
     cd packaging/flatpak && flatpak-builder --user --force-clean \
         --install --install-deps-from=flathub \
-        build io.visorcraft.LinSight.yml
+        build com.visorcraft.LinSight.yml
 
 # Vendor all cargo dependencies for the Flatpak sandboxed build.
 flatpak-vendor:

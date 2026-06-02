@@ -256,7 +256,7 @@ impl CpuPlugin {
         };
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.cpu".into(),
+            plugin_id: "com.visorcraft.linsight.cpu".into(),
             display_name: "CPU".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

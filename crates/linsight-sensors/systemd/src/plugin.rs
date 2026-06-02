@@ -57,7 +57,7 @@ impl SystemdPlugin {
         }
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.systemd".into(),
+            plugin_id: "com.visorcraft.linsight.systemd".into(),
             display_name: "Systemd Units".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors: vec![SensorDescriptor {
@@ -80,7 +80,7 @@ impl SystemdPlugin {
                 model: "Systemd Services".into(),
                 vendor: None,
                 location: None,
-                plugin_id: "io.visorcraft.linsight.systemd".into(),
+                plugin_id: "com.visorcraft.linsight.systemd".into(),
                 plugin_device_id: "systemd".into(),
                 sensor_ids: vec![SensorId::new("systemd.units")],
             }],
@@ -172,7 +172,7 @@ fn cgroup_root(sysroot: Option<&Path>) -> PathBuf {
 
 fn empty_manifest() -> PluginManifest {
     PluginManifest {
-        plugin_id: "io.visorcraft.linsight.systemd".into(),
+        plugin_id: "com.visorcraft.linsight.systemd".into(),
         display_name: "Systemd Units".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         sensors: vec![],

@@ -8,7 +8,7 @@
 # that already build for v3.
 pkgname=linsight-v3
 _pkgname=linsight
-pkgver=1.7.2
+pkgver=1.7.3
 pkgrel=1
 pkgdesc='LinSight — x86_64-v3 tuned build'
 arch=('x86_64')
@@ -43,10 +43,10 @@ package() {
   install -Dm755 target/release/linsightd    "$pkgdir/usr/bin/linsightd"
   install -Dm755 target/release/linsight-cli "$pkgdir/usr/bin/linsight-cli"
 
-  install -Dm644 packaging/io.visorcraft.LinSight.desktop \
-    "$pkgdir/usr/share/applications/io.visorcraft.LinSight.desktop"
-  install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml \
-    "$pkgdir/usr/share/metainfo/io.visorcraft.LinSight.metainfo.xml"
+  install -Dm644 packaging/com.visorcraft.LinSight.desktop \
+    "$pkgdir/usr/share/applications/com.visorcraft.LinSight.desktop"
+  install -Dm644 packaging/com.visorcraft.LinSight.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/com.visorcraft.LinSight.metainfo.xml"
   install -Dm644 packaging/systemd/linsight.service \
     "$pkgdir/usr/lib/systemd/user/linsight.service"
 

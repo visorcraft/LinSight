@@ -204,7 +204,7 @@ mod tests {
             "net:enp4s0",
             "net:wg0",
             "cpu:0",
-            "plugin:io.visorcraft.linsight.echo:demo",
+            "plugin:com.visorcraft.linsight.echo:demo",
         ] {
             assert!(HardwareDeviceKey::try_new(s).is_ok(), "should accept: {s}");
         }
@@ -291,7 +291,7 @@ mod tests {
             model: "Intel Arc B-series".into(),
             vendor: Some("Intel Corporation".into()),
             location: Some("PCI 0000:06:00.0".into()),
-            plugin_id: "io.visorcraft.linsight.xe".into(),
+            plugin_id: "com.visorcraft.linsight.xe".into(),
             plugin_device_id: "gpu0".into(),
             sensor_ids: vec![SensorId::new("xe.gpu0.util")],
         };

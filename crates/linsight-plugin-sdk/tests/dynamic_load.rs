@@ -127,11 +127,11 @@ fn dynamic_load_init_and_sample_round_trip() {
     let plugin = DynBoxPlugin(dyn_box);
 
     let manifest = host_init(&plugin, &PluginCtx::default()).expect("host_init");
-    assert_eq!(manifest.plugin_id, "io.visorcraft.linsight.example.echo");
+    assert_eq!(manifest.plugin_id, "com.visorcraft.linsight.example.echo");
     assert_eq!(manifest.sensors.len(), 1);
     assert_eq!(manifest.sensors[0].id.as_str(), "example.echo.value");
     assert_eq!(manifest.devices.len(), 1);
-    assert_eq!(manifest.devices[0].key.as_str(), "plugin:io.visorcraft.linsight.example.echo:demo");
+    assert_eq!(manifest.devices[0].key.as_str(), "plugin:com.visorcraft.linsight.example.echo:demo");
 
     let reading = host_sample(&plugin, SensorId::new("example.echo.value")).expect("host_sample");
     match reading {

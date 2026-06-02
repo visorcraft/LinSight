@@ -113,7 +113,7 @@ in-process to inter-process.
   sprint and is now a no-op with a warning if referenced.)
 - API keys for cloud notification providers (future work) will
   live in the Secret Service (KWallet / GNOME Keyring) under the
-  `io.visorcraft.LinSight` service, never on disk.
+  `com.visorcraft.LinSight` service, never on disk.
 
 ## Reporting
 

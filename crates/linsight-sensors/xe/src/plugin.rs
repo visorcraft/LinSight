@@ -189,7 +189,7 @@ impl XePlugin {
         }
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.xe".into(),
+            plugin_id: "com.visorcraft.linsight.xe".into(),
             display_name: "Intel xe GPU".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

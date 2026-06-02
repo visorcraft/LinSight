@@ -1429,7 +1429,7 @@ Append to the `#[cfg(test)] mod tests` block:
             min: Some(0.0),
             max: Some(100.0),
             device_id: None,
-            plugin_id: "io.visorcraft.linsight.cpu".into(),
+            plugin_id: "com.visorcraft.linsight.cpu".into(),
         }]));
     }
 
@@ -2630,7 +2630,7 @@ impl LinsightPlugin for CpuPlugin {
         inner.sysroot = ctx.sysroot.clone();
         inner.prev_stat = None;
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.cpu".into(),
+            plugin_id: "com.visorcraft.linsight.cpu".into(),
             display_name: "CPU".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors: vec![SensorDescriptor {
@@ -3416,7 +3416,7 @@ fn serve(stream: UnixStream, sched: Arc<Mutex<Scheduler>>) -> Result<(), FrameEr
     };
     info!(client = %client_name, "client said hello");
     let plugins = vec![PluginInfo {
-        plugin_id: "io.visorcraft.linsight.cpu".into(),
+        plugin_id: "com.visorcraft.linsight.cpu".into(),
         display_name: "CPU".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         sensor_count: 1,
@@ -3468,7 +3468,7 @@ fn serve(stream: UnixStream, sched: Arc<Mutex<Scheduler>>) -> Result<(), FrameEr
                         min: d.min,
                         max: d.max,
                         device_id: d.device_id.clone(),
-                        plugin_id: "io.visorcraft.linsight.cpu".into(),
+                        plugin_id: "com.visorcraft.linsight.cpu".into(),
                     }).collect();
                     drop(s);
                     writer.lock().unwrap().write_server(&ServerMsg::SensorList(infos))?;

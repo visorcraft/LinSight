@@ -115,7 +115,7 @@ impl I915Plugin {
             }
         }
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.i915".into(),
+            plugin_id: "com.visorcraft.linsight.i915".into(),
             display_name: "Intel i915".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

@@ -299,7 +299,7 @@ mod tests {
             min: Some(0.0),
             max: Some(100.0),
             device_id: None,
-            plugin_id: "io.visorcraft.linsight.cpu".into(),
+            plugin_id: "com.visorcraft.linsight.cpu".into(),
             device_key: Some("cpu:0".into()),
             device_label: Some("AMD Ryzen 9 8945HX".into()),
             tags: vec!["cpu".into()],

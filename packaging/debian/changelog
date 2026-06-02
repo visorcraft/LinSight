@@ -1,3 +1,9 @@
+linsight (1.7.3-1) unstable; urgency=medium
+
+  * v1.7.3 release. Rename the application ID to com.visorcraft.LinSight (desktop entry, metainfo, icons, Flatpak, window id) to match the visorcraft.com domain, and sensor plugin-ids to com.visorcraft.linsight.*. A pinned launcher must be re-pinned after upgrading.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 14:00:00 +0000
+
 linsight (1.7.2-1) unstable; urgency=medium
 
   * v1.7.2 release. Rename bundled third-party credits to third-party-notices.md and regenerate; refresh translation catalogs.

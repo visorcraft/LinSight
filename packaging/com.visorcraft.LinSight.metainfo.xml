@@ -2,7 +2,7 @@
 <!-- SPDX-FileCopyrightText: 2026 VisorCraft LLC -->
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <component type="desktop-application">
-  <id>io.visorcraft.LinSight</id>
+  <id>com.visorcraft.LinSight</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <name>LinSight</name>
@@ -25,7 +25,7 @@
       <li>Drop-in .so plugin support for new hardware</li>
     </ul>
   </description>
-  <launchable type="desktop-id">io.visorcraft.LinSight.desktop</launchable>
+  <launchable type="desktop-id">com.visorcraft.LinSight.desktop</launchable>
   <provides>
     <binary>linsight</binary>
     <binary>linsightd</binary>
@@ -33,7 +33,7 @@
   </provides>
   <url type="homepage">https://github.com/visorcraft/linsight</url>
   <url type="bugtracker">https://github.com/visorcraft/linsight/issues</url>
-  <developer id="io.visorcraft">
+  <developer id="com.visorcraft">
     <name>VisorCraft LLC</name>
   </developer>
   <content_rating type="oars-1.1" />
@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.7.3" date="2026-06-02">
+      <description>
+        <p>Identity update: the application ID is now com.visorcraft.LinSight
+        (matching the visorcraft.com domain), changed across the desktop entry,
+        AppStream metadata, icons, Flatpak app-id and the window id. Users with
+        a pinned launcher should re-pin LinSight after upgrading.</p>
+      </description>
+    </release>
     <release version="1.7.2" date="2026-06-02">
       <description>
         <p>Maintenance update: the bundled third-party license notices were

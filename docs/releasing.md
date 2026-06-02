@@ -41,7 +41,7 @@ The release job produces, checksums, and uploads:
    - `Cargo.toml` (workspace `version`) — then build once so `Cargo.lock` updates
    - `packaging/fedora/linsight.spec` and `packaging/opensuse/linsight.spec`
      (`Version:` plus a new `%changelog` entry)
-   - `packaging/io.visorcraft.LinSight.metainfo.xml` (new `<release>` entry)
+   - `packaging/com.visorcraft.LinSight.metainfo.xml` (new `<release>` entry)
    - `packaging/appimage/AppImageBuilder.yml` (`version:`)
    - `packaging/arch/PKGBUILD.local` (`pkgver`)
    - `packaging/debian/changelog` (new top entry)

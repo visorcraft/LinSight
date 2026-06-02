@@ -102,7 +102,7 @@ impl HwmonPlugin {
         }
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.hwmon".into(),
+            plugin_id: "com.visorcraft.linsight.hwmon".into(),
             display_name: "Hardware Monitor".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

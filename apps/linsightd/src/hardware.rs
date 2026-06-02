@@ -275,10 +275,10 @@ mod tests {
     fn build_fills_in_plugin_id_and_collects_sensors() {
         let d = [dev("pci:0000:06:00.0", "Arc B-series", "gpu0")];
         let s = [sensor("xe.gpu0.util", Some("pci:0000:06:00.0"))];
-        let reg = HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &s)], HashMap::new());
+        let reg = HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &s)], HashMap::new());
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         let device = reg.devices.get(&key).unwrap();
-        assert_eq!(device.plugin_id, "io.visorcraft.linsight.xe");
+        assert_eq!(device.plugin_id, "com.visorcraft.linsight.xe");
         assert_eq!(device.sensor_ids.len(), 1);
         assert_eq!(device.sensor_ids[0].as_str(), "xe.gpu0.util");
     }
@@ -287,7 +287,7 @@ mod tests {
     fn device_label_falls_back_to_model_when_no_nickname() {
         let d = [dev("pci:0000:06:00.0", "Arc B-series", "gpu0")];
         let reg =
-            HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &[])], HashMap::new());
+            HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], HashMap::new());
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         assert_eq!(reg.device_label_for(&key), "Arc B-series");
     }
@@ -297,7 +297,7 @@ mod tests {
         let d = [dev("pci:0000:06:00.0", "Arc B-series", "gpu0")];
         let mut nicks = HashMap::new();
         nicks.insert("pci:0000:06:00.0".into(), "Battlemage".into());
-        let reg = HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &[])], nicks);
+        let reg = HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], nicks);
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         assert_eq!(reg.device_label_for(&key), "Battlemage");
     }
@@ -320,7 +320,7 @@ mod tests {
     fn set_nickname_then_label_reflects_value() {
         let d = [dev("pci:0000:06:00.0", "Arc B-series", "gpu0")];
         let mut reg =
-            HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &[])], HashMap::new());
+            HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], HashMap::new());
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         reg.set_nickname(&key, Some("Battlemage".into())).unwrap();
         assert_eq!(reg.device_label_for(&key), "Battlemage");
@@ -360,7 +360,7 @@ mod tests {
 
         let d = [dev("pci:0000:06:00.0", "Arc B-series", "gpu0")];
         let mut reg =
-            HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &[])], HashMap::new());
+            HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], HashMap::new());
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         reg.set_nickname(&key, Some("Battlemage".into())).unwrap();
 
@@ -376,7 +376,7 @@ mod tests {
         // And a fresh registry rebuilt from the reloaded map should
         // surface the nickname through `device_label_for`.
         let reg2 =
-            HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &[])], reloaded.nicknames);
+            HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], reloaded.nicknames);
         assert_eq!(reg2.device_label_for(&key), "Battlemage");
     }
 
@@ -407,7 +407,7 @@ mod tests {
             },
         ];
         let reg =
-            HardwareRegistry::build(&[("io.visorcraft.linsight.nvme", &d, &[])], HashMap::new());
+            HardwareRegistry::build(&[("com.visorcraft.linsight.nvme", &d, &[])], HashMap::new());
 
         let k0 = HardwareDeviceKey::try_new("nvme:eui.001").unwrap();
         let k1 = HardwareDeviceKey::try_new("nvme:eui.002").unwrap();
@@ -444,7 +444,7 @@ mod tests {
         ];
         let mut nicks = HashMap::new();
         nicks.insert("nvme:eui.001".into(), "OS drive".into());
-        let reg = HardwareRegistry::build(&[("io.visorcraft.linsight.nvme", &d, &[])], nicks);
+        let reg = HardwareRegistry::build(&[("com.visorcraft.linsight.nvme", &d, &[])], nicks);
 
         let k0 = HardwareDeviceKey::try_new("nvme:eui.001").unwrap();
         let k1 = HardwareDeviceKey::try_new("nvme:eui.002").unwrap();
@@ -459,7 +459,7 @@ mod tests {
             dev("nvme:eui.002", "WD_BLACK SN850X 1TB", "nvme1"),
         ];
         let reg =
-            HardwareRegistry::build(&[("io.visorcraft.linsight.nvme", &d, &[])], HashMap::new());
+            HardwareRegistry::build(&[("com.visorcraft.linsight.nvme", &d, &[])], HashMap::new());
         let k = HardwareDeviceKey::try_new("nvme:eui.001").unwrap();
         assert_eq!(reg.device_label_for(&k), "Samsung SSD 990 PRO 2TB");
     }

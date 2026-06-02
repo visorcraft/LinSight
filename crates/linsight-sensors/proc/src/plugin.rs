@@ -63,7 +63,7 @@ impl ProcPlugin {
         inner.num_cpus = num_cpus(ctx.sysroot()).unwrap_or(1).max(1);
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.proc".into(),
+            plugin_id: "com.visorcraft.linsight.proc".into(),
             display_name: "Process List".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors: vec![SensorDescriptor {

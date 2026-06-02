@@ -120,7 +120,7 @@ git commit -m "feat(core): add HardwareCategory enum"
             "net:enp4s0",
             "net:wg0",
             "cpu:0",
-            "plugin:io.visorcraft.linsight.echo:demo",
+            "plugin:com.visorcraft.linsight.echo:demo",
         ] {
             assert!(HardwareDeviceKey::try_new(s).is_ok(), "should accept: {s}");
         }
@@ -259,7 +259,7 @@ git commit -m "feat(core): add HardwareDeviceKey newtype with validation"
             model: "Intel Arc B-series".into(),
             vendor: Some("Intel Corporation".into()),
             location: Some("PCI 0000:06:00.0".into()),
-            plugin_id: "io.visorcraft.linsight.xe".into(),
+            plugin_id: "com.visorcraft.linsight.xe".into(),
             plugin_device_id: "gpu0".into(),
             sensor_ids: vec![SensorId::new("xe.gpu0.util")],
         };
@@ -1286,7 +1286,7 @@ fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
     }];
 
     Ok(PluginManifest {
-        plugin_id: "io.visorcraft.linsight.cpu".into(),
+        plugin_id: "com.visorcraft.linsight.cpu".into(),
         display_name: "CPU".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         sensors,
@@ -1735,9 +1735,9 @@ git commit -m "feat(sensors/net): emit net:<ifname> hardware devices"
 - [ ] **Step 1: Add a single `HardwareDevice` to the example.**
 
 ```rust
-let key = HardwareDeviceKey::try_new("plugin:io.visorcraft.linsight.echo:demo").unwrap();
+let key = HardwareDeviceKey::try_new("plugin:com.visorcraft.linsight.echo:demo").unwrap();
 Ok(PluginManifest {
-    plugin_id: "io.visorcraft.linsight.echo".into(),
+    plugin_id: "com.visorcraft.linsight.echo".into(),
     display_name: "Echo example".into(),
     version: env!("CARGO_PKG_VERSION").into(),
     sensors: vec![SensorDescriptor {
@@ -1765,7 +1765,7 @@ Ok(PluginManifest {
 ```rust
 // Add to the existing test, after manifest is loaded:
 assert_eq!(manifest.devices.len(), 1);
-assert_eq!(manifest.devices[0].key.as_str(), "plugin:io.visorcraft.linsight.echo:demo");
+assert_eq!(manifest.devices[0].key.as_str(), "plugin:com.visorcraft.linsight.echo:demo");
 ```
 
 - [ ] **Step 3: Run.**
@@ -2142,7 +2142,7 @@ mod tests {
     fn fake_xe_manifest() -> PluginManifest {
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         PluginManifest {
-            plugin_id: "io.visorcraft.linsight.xe".into(),
+            plugin_id: "com.visorcraft.linsight.xe".into(),
             display_name: "Intel xe".into(),
             version: "0.4.0".into(),
             devices: vec![HardwareDevice {
@@ -2177,7 +2177,7 @@ mod tests {
         let registry = HardwareRegistry::build(&manifests, nicknames);
         assert_eq!(registry.devices.len(), 1);
         let dev = registry.devices.values().next().unwrap();
-        assert_eq!(dev.plugin_id, "io.visorcraft.linsight.xe");
+        assert_eq!(dev.plugin_id, "com.visorcraft.linsight.xe");
         assert_eq!(dev.sensor_ids.len(), 1);
         assert_eq!(dev.sensor_ids[0].as_str(), "xe.gpu0.util");
     }

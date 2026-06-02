@@ -297,7 +297,7 @@ Add to the test module at the bottom of `apps/linsight-gui/src/qobjects/overview
             min: Some(0.0),
             max: None,
             device_id: Some("home".into()),
-            plugin_id: "io.visorcraft.linsight.fs".into(),
+            plugin_id: "com.visorcraft.linsight.fs".into(),
             device_key: Some("fs:home".into()),
             device_label: Some("btrfs (/home)".into()),
             tags: vec!["parent:nvme0".into()],

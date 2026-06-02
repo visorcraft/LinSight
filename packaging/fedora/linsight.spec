@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.7.2
+Version:        1.7.3
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -61,17 +61,17 @@ cd %{_builddir}/%{name}-%{version}
 install -Dm755 %{cargo_target}/release/linsight     %{buildroot}%{_bindir}/linsight
 install -Dm755 %{cargo_target}/release/linsightd    %{buildroot}%{_bindir}/linsightd
 install -Dm755 %{cargo_target}/release/linsight-cli %{buildroot}%{_bindir}/linsight-cli
-install -Dm644 packaging/io.visorcraft.LinSight.desktop \
-    %{buildroot}%{_datadir}/applications/io.visorcraft.LinSight.desktop
-install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml \
-    %{buildroot}%{_datadir}/metainfo/io.visorcraft.LinSight.metainfo.xml
+install -Dm644 packaging/com.visorcraft.LinSight.desktop \
+    %{buildroot}%{_datadir}/applications/com.visorcraft.LinSight.desktop
+install -Dm644 packaging/com.visorcraft.LinSight.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/com.visorcraft.LinSight.metainfo.xml
 install -Dm644 packaging/systemd/linsight.service \
     %{buildroot}%{_userunitdir}/linsight.service
-install -Dm644 packaging/icons/scalable/apps/io.visorcraft.LinSight.svg \
-    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.visorcraft.LinSight.svg
+install -Dm644 packaging/icons/scalable/apps/com.visorcraft.LinSight.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.visorcraft.LinSight.svg
 for _s in 16 24 32 48 64 96 128 192 256 512; do
-  install -Dm644 packaging/icons/${_s}x${_s}/apps/io.visorcraft.LinSight.png \
-    %{buildroot}%{_datadir}/icons/hicolor/${_s}x${_s}/apps/io.visorcraft.LinSight.png
+  install -Dm644 packaging/icons/${_s}x${_s}/apps/com.visorcraft.LinSight.png \
+    %{buildroot}%{_datadir}/icons/hicolor/${_s}x${_s}/apps/com.visorcraft.LinSight.png
 done
 install -d %{buildroot}%{_libdir}/linsight/plugins
 
@@ -81,13 +81,19 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %{_bindir}/linsight
 %{_bindir}/linsightd
 %{_bindir}/linsight-cli
-%{_datadir}/applications/io.visorcraft.LinSight.desktop
-%{_datadir}/metainfo/io.visorcraft.LinSight.metainfo.xml
+%{_datadir}/applications/com.visorcraft.LinSight.desktop
+%{_datadir}/metainfo/com.visorcraft.LinSight.metainfo.xml
 %{_userunitdir}/linsight.service
-%{_datadir}/icons/hicolor/*/apps/io.visorcraft.LinSight.*
+%{_datadir}/icons/hicolor/*/apps/com.visorcraft.LinSight.*
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.3-1
+- v1.7.3 release. Rename the application ID from io.visorcraft.LinSight to
+  com.visorcraft.LinSight (desktop entry, AppStream metainfo, icons, Flatpak
+  app-id, GUI window id) to match the visorcraft.com domain, and the sensor
+  plugin-ids from io.visorcraft.linsight.* to com.visorcraft.linsight.*.
+  NOTE: a pinned launcher must be re-pinned after upgrading.
 * Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.2-1
 - v1.7.2 release. Rename the bundled third-party credits to
   docs/third-party-notices.md and regenerate against the current dependency

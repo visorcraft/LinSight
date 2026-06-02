@@ -100,7 +100,7 @@ impl MemPlugin {
             },
         ];
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.mem".into(),
+            plugin_id: "com.visorcraft.linsight.mem".into(),
             display_name: "Memory".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

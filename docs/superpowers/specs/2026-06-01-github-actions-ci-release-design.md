@@ -189,15 +189,15 @@ the stale hardcoded versions catalogued above.
   `cargo test` is **not** repeated here — `ci.yml` already runs it on
   every push, and the `.deb` build re-tests in release mode. This job's
   purpose is to produce artifacts.)
-- Validate `packaging/io.visorcraft.LinSight.desktop` +
-  `io.visorcraft.LinSight.metainfo.xml`.
+- Validate `packaging/com.visorcraft.LinSight.desktop` +
+  `com.visorcraft.LinSight.metainfo.xml`.
 - `cargo build --workspace --release --locked`.
 - Offscreen GUI smoke: `QT_QPA_PLATFORM=offscreen timeout 5
   target/release/linsight`; accept exit 0 / 124 / 143.
 - Stage `linsight-<version>-linux-x86_64.tar.gz` containing:
   - `bin/linsight`, `bin/linsightd`, `bin/linsight-cli`
-  - `share/applications/io.visorcraft.LinSight.desktop`
-  - `share/metainfo/io.visorcraft.LinSight.metainfo.xml`
+  - `share/applications/com.visorcraft.LinSight.desktop`
+  - `share/metainfo/com.visorcraft.LinSight.metainfo.xml`
   - `lib/systemd/user/linsight.service`
   - `README.md`, `LICENSE`
   - (reproducible tar: `--sort=name --owner=0 --group=0
@@ -318,7 +318,7 @@ The Flatpak module runs `cargo --offline build --locked` against a
 `.cargo/config.toml` is bare `[build]`, and `just flatpak-vendor` never
 writes a vendor source-replacement config. Fix:
 
-- **Manifest fix (`packaging/flatpak/io.visorcraft.LinSight.yml`):** add
+- **Manifest fix (`packaging/flatpak/com.visorcraft.LinSight.yml`):** add
   a build-command, before the `cargo --offline build`, that writes a
   cargo config into `$CARGO_HOME` (already set to
   `/run/build/linsight/cargo`) redirecting crates.io to the vendored
@@ -351,9 +351,9 @@ writes a vendor source-replacement config. Fix:
      apply here).
   4. `just flatpak-vendor` (produces `packaging/flatpak/vendor.tar.gz`).
   5. `flatpak-builder --repo=…/repo --force-clean build
-     packaging/flatpak/io.visorcraft.LinSight.yml`.
+     packaging/flatpak/com.visorcraft.LinSight.yml`.
   6. `flatpak build-bundle …/repo linsight-<version>.flatpak
-     io.visorcraft.LinSight master`.
+     com.visorcraft.LinSight master`.
   7. Upload artifact `flatpak`.
 - **Resilience:** like AppImage, `publish` does not hard-depend on this
   job.
@@ -384,7 +384,7 @@ Beyond the three workflow files, this work touches packaging so the
 1. **`packaging/appimage/AppImageBuilder.yml`** — dynamic version +
    populated `script:` (see §4.7).
 2. **`Justfile`** — new `appimage` recipe (local parity with §4.7).
-3. **`packaging/flatpak/io.visorcraft.LinSight.yml`** — vendor
+3. **`packaging/flatpak/com.visorcraft.LinSight.yml`** — vendor
    source-replacement config write before the offline build (see §4.8).
 4. **Sync all in-tree packaging version fields to the workspace
    version (`1.7.0`).** The workflow patches them from the tag at build

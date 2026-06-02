@@ -60,7 +60,7 @@ nine separate PRs.
    hardcodes plugin IDs instead of reading them from the host.
 
 3. **Hardcoded values that should be named constants.** `tile0/gt0`
-   (xe), `nvme0n1` (nvme), `io.visorcraft.linsight.cpu` (daemon
+   (xe), `nvme0n1` (nvme), `com.visorcraft.linsight.cpu` (daemon
    transport), `0.1..=20.0` Hz (`SensorDescriptor::clamped_rate_hz`
    not shared with `scheduler.rs`), tile dimensions `200×120` and
    centering offset `100, 60` (`CanvasEditorPage.qml`), page header
@@ -92,7 +92,7 @@ nine separate PRs.
 ### CR-1. Daemon transport hardcodes `plugin_id` for every sensor
 **`apps/linsightd/src/transport/unix.rs:75-80` and `:130`** — Both the
 `Welcome` plugin list and every `SensorInfo` from `ListSensors`
-hardcode `plugin_id = "io.visorcraft.linsight.cpu"` regardless of which
+hardcode `plugin_id = "com.visorcraft.linsight.cpu"` regardless of which
 plugin actually owns the sensor. Adding any built-in beyond CPU (mem,
 net, xe, nvml, nvme — all of them) results in the daemon claiming they
 belong to the CPU plugin. Any client that filters by plugin is broken.

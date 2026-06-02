@@ -151,7 +151,7 @@ impl DiskPlugin {
         }
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.disk".into(),
+            plugin_id: "com.visorcraft.linsight.disk".into(),
             display_name: "Disk I/O".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

@@ -358,7 +358,7 @@ mod tests {
     fn test_registry() -> HardwareRegistry {
         let d = [dev("pci:0000:06:00.0", "Intel Arc B-series", Some("Intel Corporation"))];
         let s = [sensor("xe.gpu0.util", Some("pci:0000:06:00.0"), Some("gpu0"))];
-        HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &s)], HashMap::new())
+        HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &s)], HashMap::new())
     }
 
     #[test]
@@ -367,7 +367,7 @@ mod tests {
         let rows = vec![(
             sensor("xe.gpu0.util", Some("pci:0000:06:00.0"), Some("gpu0")),
             Some(sample_scalar("xe.gpu0.util", 27.6)),
-            "io.visorcraft.linsight.xe".to_owned(),
+            "com.visorcraft.linsight.xe".to_owned(),
         )];
         let body = render(&reg, &rows);
         assert!(
@@ -391,7 +391,7 @@ mod tests {
         assert!(body.contains(r#"model="Intel Arc B-series""#));
         assert!(body.contains(r#"vendor="Intel Corporation""#));
         assert!(body.contains(r#"category="gpu""#));
-        assert!(body.contains(r#"plugin_id="io.visorcraft.linsight.xe""#));
+        assert!(body.contains(r#"plugin_id="com.visorcraft.linsight.xe""#));
         // Empty nickname when none set — Prometheus tolerates the empty
         // value on info-metric labels (this is NOT the per-sample
         // empty-device_key concern; this is a *different* label).
@@ -409,7 +409,7 @@ mod tests {
         let mut raw_nicks = HashMap::new();
         raw_nicks.insert(key.as_str().to_owned(), "a\"b\\c\nd".to_owned());
         let d = [dev("pci:0000:06:00.0", "Intel Arc B-series", Some("Intel Corporation"))];
-        let reg = HardwareRegistry::build(&[("io.visorcraft.linsight.xe", &d, &[])], raw_nicks);
+        let reg = HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], raw_nicks);
         let body = render(&reg, &[]);
         assert!(
             body.contains(r#"nickname="a\"b\\c\nd""#),
@@ -427,7 +427,7 @@ mod tests {
         let rows = vec![(
             sensor("mem.used", None, None),
             Some(sample_scalar("mem.used", 1.5)),
-            "io.visorcraft.linsight.mem".to_owned(),
+            "com.visorcraft.linsight.mem".to_owned(),
         )];
         let body = render(&reg, &rows);
         assert!(
@@ -457,7 +457,7 @@ mod tests {
             // matches the fixture's plugin_device_id.
             sensor("xe.gpu0.util", None, Some("gpu0")),
             Some(sample_scalar("xe.gpu0.util", 50.0)),
-            "io.visorcraft.linsight.xe".to_owned(),
+            "com.visorcraft.linsight.xe".to_owned(),
         )];
         let body = render(&reg, &rows);
         assert!(

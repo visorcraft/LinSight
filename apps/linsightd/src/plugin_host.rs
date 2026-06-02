@@ -545,7 +545,7 @@ mod tests {
         let mut host = empty_host();
         let mut configs: HashMap<String, serde_json::Value> = HashMap::new();
         configs.insert(
-            "io.visorcraft.linsight.example.echo".to_string(),
+            "com.visorcraft.linsight.example.echo".to_string(),
             serde_json::json!({ "enable_extra": true }),
         );
         host.load_from_dir(dir.path(), &configs);

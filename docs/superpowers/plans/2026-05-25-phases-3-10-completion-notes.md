@@ -117,15 +117,15 @@ icon set) — agent-non-friendly visual iteration.
 - Flatpak manifest (`org.kde.Platform//6.10` runtime, vendored crates)
 - AppImage builder manifest
 - systemd user unit (already in place since Phase 7)
-- Desktop entry (`io.visorcraft.LinSight.desktop`)
-- AppStream metainfo (`io.visorcraft.LinSight.metainfo.xml`)
+- Desktop entry (`com.visorcraft.LinSight.desktop`)
+- AppStream metainfo (`com.visorcraft.LinSight.metainfo.xml`)
 
 Justfile targets: `just arch-pkg`, `just arch-pkg-v3`, `just flatpak`
 (with auto vendoring via `just flatpak-vendor`).
 
 Deferred: icon SVG/PNG assets (we don't have brand design output for
 LinSight yet). The `Icon=` line in the .desktop file points at
-`io.visorcraft.LinSight` which falls back to the generic monitor icon
+`com.visorcraft.LinSight` which falls back to the generic monitor icon
 until proper assets land.
 
 ## What requires user input (deferred to the very end)
@@ -135,7 +135,7 @@ until proper assets land.
    git push origin master --tags
    ```
 2. **Ship icon assets** — provide hicolor SVG + PNG icons at
-   `packaging/icons/{16x16,24x24,...,512x512,scalable}/apps/io.visorcraft.LinSight.{png,svg}`
+   `packaging/icons/{16x16,24x24,...,512x512,scalable}/apps/com.visorcraft.LinSight.{png,svg}`
    and reference them from the Arch/Debian/Fedora install steps the
    same way Grexa does it.
 3. **Visual iteration on**: QML custom-canvas editor (Phase 6b),

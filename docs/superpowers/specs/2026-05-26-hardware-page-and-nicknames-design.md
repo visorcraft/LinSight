@@ -266,11 +266,11 @@ is **what the plugin must emit**, not what the daemon does.
 
 | plugin                              | key scheme                           | model source                                                            | fallback                            |
 |-------------------------------------|--------------------------------------|-------------------------------------------------------------------------|-------------------------------------|
-| `io.visorcraft.linsight.cpu`        | `cpu:0`                              | `/proc/cpuinfo` `model name`                                            | `"CPU"`                             |
-| `io.visorcraft.linsight.xe`         | `pci:<slot>`                         | `/sys/.../{vendor,device}` → pci.ids                                    | `"Intel GPU (<vendor>:<device>)"`   |
-| `io.visorcraft.linsight.nvml`       | `nvml:uuid:<u>`                      | NVML `dev.name()`                                                       | `"NVIDIA GPU (gpu<i>)"`             |
-| `io.visorcraft.linsight.nvme`       | `nvme:<wwid>`                        | `/sys/class/nvme/<n>/model`                                             | `"NVMe SSD (<n>)"`                  |
-| `io.visorcraft.linsight.net`        | `net:<ifname>`                       | If PCI-backed: `/sys/class/net/<if>/device` → pci.ids; else driver name | `"<ifname>"`                        |
+| `com.visorcraft.linsight.cpu`        | `cpu:0`                              | `/proc/cpuinfo` `model name`                                            | `"CPU"`                             |
+| `com.visorcraft.linsight.xe`         | `pci:<slot>`                         | `/sys/.../{vendor,device}` → pci.ids                                    | `"Intel GPU (<vendor>:<device>)"`   |
+| `com.visorcraft.linsight.nvml`       | `nvml:uuid:<u>`                      | NVML `dev.name()`                                                       | `"NVIDIA GPU (gpu<i>)"`             |
+| `com.visorcraft.linsight.nvme`       | `nvme:<wwid>`                        | `/sys/class/nvme/<n>/model`                                             | `"NVMe SSD (<n>)"`                  |
+| `com.visorcraft.linsight.net`        | `net:<ifname>`                       | If PCI-backed: `/sys/class/net/<if>/device` → pci.ids; else driver name | `"<ifname>"`                        |
 | third-party `.so` (no `devices`)    | daemon synthesizes `plugin:<plugin_id>:<device_id>` from `SensorDescriptor.device_id` | uses `SensorDescriptor.display_name`            | the synthesized key itself          |
 
 ### Shared pci.ids helper
@@ -506,7 +506,7 @@ linsight_xe_gpu_util{device_key="pci:0000:06:00.0"} 27.6
 
 # HELP linsight_hardware_info Static hardware metadata
 # TYPE linsight_hardware_info gauge
-linsight_hardware_info{device_key="pci:0000:06:00.0",category="gpu",model="Intel Arc B-series",nickname="Battlemage",plugin_id="io.visorcraft.linsight.xe"} 1
+linsight_hardware_info{device_key="pci:0000:06:00.0",category="gpu",model="Intel Arc B-series",nickname="Battlemage",plugin_id="com.visorcraft.linsight.xe"} 1
 ```
 
 Two changes from today:

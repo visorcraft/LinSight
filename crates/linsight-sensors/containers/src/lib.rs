@@ -174,7 +174,7 @@ impl LinsightPlugin for ContainersPlugin {
     }
 }
 
-const PLUGIN_ID: &str = "io.visorcraft.linsight.containers";
+const PLUGIN_ID: &str = "com.visorcraft.linsight.containers";
 
 fn cgroup_root(sysroot: Option<&Path>) -> PathBuf {
     match sysroot {

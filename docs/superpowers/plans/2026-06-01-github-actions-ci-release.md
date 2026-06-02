@@ -47,7 +47,7 @@ python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1])); print('yaml ok')
 - `packaging/opensuse/linsight.spec` — `Version: 1.6.0` → `1.7.0`
 - `packaging/debian/changelog` — prepend `1.7.0-1` entry
 - `packaging/appimage/AppImageBuilder.yml` — version `0.3.0` → `1.7.0`, populate `script:`
-- `packaging/flatpak/io.visorcraft.LinSight.yml` — vendor-config write + `strip-components: 1`
+- `packaging/flatpak/com.visorcraft.LinSight.yml` — vendor-config write + `strip-components: 1`
 - `Justfile` — new `appimage` recipe
 
 ---
@@ -314,7 +314,7 @@ prefix) is extracted with `strip-components: 0` into `dest: vendor`,
 double-nesting it to `vendor/vendor/`. Fix both.
 
 **Files:**
-- Modify: `packaging/flatpak/io.visorcraft.LinSight.yml`
+- Modify: `packaging/flatpak/com.visorcraft.LinSight.yml`
 
 - [ ] **Step 1: Confirm vendoring produces a `vendor/`-prefixed archive**
 
@@ -329,7 +329,7 @@ as-is and adjust the manifest's `strip-components` instead.)
 
 - [ ] **Step 2: Add the vendor-config write to the build-commands**
 
-In `packaging/flatpak/io.visorcraft.LinSight.yml`, replace the module's
+In `packaging/flatpak/com.visorcraft.LinSight.yml`, replace the module's
 `build-commands:` opening so the first thing it does is write a cargo
 config redirecting crates.io to the vendored sources. Change:
 
@@ -384,7 +384,7 @@ Change `strip-components: 0` to `strip-components: 1` so the archive's
 - [ ] **Step 4: Validate YAML**
 
 ```bash
-python3 -c "import yaml; yaml.safe_load(open('packaging/flatpak/io.visorcraft.LinSight.yml')); print('yaml ok')"
+python3 -c "import yaml; yaml.safe_load(open('packaging/flatpak/com.visorcraft.LinSight.yml')); print('yaml ok')"
 ```
 
 Expected: `yaml ok`.
@@ -404,7 +404,7 @@ the rc-tag stage (Task 11) since it needs the KDE 6.10 runtime.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packaging/flatpak/io.visorcraft.LinSight.yml
+git add packaging/flatpak/com.visorcraft.LinSight.yml
 git commit -m "fix(flatpak): wire vendored cargo sources + un-nest vendor archive"
 ```
 
@@ -441,14 +441,14 @@ script:
   - install -Dm755 target/release/linsight     AppDir/usr/bin/linsight
   - install -Dm755 target/release/linsightd    AppDir/usr/bin/linsightd
   - install -Dm755 target/release/linsight-cli AppDir/usr/bin/linsight-cli
-  - install -Dm644 packaging/io.visorcraft.LinSight.desktop
-      AppDir/usr/share/applications/io.visorcraft.LinSight.desktop
-  - install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml
-      AppDir/usr/share/metainfo/io.visorcraft.LinSight.metainfo.xml
-  - install -Dm644 packaging/icons/scalable/apps/io.visorcraft.LinSight.svg
-      AppDir/usr/share/icons/hicolor/scalable/apps/io.visorcraft.LinSight.svg
-  - install -Dm644 packaging/icons/256x256/apps/io.visorcraft.LinSight.png
-      AppDir/usr/share/icons/hicolor/256x256/apps/io.visorcraft.LinSight.png
+  - install -Dm644 packaging/com.visorcraft.LinSight.desktop
+      AppDir/usr/share/applications/com.visorcraft.LinSight.desktop
+  - install -Dm644 packaging/com.visorcraft.LinSight.metainfo.xml
+      AppDir/usr/share/metainfo/com.visorcraft.LinSight.metainfo.xml
+  - install -Dm644 packaging/icons/scalable/apps/com.visorcraft.LinSight.svg
+      AppDir/usr/share/icons/hicolor/scalable/apps/com.visorcraft.LinSight.svg
+  - install -Dm644 packaging/icons/256x256/apps/com.visorcraft.LinSight.png
+      AppDir/usr/share/icons/hicolor/256x256/apps/com.visorcraft.LinSight.png
 ```
 
 (`linsightd` is bundled because the GUI auto-spawns it as a child; it
@@ -645,8 +645,8 @@ jobs:
 
       - name: Validate desktop file + metainfo
         run: |
-          desktop-file-validate packaging/io.visorcraft.LinSight.desktop
-          appstreamcli validate --no-net packaging/io.visorcraft.LinSight.metainfo.xml
+          desktop-file-validate packaging/com.visorcraft.LinSight.desktop
+          appstreamcli validate --no-net packaging/com.visorcraft.LinSight.metainfo.xml
 
       - name: Build release binaries
         run: cargo build --workspace --release --locked
@@ -681,10 +681,10 @@ jobs:
           install -m755 target/release/linsight     "$staging/bin/linsight"
           install -m755 target/release/linsightd    "$staging/bin/linsightd"
           install -m755 target/release/linsight-cli "$staging/bin/linsight-cli"
-          install -m644 packaging/io.visorcraft.LinSight.desktop \
-            "$staging/share/applications/io.visorcraft.LinSight.desktop"
-          install -m644 packaging/io.visorcraft.LinSight.metainfo.xml \
-            "$staging/share/metainfo/io.visorcraft.LinSight.metainfo.xml"
+          install -m644 packaging/com.visorcraft.LinSight.desktop \
+            "$staging/share/applications/com.visorcraft.LinSight.desktop"
+          install -m644 packaging/com.visorcraft.LinSight.metainfo.xml \
+            "$staging/share/metainfo/com.visorcraft.LinSight.metainfo.xml"
           install -m644 packaging/systemd/linsight.service \
             "$staging/lib/systemd/user/linsight.service"
           install -m644 README.md "$staging/README.md"
@@ -1237,9 +1237,9 @@ Add both jobs under `jobs:` (after `opensuse-pkg`, before `publish`):
         run: |
           flatpak-builder --user --disable-rofiles-fuse --force-clean \
             --repo=flatpak-repo flatpak-build \
-            packaging/flatpak/io.visorcraft.LinSight.yml
+            packaging/flatpak/com.visorcraft.LinSight.yml
           flatpak build-bundle flatpak-repo \
-            "linsight-${VERSION}.flatpak" io.visorcraft.LinSight master
+            "linsight-${VERSION}.flatpak" com.visorcraft.LinSight master
       - name: Stage Flatpak + sha256
         env:
           VERSION: ${{ needs.linux-tarball.outputs.version }}

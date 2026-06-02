@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
-app-id: io.visorcraft.LinSight
+app-id: com.visorcraft.LinSight
 runtime: org.kde.Platform
 runtime-version: '6.10'
 sdk: org.kde.Sdk
@@ -51,16 +51,16 @@ modules:
       - install -Dm755 target/release/linsight     /app/bin/linsight
       - install -Dm755 target/release/linsightd    /app/bin/linsightd
       - install -Dm755 target/release/linsight-cli /app/bin/linsight-cli
-      - install -Dm644 packaging/io.visorcraft.LinSight.desktop
-          /app/share/applications/io.visorcraft.LinSight.desktop
-      - install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml
-          /app/share/metainfo/io.visorcraft.LinSight.metainfo.xml
-      - install -Dm644 packaging/icons/64x64/apps/io.visorcraft.LinSight.png
-          /app/share/icons/hicolor/64x64/apps/io.visorcraft.LinSight.png
-      - install -Dm644 packaging/icons/128x128/apps/io.visorcraft.LinSight.png
-          /app/share/icons/hicolor/128x128/apps/io.visorcraft.LinSight.png
-      - install -Dm644 packaging/icons/256x256/apps/io.visorcraft.LinSight.png
-          /app/share/icons/hicolor/256x256/apps/io.visorcraft.LinSight.png
+      - install -Dm644 packaging/com.visorcraft.LinSight.desktop
+          /app/share/applications/com.visorcraft.LinSight.desktop
+      - install -Dm644 packaging/com.visorcraft.LinSight.metainfo.xml
+          /app/share/metainfo/com.visorcraft.LinSight.metainfo.xml
+      - install -Dm644 packaging/icons/64x64/apps/com.visorcraft.LinSight.png
+          /app/share/icons/hicolor/64x64/apps/com.visorcraft.LinSight.png
+      - install -Dm644 packaging/icons/128x128/apps/com.visorcraft.LinSight.png
+          /app/share/icons/hicolor/128x128/apps/com.visorcraft.LinSight.png
+      - install -Dm644 packaging/icons/256x256/apps/com.visorcraft.LinSight.png
+          /app/share/icons/hicolor/256x256/apps/com.visorcraft.LinSight.png
     sources:
       - type: dir
         path: ../..

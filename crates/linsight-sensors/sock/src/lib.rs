@@ -97,7 +97,7 @@ impl SockPlugin {
             .collect();
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.sock".into(),
+            plugin_id: "com.visorcraft.linsight.sock".into(),
             display_name: "Sockets".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,
@@ -107,7 +107,7 @@ impl SockPlugin {
                 model: "Network Sockets".into(),
                 vendor: None,
                 location: None,
-                plugin_id: "io.visorcraft.linsight.sock".into(),
+                plugin_id: "com.visorcraft.linsight.sock".into(),
                 plugin_device_id: "sock".into(),
                 sensor_ids: vec![],
             }],

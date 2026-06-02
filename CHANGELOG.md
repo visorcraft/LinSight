@@ -9,6 +9,16 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-06-02
+
+- **Application ID renamed to `com.visorcraft.LinSight`** to match the
+  visorcraft.com domain (and align with the sibling LinSync app). This covers
+  the desktop entry, AppStream metainfo, hicolor icons, the Flatpak app-id, and
+  the GUI's window id (`set_desktop_file_name`). The sensor plugin-ids were
+  likewise renamed `io.visorcraft.linsight.*` → `com.visorcraft.linsight.*`.
+  **Upgrade note:** a pinned launcher/taskbar shortcut references the old
+  app-id and must be re-pinned to LinSight after upgrading.
+
 ## [1.7.2] — 2026-06-02
 
 - **Third-party notices renamed + regenerated.** `docs/credits-third-party.md`
@@ -581,7 +591,7 @@ High finding. Full punch lists:
 #### Correctness
 - Daemon transport now reports the real plugin list and per-sensor
   `plugin_id` in `Welcome` / `SensorList`. Previously hardcoded
-  `"io.visorcraft.linsight.cpu"` for every sensor, breaking any client
+  `"com.visorcraft.linsight.cpu"` for every sensor, breaking any client
   that filtered by plugin. (`apps/linsightd/src/transport/unix.rs`)
 - CLI `read` now bails with "sensor not found" instead of hanging
   forever when given an unknown sensor name. (`crates/linsight-cli/src/commands/read.rs`)

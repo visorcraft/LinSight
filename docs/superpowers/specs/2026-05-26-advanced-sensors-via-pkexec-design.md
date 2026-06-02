@@ -103,7 +103,7 @@ Attack surface analysis:
   hardening checklist documented in this spec.
 - **pkexec invocation.** A PolKit `.policy` file ships with the
   package. The policy declares the action ID
-  `io.visorcraft.linsight.refresh-advanced-sensors`, requires
+  `com.visorcraft.linsight.refresh-advanced-sensors`, requires
   `auth_admin` (admin password), and points at the helper's
   installed path. PolKit handles the password prompt; LinSight
   never sees or stores the password.
@@ -234,16 +234,16 @@ Key invariants enforced at startup:
 
 ## PolKit policy
 
-Ships at `/usr/share/polkit-1/actions/io.visorcraft.linsight.policy`:
+Ships at `/usr/share/polkit-1/actions/com.visorcraft.linsight.policy`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE policyconfig PUBLIC ...>
 <policyconfig>
-  <action id="io.visorcraft.linsight.refresh-advanced-sensors">
+  <action id="com.visorcraft.linsight.refresh-advanced-sensors">
     <description>Refresh LinSight's advanced hardware sensors</description>
     <message>LinSight needs administrator access to read memory speed and SMART data.</message>
-    <icon_name>io.visorcraft.LinSight</icon_name>
+    <icon_name>com.visorcraft.LinSight</icon_name>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
@@ -385,8 +385,8 @@ Fedora, Flatpak):
 | Path | Owner | Mode | Notes |
 |---|---|---|---|
 | `/usr/lib/linsight/linsight-privileged-probe` | root | 0755 | Helper binary; NOT setuid (pkexec invokes it) |
-| `/usr/share/polkit-1/actions/io.visorcraft.linsight.policy` | root | 0644 | PolKit action |
-| `/usr/share/dbus-1/system.d/io.visorcraft.linsight.conf` | — | — | None — the helper doesn't speak DBus |
+| `/usr/share/polkit-1/actions/com.visorcraft.linsight.policy` | root | 0644 | PolKit action |
+| `/usr/share/dbus-1/system.d/com.visorcraft.linsight.conf` | — | — | None — the helper doesn't speak DBus |
 
 Flatpak constraint: the sandboxed flatpak version CANNOT install
 a polkit policy or run pkexec. Flatpak users see the toggle

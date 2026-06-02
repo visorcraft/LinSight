@@ -272,7 +272,7 @@ impl FsPlugin {
         }
         inner.mounts = resolved_mounts;
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.fs".into(),
+            plugin_id: "com.visorcraft.linsight.fs".into(),
             display_name: "Filesystem".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

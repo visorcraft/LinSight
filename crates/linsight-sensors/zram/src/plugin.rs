@@ -105,7 +105,7 @@ impl ZramPlugin {
             });
         }
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.zram".into(),
+            plugin_id: "com.visorcraft.linsight.zram".into(),
             display_name: "ZRAM".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

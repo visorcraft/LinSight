@@ -474,7 +474,7 @@ impl SystemPlugin {
         }
 
         Ok(PluginManifest {
-            plugin_id: "io.visorcraft.linsight.system".into(),
+            plugin_id: "com.visorcraft.linsight.system".into(),
             display_name: "System".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             sensors,

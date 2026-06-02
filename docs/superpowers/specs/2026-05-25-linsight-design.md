@@ -135,8 +135,8 @@ linsight/
 │   ├── appimage/
 │   ├── icons/
 │   ├── systemd/linsight.service      # user unit for always-on mode
-│   ├── io.visorcraft.LinSight.desktop
-│   └── io.visorcraft.LinSight.metainfo.xml
+│   ├── com.visorcraft.LinSight.desktop
+│   └── com.visorcraft.LinSight.metainfo.xml
 ├── scripts/
 ├── tests/
 ├── AGENTS.md
@@ -474,7 +474,7 @@ sensor on scrape, never blocking on a fresh read. Sensors not in
 | `packaging/flatpak/` | Flatpak — full sensor access requires `--filesystem=host:ro` + `--device=all`; ships with those overrides since they're necessary to read `/sys/class/hwmon`. Runtime plugin loading from `$XDG_DATA_HOME` works via the Flatpak host path. Less sandboxed than ideal; documented. |
 | `packaging/appimage/` | appimage-builder; bundles Qt 6 + Kirigami |
 | `packaging/systemd/linsight.service` | User unit installed, **not enabled by default** |
-| `packaging/io.visorcraft.LinSight.desktop` | Desktop entry; launches `linsight` |
+| `packaging/com.visorcraft.LinSight.desktop` | Desktop entry; launches `linsight` |
 
 ## Performance targets
 
