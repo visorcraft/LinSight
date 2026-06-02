@@ -275,7 +275,8 @@ mod tests {
     fn build_fills_in_plugin_id_and_collects_sensors() {
         let d = [dev("pci:0000:06:00.0", "Arc B-series", "gpu0")];
         let s = [sensor("xe.gpu0.util", Some("pci:0000:06:00.0"))];
-        let reg = HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &s)], HashMap::new());
+        let reg =
+            HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &s)], HashMap::new());
         let key = HardwareDeviceKey::try_new("pci:0000:06:00.0").unwrap();
         let device = reg.devices.get(&key).unwrap();
         assert_eq!(device.plugin_id, "com.visorcraft.linsight.xe");
