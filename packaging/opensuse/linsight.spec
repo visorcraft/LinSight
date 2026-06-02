@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.7.0
+Version:        1.7.1
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -51,6 +51,12 @@ install -Dm644 packaging/io.visorcraft.LinSight.metainfo.xml \
     %{buildroot}%{_datadir}/metainfo/io.visorcraft.LinSight.metainfo.xml
 install -Dm644 packaging/systemd/linsight.service \
     %{buildroot}%{_userunitdir}/linsight.service
+install -Dm644 packaging/icons/scalable/apps/io.visorcraft.LinSight.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.visorcraft.LinSight.svg
+for _s in 16 24 32 48 64 96 128 192 256 512; do
+  install -Dm644 packaging/icons/${_s}x${_s}/apps/io.visorcraft.LinSight.png \
+    %{buildroot}%{_datadir}/icons/hicolor/${_s}x${_s}/apps/io.visorcraft.LinSight.png
+done
 install -d %{buildroot}%{_libdir}/linsight/plugins
 
 %files
@@ -62,9 +68,13 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %{_datadir}/applications/io.visorcraft.LinSight.desktop
 %{_datadir}/metainfo/io.visorcraft.LinSight.metainfo.xml
 %{_userunitdir}/linsight.service
+%{_datadir}/icons/hicolor/*/apps/io.visorcraft.LinSight.*
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.1-1
+- v1.7.1 release. GitHub Actions CI + multi-format release automation;
+  packaging fixes and launcher icons in the RPM/DEB packages.
 * Mon Jun 01 2026 VisorCraft LLC <support@visorcraft.com> - 1.7.0-1
 - v1.7.0 release. Plugin panic isolation (ABI v6) and audit-driven
   security hardening.

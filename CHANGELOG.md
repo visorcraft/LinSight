@@ -9,6 +9,19 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-06-02
+
+- **GitHub Actions CI + release automation.** A lean per-push CI gate
+  (`fmt` + `clippy` + `cargo test`), a weekly `cargo-deny`/`cargo-audit`
+  security workflow, and a tag-triggered release pipeline that builds and
+  publishes every distributable format — portable tarball, Arch + arch-v3
+  `pkg.tar.zst`, Debian `.deb`, Fedora and openSUSE `.rpm`, AppImage, and a
+  Flatpak bundle — with aggregated `sha256sums.txt`.
+- **Packaging fixes** surfaced while wiring the release builds: repaired the
+  AppImage and Flatpak recipes, corrected the Debian runtime dependencies so
+  the `.deb` installs on trixie, fixed the RPM build under rpm 6.0, and added
+  hicolor launcher icons to the RPM and DEB packages.
+
 ## [1.7.0] — 2026-06-01
 
 - **Plugin panic isolation now actually works (plugin ABI v5 → v6).** A

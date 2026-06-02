@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.7.1" date="2026-06-02">
+      <description>
+        <p>Packaging and release-automation update: continuous integration
+        plus one-command multi-format release builds (portable tarball, Arch,
+        Debian, Fedora, openSUSE, AppImage and Flatpak), with assorted
+        packaging fixes and launcher icons in the distro packages.</p>
+      </description>
+    </release>
     <release version="1.7.0" date="2026-06-01">
       <description>
         <p>Security and robustness hardening: a panicking plugin is now
