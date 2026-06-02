@@ -328,11 +328,15 @@ jobs:
             set -euo pipefail
             export RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
             git config --global --add safe.directory "$GITHUB_WORKSPACE"
-            cd "$GITHUB_WORKSPACE/packaging/fedora"
+            # git archive must run from the repo root: from a subdirectory it
+            # only captures that subtree (dropping packaging/), which breaks
+            # the spec's %install.
+            cd "$GITHUB_WORKSPACE"
             git archive --format=tar.gz \
               --prefix="linsight-'"${VERSION}"'/" \
-              --output="linsight-'"${VERSION}"'.tar.gz" \
+              --output="packaging/fedora/linsight-'"${VERSION}"'.tar.gz" \
               HEAD
+            cd packaging/fedora
             rpmbuild \
               --define "_topdir $(pwd)/_rpmbuild" \
               --define "_sourcedir $(pwd)" \
@@ -383,11 +387,14 @@ jobs:
             set -euo pipefail
             export RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
             git config --global --add safe.directory "$GITHUB_WORKSPACE"
-            cd "$GITHUB_WORKSPACE/packaging/opensuse"
+            # git archive must run from the repo root (a subdirectory only
+            # captures that subtree, dropping packaging/).
+            cd "$GITHUB_WORKSPACE"
             git archive --format=tar.gz \
               --prefix="linsight-'"${VERSION}"'/" \
-              --output="linsight-'"${VERSION}"'.tar.gz" \
+              --output="packaging/opensuse/linsight-'"${VERSION}"'.tar.gz" \
               HEAD
+            cd packaging/opensuse
             rpmbuild \
               --define "_topdir $(pwd)/_rpmbuild" \
               --define "_sourcedir $(pwd)" \
