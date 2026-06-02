@@ -373,7 +373,7 @@ jobs:
           # ...and retry the whole refresh+install a few times to ride out
           # transient mirror timeouts.
           for attempt in 1 2 3 4 5; do
-            if zypper --non-interactive --gpg-auto-import-keys refresh \
+            if zypper --non-interactive refresh \
                && zypper --non-interactive install --no-recommends \
                     rpm-build git tar gzip make \
                     rust cargo clang mold pkgconf-pkg-config \
