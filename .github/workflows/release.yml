@@ -427,7 +427,8 @@ jobs:
             qt6-tools-dev kirigami2-dev libgl1-mesa-dev \
             pkg-config clang ninja-build \
             python3-pip patchelf desktop-file-utils fakeroot zsync \
-            squashfs-tools gnupg2 libglib2.0-bin debian-archive-keyring
+            squashfs-tools gnupg2 libglib2.0-bin debian-archive-keyring \
+            gtk-update-icon-cache
           pip3 install --break-system-packages appimage-builder==1.1.0
       - name: Install Rust 1.95 via rustup
         env:
@@ -506,7 +507,7 @@ jobs:
         run: |
           rm -rf packaging/flatpak/vendor
           cargo vendor --locked packaging/flatpak/vendor >/dev/null
-          tar -C packaging/flatpak -cf packaging/flatpak/vendor.tar.gz vendor/
+          tar -C packaging/flatpak -czf packaging/flatpak/vendor.tar.gz vendor/
       - name: Build + bundle Flatpak
         run: |
           flatpak-builder --user --disable-rofiles-fuse --force-clean \

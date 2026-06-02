@@ -119,7 +119,7 @@ flatpak: flatpak-vendor
 flatpak-vendor:
     rm -rf packaging/flatpak/vendor
     cargo vendor --locked packaging/flatpak/vendor
-    tar -C packaging/flatpak -cf packaging/flatpak/vendor.tar.gz vendor/
+    tar -C packaging/flatpak -czf packaging/flatpak/vendor.tar.gz vendor/
 
 # Build the AppImage via appimage-builder. Injects the workspace version
 # dynamically. Requires `appimage-builder` on PATH.
