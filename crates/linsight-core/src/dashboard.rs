@@ -16,7 +16,7 @@
 //! shipping; this module owns the schema, atomic write, and the migration
 //! framework that future schema bumps will plug into.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -117,21 +117,10 @@ pub fn load(path: &Path) -> CoreResult<DashboardSpec> {
     Ok(spec)
 }
 
-/// Persist a spec atomically (write to `.tmp`, rename). Caller must ensure
-/// the parent directory exists.
+/// Persist a spec with the shared atomic JSON writer.
 pub fn save(path: &Path, spec: &DashboardSpec) -> CoreResult<()> {
-    let json = serde_json::to_string_pretty(spec)
-        .map_err(|e| CoreError::Serialize(format!("serialize: {e}")))?;
-    let tmp = with_suffix(path, ".tmp");
-    std::fs::write(&tmp, json).map_err(|e| CoreError::Io(format!("{}: {e}", tmp.display())))?;
-    std::fs::rename(&tmp, path)
-        .map_err(|e| CoreError::Io(format!("rename {} → {}: {e}", tmp.display(), path.display())))
-}
-
-fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
-    let mut s = p.as_os_str().to_owned();
-    s.push(suffix);
-    PathBuf::from(s)
+    crate::atomic_write_json(path, spec)
+        .map_err(|e| CoreError::Io(format!("{}: {e}", path.display())))
 }
 
 /// One-step migration: bumps `raw` from version N to N+1. Each step is a
@@ -240,6 +229,34 @@ mod tests {
         save(&path, &spec).unwrap();
         let back = load(&path).unwrap();
         assert_eq!(back, spec);
+    }
+
+    #[test]
+    fn save_creates_missing_parent_dirs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("nested/config/dashboard.json");
+        let spec = DashboardSpec::default();
+        save(&path, &spec).unwrap();
+        assert_eq!(load(&path).unwrap(), spec);
+    }
+
+    #[test]
+    fn save_leaves_no_tmp_sibling_after_success() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("dashboard.json");
+        let spec = DashboardSpec::default();
+        save(&path, &spec).unwrap();
+
+        let entries: Vec<_> =
+            std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert!(
+            !entries.iter().any(|name| name == "dashboard.json.tmp"),
+            "stray legacy tmp file: {entries:?}"
+        );
+        assert!(
+            !entries.iter().any(|name| name.to_string_lossy().starts_with("dashboard.json.tmp.")),
+            "stray atomic tmp file: {entries:?}"
+        );
     }
 
     #[test]
