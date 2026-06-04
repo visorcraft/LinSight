@@ -265,7 +265,7 @@ fn enumerate(sysroot: Option<&Path>, extra_exclude: &[String]) -> Vec<DiskDevice
 
         let size_path = entry.path().join("size");
         let capacity_bytes = if let Ok(s) = fs::read_to_string(&size_path) {
-            s.trim().parse::<u64>().map(|sectors| sectors * 512).unwrap_or(0)
+            s.trim().parse::<u64>().map(|sectors| sectors.saturating_mul(512)).unwrap_or(0)
         } else {
             0
         };
@@ -294,11 +294,20 @@ mod tests {
     use super::*;
 
     fn fake_sysroot(devices: &[(&str, &str)]) -> tempfile::TempDir {
+        let devices: Vec<(&str, &str, Option<&str>)> =
+            devices.iter().map(|(name, stat_content)| (*name, *stat_content, None)).collect();
+        fake_sysroot_with_sizes(&devices)
+    }
+
+    fn fake_sysroot_with_sizes(devices: &[(&str, &str, Option<&str>)]) -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().unwrap();
-        for (name, stat_content) in devices {
+        for (name, stat_content, size_content) in devices {
             let p = dir.path().join("sys/class/block").join(name);
             fs::create_dir_all(&p).unwrap();
             fs::write(p.join("stat"), stat_content).unwrap();
+            if let Some(size_content) = size_content {
+                fs::write(p.join("size"), size_content).unwrap();
+            }
         }
         dir
     }
@@ -333,6 +342,21 @@ mod tests {
         assert!(ids.contains(&"disk.sda.iops_read"));
         assert!(ids.contains(&"disk.sda.iops_written"));
         assert!(ids.contains(&"disk.sda.io_util_ms"));
+    }
+
+    #[test]
+    fn capacity_bytes_saturates_extreme_sector_count() {
+        let max_sectors = u64::MAX.to_string();
+        let dir = fake_sysroot_with_sizes(&[(
+            "sda",
+            "0 0 0 0 0 0 0 0 0 0 0",
+            Some(max_sectors.as_str()),
+        )]);
+
+        let devs = enumerate(Some(dir.path()), &[]);
+
+        assert_eq!(devs.len(), 1);
+        assert_eq!(devs[0].capacity_bytes, u64::MAX);
     }
 
     #[test]
