@@ -23,7 +23,9 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,22 +36,30 @@ use tracing::{error, info, warn};
 
 const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_BATCH: usize = 4096;
+const QUEUE_CAPACITY: usize = 16_384;
 
 /// Async-write handle. Cloneable so multiple producers can `record(sample)`
 /// without coordinating around a mutex. Dropping the last clone signals the
 /// writer thread to flush + exit.
 #[derive(Clone)]
 pub struct HistoryWriter {
-    tx: Sender<Sample>,
+    tx: SyncSender<Sample>,
+    dropped: Arc<AtomicU64>,
 }
 
 impl HistoryWriter {
     pub fn record(&self, sample: Sample) {
-        // A full channel means the writer is way behind; dropping the
-        // sample is preferable to blocking the sample loop. We log so the
-        // operator sees pressure.
-        if let Err(e) = self.tx.send(sample) {
-            warn!(error = ?e, "history channel send failed");
+        // The scheduler hot path must never block on history I/O pressure.
+        // Under sustained backlog we intentionally drop samples and let the
+        // writer thread report aggregated pressure.
+        match self.tx.try_send(sample) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                warn!("history channel send failed; writer disconnected");
+            }
         }
     }
 }
@@ -100,17 +110,19 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
         }
     }
 
-    let (tx, rx) = channel::<Sample>();
+    let dropped = Arc::new(AtomicU64::new(0));
+    let writer_dropped = Arc::clone(&dropped);
+    let (tx, rx) = sync_channel::<Sample>(QUEUE_CAPACITY);
     let handle = thread::spawn(move || {
-        if let Err(e) = run_writer(conn, rx) {
+        if let Err(e) = run_writer(conn, rx, writer_dropped) {
             error!(error = ?e, "history writer thread crashed");
         }
     });
     info!(db = %db_path.display(), "history writer ready");
-    Ok((HistoryWriter { tx }, handle))
+    Ok((HistoryWriter { tx, dropped }, handle))
 }
 
-fn run_writer(mut conn: Connection, rx: Receiver<Sample>) -> Result<()> {
+fn run_writer(mut conn: Connection, rx: Receiver<Sample>, dropped: Arc<AtomicU64>) -> Result<()> {
     let mut pending: Vec<Sample> = Vec::with_capacity(MAX_BATCH);
     let mut last_flush = Instant::now();
     loop {
@@ -121,6 +133,7 @@ fn run_writer(mut conn: Connection, rx: Receiver<Sample>) -> Result<()> {
             // final flush are surfaced so an operator notices if the last
             // batch was lost to e.g. disk-full.
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                log_dropped_pressure(&dropped);
                 if !pending.is_empty()
                     && let Err(e) = flush(&mut conn, &pending)
                 {
@@ -132,12 +145,20 @@ fn run_writer(mut conn: Connection, rx: Receiver<Sample>) -> Result<()> {
         if pending.len() >= MAX_BATCH
             || (!pending.is_empty() && last_flush.elapsed() >= FLUSH_INTERVAL)
         {
+            log_dropped_pressure(&dropped);
             if let Err(e) = flush(&mut conn, &pending) {
                 warn!(error = ?e, "history flush failed");
             }
             pending.clear();
             last_flush = Instant::now();
         }
+    }
+}
+
+fn log_dropped_pressure(dropped: &AtomicU64) {
+    let count = dropped.swap(0, Ordering::Relaxed);
+    if count > 0 {
+        warn!(dropped = count, "history queue pressure; dropped samples");
     }
 }
 
@@ -167,9 +188,8 @@ fn flush(conn: &mut Connection, batch: &[Sample]) -> Result<()> {
 }
 
 /// Query historical samples for a sensor within a time window.
-/// When the result set exceeds `max_points`, rows are downsampled by
-/// taking every Nth row (stride = total_rows / max_points) so the
-/// returned points are spread evenly across the time range.
+/// The query downsampling runs in SQLite with window bucketing so Rust
+/// decodes only rows that can be returned.
 /// Opens a read-only connection to avoid blocking the writer thread.
 pub fn query(
     db_path: &Path,
@@ -182,53 +202,74 @@ pub fn query(
         .with_context(|| format!("invalid sensor id for query: {sensor:?}"))?;
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("open {} for query", db_path.display()))?;
-    let limit = max_points.unwrap_or(500).min(10_000) as i64;
-
-    let total: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM samples WHERE sensor_id = ?1 AND ts >= ?2 AND ts <= ?3",
-            params![sensor, since_micros, until_micros],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    let stride = if total > limit { (total as usize / limit as usize).max(1) } else { 1 };
+    let limit = max_points.unwrap_or(500).clamp(1, 10_000) as i64;
 
     let mut stmt = conn.prepare_cached(
-        "SELECT ts, scalar, counter, state FROM samples
-         WHERE sensor_id = ?1 AND ts >= ?2 AND ts <= ?3
-         ORDER BY ts",
+        "WITH ranked AS (
+            SELECT
+                ts,
+                scalar,
+                counter,
+                state,
+                row_number() OVER (ORDER BY ts) AS rn,
+                count(*) OVER () AS total
+            FROM samples
+            WHERE sensor_id = ?1 AND ts >= ?2 AND ts <= ?3
+         ),
+         bucketed AS (
+            SELECT
+                ts,
+                scalar,
+                counter,
+                state,
+                rn,
+                ((rn - 1) * ?4) / total AS bucket
+            FROM ranked
+         ),
+         chosen AS (
+            SELECT
+                ts,
+                scalar,
+                counter,
+                state,
+                row_number() OVER (PARTITION BY bucket ORDER BY rn) AS bucket_rank
+            FROM bucketed
+         )
+         SELECT ts, scalar, counter, state
+         FROM chosen
+         WHERE bucket_rank = 1
+         ORDER BY ts
+         LIMIT ?4",
     )?;
-    let rows = stmt.query_map(params![sensor, since_micros, until_micros], |row| {
-        let ts: i64 = row.get(0)?;
-        let scalar: Option<f64> = row.get(1)?;
-        let counter: Option<i64> = row.get(2)?;
-        let state: Option<String> = row.get(3)?;
-        let reading = match (scalar, counter, state) {
-            (Some(v), _, _) => Reading::Scalar(v),
-            (_, Some(v), _) => Reading::Counter(v as u64),
-            (_, _, Some(v)) => Reading::State(v),
-            (None, None, None) => Reading::Scalar(0.0),
-        };
-        Ok(linsight_core::Sample { sensor: sensor_id.clone(), ts_micros: ts as u64, reading })
-    })?;
+    let rows =
+        stmt.query_map(params![sensor_id.as_str(), since_micros, until_micros, limit], |row| {
+            let ts: i64 = row.get(0)?;
+            let scalar: Option<f64> = row.get(1)?;
+            let counter: Option<i64> = row.get(2)?;
+            let state: Option<String> = row.get(3)?;
+            let reading = match (scalar, counter, state) {
+                (Some(v), _, _) => Reading::Scalar(v),
+                (_, Some(v), _) => Reading::Counter(v as u64),
+                (_, _, Some(v)) => Reading::State(v),
+                (None, None, None) => Reading::Scalar(0.0),
+            };
+            Ok(linsight_core::Sample { sensor: sensor_id.clone(), ts_micros: ts as u64, reading })
+        })?;
 
     let mut samples = Vec::new();
-    for (i, row) in rows.enumerate() {
-        if i % stride == 0 {
-            samples.push(row?);
-        } else {
-            let _ = row?;
-        }
-        if samples.len() as i64 >= limit {
-            break;
-        }
+    for row in rows {
+        samples.push(row?);
     }
     Ok(samples)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::{TryRecvError, channel, sync_channel};
+    use std::time::Duration;
+
     use linsight_core::SensorId;
 
     use super::*;
@@ -252,5 +293,62 @@ mod tests {
         let conn = Connection::open(&db).unwrap();
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn record_drops_when_queue_is_full_without_blocking() {
+        let (tx, rx) = sync_channel::<Sample>(1);
+        let writer = HistoryWriter { tx, dropped: Arc::new(AtomicU64::new(0)) };
+        let sensor = SensorId::new("cpu.util");
+
+        writer.record(Sample {
+            sensor: sensor.clone(),
+            ts_micros: 1,
+            reading: Reading::Scalar(1.0),
+        });
+
+        let (done_tx, done_rx) = channel::<()>();
+        let writer2 = writer.clone();
+        let sensor2 = sensor.clone();
+        let thread = thread::spawn(move || {
+            writer2.record(Sample { sensor: sensor2, ts_micros: 2, reading: Reading::Scalar(2.0) });
+            done_tx.send(()).unwrap();
+        });
+
+        done_rx
+            .recv_timeout(Duration::from_millis(100))
+            .expect("record blocked while queue was full");
+        thread.join().expect("pressure thread panicked");
+
+        assert_eq!(writer.dropped.load(Ordering::Relaxed), 1);
+        assert!(rx.try_recv().is_ok());
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn query_downsamples_with_bounded_even_spread() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = dir.path().join("h.db");
+        let (writer, handle) = spawn(db.clone()).unwrap();
+
+        for ts in 0..103_u64 {
+            writer.record(Sample {
+                sensor: SensorId::new("cpu.util"),
+                ts_micros: ts,
+                reading: Reading::Scalar(ts as f64),
+            });
+        }
+        drop(writer);
+        handle.join().expect("writer thread panicked");
+
+        let samples = query(&db, "cpu.util", 0, 102, Some(10)).unwrap();
+        assert_eq!(samples.len(), 10);
+
+        let ts: Vec<u64> = samples.iter().map(|s| s.ts_micros).collect();
+        assert!(ts.windows(2).all(|w| w[1] > w[0]));
+        let gaps: Vec<u64> = ts.windows(2).map(|w| w[1] - w[0]).collect();
+        let min_gap = *gaps.iter().min().unwrap();
+        let max_gap = *gaps.iter().max().unwrap();
+        assert!(max_gap - min_gap <= 1, "downsample gaps not evenly spread: {:?}", gaps);
     }
 }
