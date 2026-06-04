@@ -9,6 +9,25 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-06-04
+
+- **Daemon correctness and resource hardening.** Per-client subscriptions are
+  isolated so disconnects clean up outstanding sensors and clients no longer
+  receive samples requested by earlier sessions. The history writer now uses a
+  bounded queue with scalable downsampling, and the Prometheus exporter has
+  request-size/time limits while avoiding long scheduler-lock holds during
+  scrapes.
+- **Sensor and plugin performance fixes.** CPU per-core utilization now derives
+  deltas from one consistent snapshot, repeated CPU and memory sensors reuse
+  short-lived kernel-file snapshots, disk capacity math saturates extreme
+  sector counts, and configured dynamic plugins can use metadata without a
+  throwaway configured probe init.
+- **GUI, CLI, and packaging polish.** Hardware and Alerts RPCs run off the QML
+  thread, dashboard slug reservations survive rename/duplicate races, legacy
+  dashboard saves use the shared atomic writer, CLI JSON output is built with
+  serde and shares the daemon socket-default behavior, and tunnel shutdown/docs
+  now match the client-certificate allowlist flags.
+
 ## [1.8.0] — 2026-06-02
 
 - **New application icon.** The placeholder is replaced with the final

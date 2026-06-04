@@ -42,6 +42,15 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.9.0" date="2026-06-04">
+      <description>
+        <p>Hardening and performance update: client subscriptions are isolated
+        and cleaned up on disconnect, history and Prometheus paths are bounded,
+        CPU and memory sensors reuse short-lived snapshots, dashboard writes are
+        more race-resistant, GUI daemon RPCs no longer block the QML thread, and
+        CLI/tunnel behavior is aligned with the documented defaults.</p>
+      </description>
+    </release>
     <release version="1.8.0" date="2026-06-02">
       <description>
         <p>New application icon: the final LinSight mark (a layered hardware

@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.8.0
+Version:        1.9.0
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Thu Jun 04 2026 VisorCraft LLC <support@visorcraft.com> - 1.9.0-1
+- Harden daemon subscriptions, history, Prometheus, plugin loading, dashboard
+  persistence, CLI JSON/socket defaults, tunnel shutdown, and CPU/memory sensor
+  sampling.
+
 * Tue Jun 02 2026 VisorCraft LLC <support@visorcraft.com> - 1.8.0-1
 - New application icon across all packaged sizes and the in-app pages.
 - Third-party license credits now exclude first-party crates (publish = false),
