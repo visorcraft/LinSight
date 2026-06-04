@@ -168,21 +168,74 @@ fn format_bytes(v: f64) -> String {
 
 fn json_sample(sensor: &SensorId, r: &Reading, unit: &Unit) -> String {
     let unit_sym = unit.symbol();
+    let sensor = sensor.to_string();
     match r {
-        Reading::Scalar(v) => {
-            format!(r#"{{"sensor":"{sensor}","value":{v},"unit":"{unit_sym}","kind":"scalar"}}"#)
-        }
-        Reading::Counter(v) => {
-            format!(r#"{{"sensor":"{sensor}","value":{v},"unit":"{unit_sym}","kind":"counter"}}"#)
-        }
+        Reading::Scalar(v) => json_string(&JsonValueSample {
+            sensor: &sensor,
+            value: *v,
+            unit: unit_sym,
+            kind: "scalar",
+        }),
+        Reading::Counter(v) => json_string(&JsonValueSample {
+            sensor: &sensor,
+            value: *v,
+            unit: unit_sym,
+            kind: "counter",
+        }),
         Reading::State(s) => {
-            // JSON-escape the state string (simplified — handles
-            // backslash and double-quote escapes only).
-            let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
-            format!(r#"{{"sensor":"{sensor}","state":"{escaped}","kind":"state"}}"#)
+            json_string(&JsonStateSample { sensor: &sensor, state: s, kind: "state" })
         }
         Reading::Table(rows) => {
-            format!(r#"{{"sensor":"{sensor}","rows":{},"kind":"table"}}"#, rows.len())
+            json_string(&JsonTableSample { sensor: &sensor, rows: rows.len(), kind: "table" })
         }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct JsonValueSample<'a, T> {
+    sensor: &'a str,
+    value: T,
+    unit: &'a str,
+    kind: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct JsonStateSample<'a> {
+    sensor: &'a str,
+    state: &'a str,
+    kind: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct JsonTableSample<'a> {
+    sensor: &'a str,
+    rows: usize,
+    kind: &'static str,
+}
+
+fn json_string<T: serde::Serialize>(sample: &T) -> String {
+    serde_json::to_string(sample).expect("sample JSON serialization should not fail")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_sample_escapes_state_control_characters() {
+        let sensor = SensorId::try_new("test.state").unwrap();
+        let state = "line one\nline two\t\"quoted\"\\path\u{7}";
+        let json = json_sample(&sensor, &Reading::State(state.into()), &Unit::Count);
+
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "sensor": "test.state",
+                "state": state,
+                "kind": "state",
+            })
+        );
     }
 }

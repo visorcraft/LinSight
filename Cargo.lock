@@ -1269,6 +1269,8 @@ dependencies = [
  "linsight-core",
  "linsight-protocol",
  "predicates",
+ "serde",
+ "serde_json",
  "signal-hook",
  "tempfile",
  "tracing",
