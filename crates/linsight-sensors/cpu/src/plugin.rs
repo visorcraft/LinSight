@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -125,6 +126,23 @@ fn count_cores_from_proc_stat(sysroot: Option<&Path>) -> usize {
     read_proc_core_stats(sysroot).map(|v| v.len()).unwrap_or(0)
 }
 
+fn compute_core_util_snapshot(
+    prev: Option<&[(u32, CoreStat)]>,
+    current: &[(u32, CoreStat)],
+) -> BTreeMap<u32, f64> {
+    let prev_by_core: BTreeMap<u32, CoreStat> = prev.unwrap_or(&[]).iter().copied().collect();
+
+    let mut util_by_core = BTreeMap::new();
+    for &(core_idx, current_stat) in current {
+        let util = prev_by_core
+            .get(&core_idx)
+            .map(|&prev_stat| core_util_between(prev_stat, current_stat))
+            .unwrap_or(0.0);
+        util_by_core.insert(core_idx, util);
+    }
+    util_by_core
+}
+
 #[derive(Default)]
 pub struct CpuPlugin {
     inner: Mutex<Inner>,
@@ -136,6 +154,8 @@ struct Inner {
     prev_stat: Option<Stat>,
     /// Previous per-core stats for differential utilization computation.
     prev_core_stats: Option<Vec<(u32, CoreStat)>>,
+    /// Cached per-core utilization values for one `/proc/stat` snapshot.
+    core_util_cache: Option<CoreUtilCache>,
     /// Resolved path to the `temp*_input` file under
     /// `/sys/class/hwmon/hwmonN` whose `temp*_label` matches our
     /// package-temperature label. Cached at first successful read so
@@ -153,12 +173,34 @@ struct Inner {
     cached_freq_paths: Option<Vec<PathBuf>>,
 }
 
+struct CoreUtilCache {
+    snapshot: Vec<(u32, CoreStat)>,
+    util_by_core: BTreeMap<u32, f64>,
+}
+
 impl CpuPlugin {
+    fn refresh_core_util_cache(inner: &mut Inner) -> Result<(), PluginError> {
+        let current_list = read_proc_core_stats(inner.sysroot.as_deref())
+            .map_err(|e| PluginError::Io(e.to_string()))?;
+        if let Some(cache) = &inner.core_util_cache
+            && cache.snapshot == current_list
+        {
+            return Ok(());
+        }
+
+        let util_by_core =
+            compute_core_util_snapshot(inner.prev_core_stats.as_deref(), &current_list);
+        inner.prev_core_stats = Some(current_list.clone());
+        inner.core_util_cache = Some(CoreUtilCache { snapshot: current_list, util_by_core });
+        Ok(())
+    }
+
     fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
         let mut inner = self.inner.lock().expect("CpuPlugin inner poisoned");
         inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
         inner.prev_stat = None;
         inner.prev_core_stats = None;
+        inner.core_util_cache = None;
         // Drop the cached sysfs paths whenever init runs — sysroot may
         // have changed (test fixtures, plugin reload). Cheap to re-probe
         // on the next temp/freq sample.
@@ -333,23 +375,12 @@ impl CpuPlugin {
                     && let Some(idx_str) = rest.strip_suffix(".util")
                     && let Ok(core_idx) = idx_str.parse::<u32>()
                 {
-                    let current_list = read_proc_core_stats(inner.sysroot.as_deref())
-                        .map_err(|e| PluginError::Io(e.to_string()))?;
-                    let current = current_list
-                        .iter()
-                        .find(|&&(idx, _)| idx == core_idx)
-                        .ok_or_else(|| PluginError::Unsupported(sensor.to_string()))?
-                        .1;
-                    let util = match &inner.prev_core_stats {
-                        None => 0.0,
-                        Some(prev_list) => {
-                            match prev_list.iter().find(|&&(idx, _)| idx == core_idx) {
-                                Some(&(_, prev)) => core_util_between(prev, current),
-                                None => 0.0,
-                            }
-                        }
-                    };
-                    inner.prev_core_stats = Some(current_list);
+                    Self::refresh_core_util_cache(&mut inner)?;
+                    let util = inner
+                        .core_util_cache
+                        .as_ref()
+                        .and_then(|cache| cache.util_by_core.get(&core_idx).copied())
+                        .ok_or_else(|| PluginError::Unsupported(sensor.to_string()))?;
                     return Ok(Reading::Scalar(util));
                 }
                 Err(PluginError::Unsupported(sensor.to_string()))
@@ -481,6 +512,31 @@ mod tests {
         // cpu0: busy went from 150 to 250 (delta 100), total from 1150 to 1250 (delta 100)
         // utilization = 100/100 * 100 = 100%
         assert!(matches!(r, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn per_core_updated_snapshot_reports_delta_for_multiple_cores() {
+        let stat1 = "cpu 200 0 100 2000 0 0 0 0 0 0\n\
+                      cpu0 100 0 50 1000 0 0 0 0 0 0\n\
+                      cpu1 60 0 30 800 0 0 0 0 0 0\n";
+        let plugin = CpuPlugin::default();
+        let dir = fake_sysroot(stat1);
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+
+        // Prime baseline from stat1 for all core sensors.
+        host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+
+        let stat2 = "cpu 400 0 100 2000 0 0 0 0 0 0\n\
+                      cpu0 200 0 50 1000 0 0 0 0 0 0\n\
+                      cpu1 160 0 30 800 0 0 0 0 0 0\n";
+        fs::write(dir.path().join("proc/stat"), stat2).unwrap();
+
+        // Both cores must use the same previous snapshot from stat1.
+        let core0 = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        let core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        assert!(matches!(core0, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
+        assert!(matches!(core1, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
     }
 
     #[test]
