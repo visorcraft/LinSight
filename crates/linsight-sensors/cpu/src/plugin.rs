@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -18,8 +19,11 @@ use linsight_plugin_sdk::{
 use std::path::Path;
 
 use crate::proc_stat::{
-    CoreStat, Stat, core_util_between, read_proc_core_stats, read_proc_stat, util_between,
+    CoreStat, ProcStatSnapshot, Stat, core_util_between, read_proc_core_stats,
+    read_proc_stat_snapshot, util_between,
 };
+
+const PROC_STAT_CACHE_TTL: Duration = Duration::from_millis(50);
 
 /// Read `/proc/cpuinfo` (rooted at `sysroot` if set) and return the first
 /// `model name` value. None on any read/parse failure.
@@ -151,6 +155,7 @@ pub struct CpuPlugin {
 #[derive(Default)]
 struct Inner {
     sysroot: Option<PathBuf>,
+    proc_stat_cache: Option<ProcStatCache>,
     prev_stat: Option<Stat>,
     /// Previous per-core stats for differential utilization computation.
     prev_core_stats: Option<Vec<(u32, CoreStat)>>,
@@ -173,15 +178,33 @@ struct Inner {
     cached_freq_paths: Option<Vec<PathBuf>>,
 }
 
+struct ProcStatCache {
+    captured_at: Instant,
+    snapshot: ProcStatSnapshot,
+}
+
 struct CoreUtilCache {
     snapshot: Vec<(u32, CoreStat)>,
     util_by_core: BTreeMap<u32, f64>,
 }
 
 impl CpuPlugin {
-    fn refresh_core_util_cache(inner: &mut Inner) -> Result<(), PluginError> {
-        let current_list = read_proc_core_stats(inner.sysroot.as_deref())
+    fn proc_stat_snapshot(inner: &mut Inner) -> Result<ProcStatSnapshot, PluginError> {
+        if let Some(cache) = &inner.proc_stat_cache
+            && cache.captured_at.elapsed() <= PROC_STAT_CACHE_TTL
+        {
+            return Ok(cache.snapshot.clone());
+        }
+
+        let snapshot = read_proc_stat_snapshot(inner.sysroot.as_deref())
             .map_err(|e| PluginError::Io(e.to_string()))?;
+        inner.proc_stat_cache =
+            Some(ProcStatCache { captured_at: Instant::now(), snapshot: snapshot.clone() });
+        Ok(snapshot)
+    }
+
+    fn refresh_core_util_cache(inner: &mut Inner) -> Result<(), PluginError> {
+        let current_list = Self::proc_stat_snapshot(inner)?.cores;
         if let Some(cache) = &inner.core_util_cache
             && cache.snapshot == current_list
         {
@@ -198,6 +221,7 @@ impl CpuPlugin {
     fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
         let mut inner = self.inner.lock().expect("CpuPlugin inner poisoned");
         inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
+        inner.proc_stat_cache = None;
         inner.prev_stat = None;
         inner.prev_core_stats = None;
         inner.core_util_cache = None;
@@ -312,8 +336,7 @@ impl CpuPlugin {
         // Match aggregate cpu.util first, then per-core cpu.coreN.util
         match sensor.as_str() {
             "cpu.util" => {
-                let current = read_proc_stat(inner.sysroot.as_deref())
-                    .map_err(|e| PluginError::Io(e.to_string()))?;
+                let current = Self::proc_stat_snapshot(&mut inner)?.aggregate;
                 let util = match inner.prev_stat {
                     None => 0.0,
                     Some(prev) => util_between(prev, current),
@@ -410,6 +433,8 @@ impl LinsightPlugin for CpuPlugin {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::thread;
+    use std::time::Duration;
 
     use linsight_plugin_sdk::{host_init, host_sample};
 
@@ -420,6 +445,10 @@ mod tests {
         fs::create_dir(dir.path().join("proc")).unwrap();
         fs::write(dir.path().join("proc/stat"), stat_content).unwrap();
         dir
+    }
+
+    fn wait_for_proc_stat_cache_expiry() {
+        thread::sleep(Duration::from_millis(75));
     }
 
     #[test]
@@ -507,6 +536,7 @@ mod tests {
                       cpu0 200 0 50 1000 0 0 0 0 0 0\n\
                       cpu1 60 0 30 800 0 0 0 0 0 0\n";
         fs::write(dir.path().join("proc/stat"), stat2).unwrap();
+        wait_for_proc_stat_cache_expiry();
 
         let r = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
         // cpu0: busy went from 150 to 250 (delta 100), total from 1150 to 1250 (delta 100)
@@ -531,8 +561,53 @@ mod tests {
                       cpu0 200 0 50 1000 0 0 0 0 0 0\n\
                       cpu1 160 0 30 800 0 0 0 0 0 0\n";
         fs::write(dir.path().join("proc/stat"), stat2).unwrap();
+        wait_for_proc_stat_cache_expiry();
 
         // Both cores must use the same previous snapshot from stat1.
+        let core0 = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        let core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        assert!(matches!(core0, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
+        assert!(matches!(core1, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn aggregate_reuses_proc_stat_snapshot_within_cache_window() {
+        let plugin = CpuPlugin::default();
+        let dir = fake_sysroot("cpu 100 0 50 1000 0 0 0 0\n");
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+        host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+
+        fs::write(dir.path().join("proc/stat"), "cpu 200 0 50 1000 0 0 0 0\n").unwrap();
+
+        let cached = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        assert!(matches!(cached, Reading::Scalar(v) if v == 0.0));
+
+        wait_for_proc_stat_cache_expiry();
+        let refreshed = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        assert!(matches!(refreshed, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn per_core_reuses_proc_stat_snapshot_within_cache_window() {
+        let stat1 = "cpu 200 0 100 2000 0 0 0 0 0 0\n\
+                      cpu0 100 0 50 1000 0 0 0 0 0 0\n\
+                      cpu1 60 0 30 800 0 0 0 0 0 0\n";
+        let plugin = CpuPlugin::default();
+        let dir = fake_sysroot(stat1);
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+        host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+
+        let stat2 = "cpu 400 0 100 2000 0 0 0 0 0 0\n\
+                      cpu0 200 0 50 1000 0 0 0 0 0 0\n\
+                      cpu1 160 0 30 800 0 0 0 0 0 0\n";
+        fs::write(dir.path().join("proc/stat"), stat2).unwrap();
+
+        let cached_core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        assert!(matches!(cached_core1, Reading::Scalar(v) if v == 0.0));
+
+        wait_for_proc_stat_cache_expiry();
         let core0 = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
         let core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
         assert!(matches!(core0, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
@@ -559,6 +634,7 @@ mod tests {
                       cpu0 200 0 50 1000 0 0 0 0 0 0\n\
                       cpu1 280 0 30 800 0 0 0 0 0 0\n";
         fs::write(dir.path().join("proc/stat"), stat2).unwrap();
+        wait_for_proc_stat_cache_expiry();
 
         // Per-core should see its own delta (cpu0: 150->250 busy, 1150->1250 total)
         let r = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
@@ -693,6 +769,7 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
         host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
         std::fs::write(dir.path().join("proc/stat"), "cpu 200 0 50 1000 0 0 0 0\n").unwrap();
+        wait_for_proc_stat_cache_expiry();
         let r = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 100.0));
     }

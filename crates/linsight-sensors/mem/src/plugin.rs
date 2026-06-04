@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use linsight_core::{Category, Reading, SensorId, SensorKind, Unit};
 use linsight_plugin_sdk::stabby::result::Result as SResult;
@@ -11,7 +12,9 @@ use linsight_plugin_sdk::{
     RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
 };
 
-use crate::meminfo::read_meminfo;
+use crate::meminfo::{Meminfo, read_meminfo};
+
+const MEMINFO_CACHE_TTL: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 pub struct MemPlugin {
@@ -21,12 +24,32 @@ pub struct MemPlugin {
 #[derive(Default)]
 struct Inner {
     sysroot: Option<PathBuf>,
+    meminfo_cache: Option<MeminfoCache>,
+}
+
+struct MeminfoCache {
+    captured_at: Instant,
+    snapshot: Meminfo,
 }
 
 impl MemPlugin {
+    fn meminfo_snapshot(inner: &mut Inner) -> Result<Meminfo, PluginError> {
+        if let Some(cache) = &inner.meminfo_cache
+            && cache.captured_at.elapsed() <= MEMINFO_CACHE_TTL
+        {
+            return Ok(cache.snapshot);
+        }
+
+        let snapshot =
+            read_meminfo(inner.sysroot.as_deref()).map_err(|e| PluginError::Io(e.to_string()))?;
+        inner.meminfo_cache = Some(MeminfoCache { captured_at: Instant::now(), snapshot });
+        Ok(snapshot)
+    }
+
     fn init_inner(&self, ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
-        self.inner.lock().expect("MemPlugin poisoned").sysroot =
-            ctx.sysroot().map(|p| p.to_path_buf());
+        let mut inner = self.inner.lock().expect("MemPlugin poisoned");
+        inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
+        inner.meminfo_cache = None;
         // RAM has no per-DIMM identity at this depth; per-DIMM data would
         // require DMI/dmidecode and is out of scope. The manifest emits no
         // `HardwareDevice` entries and each sensor leaves `device_key`
@@ -109,9 +132,8 @@ impl MemPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("MemPlugin poisoned");
-        let m =
-            read_meminfo(inner.sysroot.as_deref()).map_err(|e| PluginError::Io(e.to_string()))?;
+        let mut inner = self.inner.lock().expect("MemPlugin poisoned");
+        let m = Self::meminfo_snapshot(&mut inner)?;
         let v = match sensor.as_str() {
             "mem.used_bytes" => m.used_bytes() as f64,
             "mem.total_bytes" => m.total_bytes as f64,
@@ -145,6 +167,8 @@ impl LinsightPlugin for MemPlugin {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::thread;
+    use std::time::Duration;
 
     use linsight_plugin_sdk::{host_init, host_sample};
 
@@ -159,6 +183,27 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    fn write_meminfo(
+        root: &std::path::Path,
+        total_kb: u64,
+        available_kb: u64,
+        swap_total_kb: u64,
+        swap_free_kb: u64,
+        swap_cached_kb: u64,
+    ) {
+        fs::write(
+            root.join("proc/meminfo"),
+            format!(
+                "MemTotal: {total_kb} kB\n\
+                 MemAvailable: {available_kb} kB\n\
+                 SwapTotal: {swap_total_kb} kB\n\
+                 SwapFree: {swap_free_kb} kB\n\
+                 SwapCached: {swap_cached_kb} kB\n"
+            ),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -192,6 +237,41 @@ mod tests {
         // SwapCached: 200 kB -> 200 * 1024 bytes
         let cached = host_sample(&p, SensorId::new("mem.swap_cached_bytes")).unwrap();
         assert!(matches!(cached, Reading::Scalar(v) if v == 200.0 * 1024.0));
+    }
+
+    #[test]
+    fn samples_reuse_meminfo_snapshot_within_cache_window() {
+        let p = MemPlugin::default();
+        let dir = fake_sysroot();
+        host_init(&p, &PluginCtx::new_with_sysroot(dir.path().into()).unwrap()).unwrap();
+
+        let used = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        assert!(matches!(used, Reading::Scalar(v) if v == 400.0 * 1024.0));
+
+        write_meminfo(dir.path(), 2000, 100, 9000, 7000, 300);
+
+        let cached_total = host_sample(&p, SensorId::new("mem.total_bytes")).unwrap();
+        assert!(matches!(cached_total, Reading::Scalar(v) if v == 1000.0 * 1024.0));
+
+        thread::sleep(Duration::from_millis(75));
+        let refreshed_total = host_sample(&p, SensorId::new("mem.total_bytes")).unwrap();
+        assert!(matches!(refreshed_total, Reading::Scalar(v) if v == 2000.0 * 1024.0));
+    }
+
+    #[test]
+    fn init_clears_cached_meminfo_snapshot() {
+        let p = MemPlugin::default();
+        let dir1 = fake_sysroot();
+        host_init(&p, &PluginCtx::new_with_sysroot(dir1.path().into()).unwrap()).unwrap();
+        let used = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        assert!(matches!(used, Reading::Scalar(v) if v == 400.0 * 1024.0));
+
+        let dir2 = fake_sysroot();
+        write_meminfo(dir2.path(), 2000, 100, 9000, 7000, 300);
+        host_init(&p, &PluginCtx::new_with_sysroot(dir2.path().into()).unwrap()).unwrap();
+
+        let used = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        assert!(matches!(used, Reading::Scalar(v) if v == 1900.0 * 1024.0));
     }
 
     #[test]

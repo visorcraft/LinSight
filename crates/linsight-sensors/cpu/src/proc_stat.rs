@@ -80,6 +80,12 @@ impl CoreStat {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcStatSnapshot {
+    pub aggregate: Stat,
+    pub cores: Vec<(u32, CoreStat)>,
+}
+
 impl From<Stat> for CoreStat {
     fn from(s: Stat) -> Self {
         Self {
@@ -165,16 +171,6 @@ pub fn core_util_between(a: CoreStat, b: CoreStat) -> f64 {
     100.0 * (db as f64) / (dt as f64)
 }
 
-pub fn read_proc_stat(sysroot: Option<&Path>) -> Result<Stat, StatError> {
-    let path = match sysroot {
-        Some(root) => root.join("proc/stat"),
-        None => Path::new("/proc/stat").to_path_buf(),
-    };
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| StatError::Io(format!("reading {}: {e}", path.display())))?;
-    parse_proc_stat(&content)
-}
-
 /// Read `/proc/stat` and return all per-core (`cpu0`, `cpu1`, …) entries.
 /// The returned list is sorted by core index. The aggregate `cpu` line is skipped.
 /// Parse `/proc/stat` content and return all per-core (`cpu0`, `cpu1`, …) entries.
@@ -215,6 +211,19 @@ pub fn read_proc_core_stats(sysroot: Option<&Path>) -> Result<Vec<(u32, CoreStat
     let content = std::fs::read_to_string(&path)
         .map_err(|e| StatError::Io(format!("reading {}: {e}", path.display())))?;
     parse_core_stats(&content)
+}
+
+pub fn read_proc_stat_snapshot(sysroot: Option<&Path>) -> Result<ProcStatSnapshot, StatError> {
+    let path = match sysroot {
+        Some(root) => root.join("proc/stat"),
+        None => Path::new("/proc/stat").to_path_buf(),
+    };
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| StatError::Io(format!("reading {}: {e}", path.display())))?;
+    Ok(ProcStatSnapshot {
+        aggregate: parse_proc_stat(&content)?,
+        cores: parse_core_stats(&content)?,
+    })
 }
 
 #[cfg(test)]
@@ -284,7 +293,7 @@ procs_blocked 0
         fs::create_dir(&proc_dir).unwrap();
         fs::write(proc_dir.join("stat"), "cpu 1 2 3 4 5 6 7 8\n").unwrap();
 
-        let stat = read_proc_stat(Some(dir.path())).unwrap();
+        let stat = read_proc_stat_snapshot(Some(dir.path())).unwrap().aggregate;
         assert_eq!(stat.user, 1);
         assert_eq!(stat.system, 3);
     }
@@ -292,7 +301,7 @@ procs_blocked 0
     #[test]
     #[ignore = "requires a live /proc; gate per AGENTS.md convention"]
     fn read_with_no_sysroot_reads_real_proc() {
-        let stat = read_proc_stat(None).unwrap();
+        let stat = read_proc_stat_snapshot(None).unwrap().aggregate;
         assert!(stat.total() > 0);
     }
 
