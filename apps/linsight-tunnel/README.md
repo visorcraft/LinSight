@@ -51,12 +51,14 @@ openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
   -days 365 -extfile <(printf "subjectAltName=DNS:remote.host.example") \
   -out server.pem
 
-# Client cert (CN is informational; the server only checks CA chain)
+# Client cert (SAN lets the server pin this client with --allow-san)
 openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
   -subj "/CN=desktop-1" \
+  -addext "subjectAltName=DNS:desktop-1" \
   -keyout client.key -out client.csr
 openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
-  -days 365 -out client.pem
+  -days 365 -extfile <(printf "subjectAltName=DNS:desktop-1") \
+  -out client.pem
 ```
 
 ## Run
@@ -67,7 +69,8 @@ On the remote host (where `linsightd` is running):
 linsight-tunnel server \
   --bind 0.0.0.0:9443 \
   --cert server.pem --key server.key --ca ca.pem \
-  --socket /run/user/1000/linsight.sock
+  --socket /run/user/1000/linsight.sock \
+  --allow-san desktop-1
 ```
 
 On the desktop:
@@ -95,6 +98,8 @@ linsight-cli --socket $XDG_RUNTIME_DIR/linsight-remote.sock list
 - `--max-connections` defaults to 64 on both sides. Excess
   connections are dropped *before* TLS auth so a connection burst
   cannot pre-auth-DoS the daemon.
+- `--allow-cn` and `--allow-san` are server-side client-certificate
+  filters. Repeat them to admit multiple client identities.
 - Ctrl+C / SIGTERM triggers a graceful drain (10 s default budget for
   in-flight TLS sessions to send `close_notify`); past the budget,
   outstanding tasks are aborted so the process doesn't hang.
@@ -104,12 +109,25 @@ linsight-cli --socket $XDG_RUNTIME_DIR/linsight-remote.sock list
 
 ## Trust model
 
-The `WebPkiClientVerifier` requires a client cert signed by the
-configured CA bundle but does NOT enforce subject / SAN / OID
-constraints — any cert chained to a trusted CA is accepted. That means
-**the CA trust boundary == full daemon access**; rotate or constrain
-the CA accordingly. A future `--allowed-cn <pattern>` filter would
-tighten this.
+The server always requires a client certificate signed by the configured
+CA bundle. If neither `--allow-cn` nor `--allow-san` is passed, any
+client certificate chained to that CA is accepted, so **the CA trust
+boundary == full daemon access**.
+
+For tighter deployments, pass one or more allowlist filters on the
+server:
+
+- `--allow-cn VALUE` accepts a client certificate whose Subject
+  CommonName matches `VALUE`.
+- `--allow-san VALUE` accepts a client certificate with a DNS
+  SubjectAltName matching `VALUE`.
+
+Exact matches are case-insensitive. A leading wildcard such as
+`*.example.com` matches one DNS label (`desktop.example.com`) but not
+multiple labels (`a.b.example.com`) and not the bare suffix
+(`example.com`). When any allowlist is configured, the client cert must
+match at least one `--allow-cn` or `--allow-san` value after normal CA
+chain validation succeeds.
 
 ## Tests
 
@@ -121,3 +139,5 @@ tighten this.
 - `mtls_rejects_untrusted_client_cert` — proves the server verifier
   actually rejects a cert signed by an out-of-bundle CA (catches the
   "verifier accidentally accepting anything" failure mode).
+- Unit tests for CN/SAN extraction, allowlist matching, idle-copy
+  behavior, and CLI help coverage for `--allow-cn` / `--allow-san`.

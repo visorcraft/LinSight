@@ -466,11 +466,13 @@ async fn run_server(args: ServerArgs) -> Result<()> {
     let socket = Arc::new(args.socket);
     let permits = Arc::new(Semaphore::new(args.max_connections));
     let mut tasks: JoinSet<()> = JoinSet::new();
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
 
     loop {
         tokio::select! {
             biased;
-            _ = shutdown_signal() => break,
+            _ = &mut shutdown => break,
             accepted = listener.accept() => {
                 let (tcp, peer) = match accepted {
                     Ok(v) => v,
@@ -611,11 +613,13 @@ async fn run_client(args: ClientArgs) -> Result<()> {
     let sni_host = Arc::new(sni_host);
     let permits = Arc::new(Semaphore::new(args.max_connections));
     let mut tasks: JoinSet<()> = JoinSet::new();
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
 
     loop {
         tokio::select! {
             biased;
-            _ = shutdown_signal() => break,
+            _ = &mut shutdown => break,
             accepted = listener.accept() => {
                 let (unix, _) = match accepted {
                     Ok(v) => v,
@@ -744,6 +748,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
     use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair};
 
     fn install_provider() {
@@ -791,6 +796,21 @@ mod tests {
         let inner: Arc<dyn ClientCertVerifier> =
             WebPkiClientVerifier::builder(Arc::new(roots)).build().unwrap();
         AllowlistClientCertVerifier { inner, allow_cn, allow_san }
+    }
+
+    #[test]
+    fn server_help_documents_client_cert_allowlist_flags() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("server")
+            .expect("server subcommand")
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("--allow-cn"));
+        assert!(help.contains("--allow-san"));
+        assert!(help.contains("Subject CommonName"));
+        assert!(help.contains("SubjectAltName DNS"));
     }
 
     // ---- wildcard_match ----
