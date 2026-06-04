@@ -6,7 +6,7 @@
 //! dashboard so renames/deletes touch only one path and slug
 //! collisions are easy to detect via filesystem probes.
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -116,11 +116,17 @@ pub(crate) fn derive_slug(name: &str) -> String {
     out
 }
 
+struct ReservedDashboardFile {
+    slug: String,
+    path: PathBuf,
+    file: File,
+}
+
 /// Race-free slug allocation: tries `base`, then `base-2`..`base-99`,
 /// each time opening the candidate file with `O_CREAT | O_EXCL`. The
 /// first that succeeds wins; if every probe loses to a concurrent
 /// writer or already exists, returns `AlreadyExists`.
-fn allocate_unique_slug(base: &str) -> std::io::Result<(String, std::fs::File)> {
+fn allocate_unique_slug(base: &str) -> std::io::Result<ReservedDashboardFile> {
     if !is_valid_slug(base) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid slug base"));
     }
@@ -133,12 +139,9 @@ fn allocate_unique_slug(base: &str) -> std::io::Result<(String, std::fs::File)> 
             // borderline path.
             continue;
         }
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(dir.join(format!("{candidate}.json")))
-        {
-            Ok(f) => return Ok((candidate, f)),
+        let path = dir.join(format!("{candidate}.json"));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok(ReservedDashboardFile { slug: candidate, path, file }),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
         }
@@ -170,6 +173,102 @@ fn write_one(d: &DashboardFile) -> std::io::Result<PathBuf> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid slug"))?;
     linsight_core::atomic_write_json(&path, d)?;
     Ok(path)
+}
+
+fn write_reserved_dashboard_file(
+    mut reservation: ReservedDashboardFile,
+    d: &DashboardFile,
+) -> std::io::Result<PathBuf> {
+    if d.slug != reservation.slug {
+        remove_reserved_dashboard_file(reservation);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "reserved slug does not match dashboard slug",
+        ));
+    }
+    if let Err(e) = serde_json::to_writer_pretty(&mut reservation.file, d) {
+        remove_reserved_dashboard_file(reservation);
+        return Err(std::io::Error::other(e));
+    }
+    if let Err(e) = reservation.file.sync_all() {
+        remove_reserved_dashboard_file(reservation);
+        return Err(e);
+    }
+    Ok(reservation.path)
+}
+
+fn remove_reserved_dashboard_file(reservation: ReservedDashboardFile) {
+    drop(reservation.file);
+    let _ = std::fs::remove_file(reservation.path);
+}
+
+fn rename_dashboard_file(old_slug: &str, new_name: &str) -> std::io::Result<String> {
+    rename_dashboard_file_with_observer(old_slug, new_name, |_| {})
+}
+
+fn rename_dashboard_file_with_observer(
+    old_slug: &str,
+    new_name: &str,
+    observe_reservation: impl FnOnce(&ReservedDashboardFile),
+) -> std::io::Result<String> {
+    let old_path = dashboard_path(old_slug).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid slug `{old_slug}`"))
+    })?;
+    let mut d = read_one(&old_path).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("dashboard `{old_slug}` not found"),
+        )
+    })?;
+    let base = derive_slug(new_name);
+    if base == old_slug {
+        d.name = new_name.into();
+        d.updated_at = Utc::now().to_rfc3339();
+        write_one(&d)?;
+        return Ok(old_slug.into());
+    }
+
+    let reservation = allocate_unique_slug(&base)?;
+    let new_slug = reservation.slug.clone();
+    d.name = new_name.into();
+    d.slug = new_slug.clone();
+    d.updated_at = Utc::now().to_rfc3339();
+    observe_reservation(&reservation);
+    write_reserved_dashboard_file(reservation, &d)?;
+    let _ = std::fs::remove_file(&old_path);
+    Ok(new_slug)
+}
+
+fn duplicate_dashboard_file(slug: &str) -> std::io::Result<String> {
+    duplicate_dashboard_file_with_observer(slug, |_| {})
+}
+
+fn duplicate_dashboard_file_with_observer(
+    slug: &str,
+    observe_reservation: impl FnOnce(&ReservedDashboardFile),
+) -> std::io::Result<String> {
+    let src = dashboard_path(slug).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid slug `{slug}`"))
+    })?;
+    let d = read_one(&src).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, format!("dashboard `{slug}` not found"))
+    })?;
+    let name = format!("{} (copy)", d.name);
+    let base = derive_slug(&name);
+    let reservation = allocate_unique_slug(&base)?;
+    let new_slug = reservation.slug.clone();
+    let now = Utc::now().to_rfc3339();
+    let copy = DashboardFile {
+        schema_version: 1,
+        name,
+        slug: new_slug.clone(),
+        layout: d.layout,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    observe_reservation(&reservation);
+    write_reserved_dashboard_file(reservation, &copy)?;
+    Ok(new_slug)
 }
 
 fn list_files() -> Vec<DashboardFile> {
@@ -343,10 +442,11 @@ impl ffi::DashboardsModel {
     pub fn create(mut self: Pin<&mut Self>, name: &QString) -> QString {
         let n = name.to_string();
         let base = derive_slug(&n);
-        let (slug, mut f) = match allocate_unique_slug(&base) {
+        let reservation = match allocate_unique_slug(&base) {
             Ok(v) => v,
             Err(e) => return self.report_err(format!("create failed: {e}")),
         };
+        let slug = reservation.slug.clone();
         let now = Utc::now().to_rfc3339();
         let d = DashboardFile {
             schema_version: 1,
@@ -356,15 +456,7 @@ impl ffi::DashboardsModel {
             created_at: now.clone(),
             updated_at: now,
         };
-        // `allocate_unique_slug` reserved the path with `O_CREAT|O_EXCL`
-        // and handed back the open File; we write directly into it
-        // rather than going through the rename dance — the empty
-        // placeholder is the file we want.
-        if let Err(e) = serde_json::to_writer_pretty(&mut f, &d) {
-            let _ = std::fs::remove_file(dashboard_path(&slug).unwrap_or_default());
-            return self.report_err(format!("create failed: {e}"));
-        }
-        if let Err(e) = f.sync_all() {
+        if let Err(e) = write_reserved_dashboard_file(reservation, &d) {
             return self.report_err(format!("create failed: {e}"));
         }
         self.as_mut().refresh();
@@ -373,73 +465,25 @@ impl ffi::DashboardsModel {
 
     pub fn rename(mut self: Pin<&mut Self>, slug: &QString, new_name: &QString) -> QString {
         let old_slug = slug.to_string();
-        let Some(old_path) = dashboard_path(&old_slug) else {
-            return self.report_err(format!("rename failed: invalid slug `{old_slug}`"));
-        };
         let new_name_s = new_name.to_string();
-        let Some(mut d) = read_one(&old_path) else {
-            return self.report_err(format!("rename failed: dashboard `{old_slug}` not found"));
-        };
-        let base = derive_slug(&new_name_s);
-        let new_slug = if base == old_slug {
-            old_slug.clone()
-        } else {
-            match allocate_unique_slug(&base) {
-                Ok((s, f)) => {
-                    // Discard the reservation; write_one creates the
-                    // real file via the tmp+rename path below.
-                    drop(f);
-                    let _ = std::fs::remove_file(dashboard_path(&s).unwrap_or_default());
-                    s
-                }
-                Err(e) => {
-                    return self.report_err(format!("rename failed: {e}"));
-                }
+        match rename_dashboard_file(&old_slug, &new_name_s) {
+            Ok(new_slug) => {
+                self.as_mut().refresh();
+                QString::from(new_slug.as_str())
             }
-        };
-        d.name = new_name_s;
-        d.slug = new_slug.clone();
-        d.updated_at = Utc::now().to_rfc3339();
-        if let Err(e) = write_one(&d) {
-            return self.report_err(format!("rename failed: {e}"));
+            Err(e) => self.report_err(format!("rename failed: {e}")),
         }
-        if new_slug != old_slug {
-            let _ = std::fs::remove_file(&old_path);
-        }
-        self.as_mut().refresh();
-        QString::from(new_slug.as_str())
     }
 
     pub fn duplicate(mut self: Pin<&mut Self>, slug: &QString) -> QString {
         let s = slug.to_string();
-        let Some(src) = dashboard_path(&s) else {
-            return self.report_err(format!("duplicate failed: invalid slug `{s}`"));
-        };
-        let Some(d) = read_one(&src) else {
-            return self.report_err(format!("duplicate failed: dashboard `{s}` not found"));
-        };
-        let base = derive_slug(&format!("{} (copy)", d.name));
-        let (new_slug, _reservation) = match allocate_unique_slug(&base) {
-            Ok(v) => v,
-            Err(e) => return self.report_err(format!("duplicate failed: {e}")),
-        };
-        // Release the reservation so write_one can do its own atomic
-        // tmp+rename without colliding with the placeholder.
-        let _ = std::fs::remove_file(dashboard_path(&new_slug).unwrap_or_default());
-        let now = Utc::now().to_rfc3339();
-        let copy = DashboardFile {
-            schema_version: 1,
-            name: format!("{} (copy)", d.name),
-            slug: new_slug.clone(),
-            layout: d.layout,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        if let Err(e) = write_one(&copy) {
-            return self.report_err(format!("duplicate failed: {e}"));
+        match duplicate_dashboard_file(&s) {
+            Ok(new_slug) => {
+                self.as_mut().refresh();
+                QString::from(new_slug.as_str())
+            }
+            Err(e) => self.report_err(format!("duplicate failed: {e}")),
         }
-        self.as_mut().refresh();
-        QString::from(new_slug.as_str())
     }
 
     pub fn remove(mut self: Pin<&mut Self>, slug: &QString) -> bool {
@@ -539,6 +583,9 @@ impl ffi::DashboardsModel {
 mod tests {
     use super::*;
     use crate::qobjects::preferences_model::tests::TempXdgConfig;
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    use std::path::PathBuf;
 
     fn with_temp<F: FnOnce()>(f: F) {
         let _g = TempXdgConfig::new();
@@ -605,10 +652,10 @@ mod tests {
             let dir = dashboards_dir().unwrap();
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("x.json"), "{}").unwrap();
-            let (slug_a, _f) = allocate_unique_slug("x").unwrap();
-            assert_eq!(slug_a, "x-2");
-            let (slug_b, _f2) = allocate_unique_slug("x").unwrap();
-            assert_eq!(slug_b, "x-3");
+            let reservation_a = allocate_unique_slug("x").unwrap();
+            assert_eq!(reservation_a.slug, "x-2");
+            let reservation_b = allocate_unique_slug("x").unwrap();
+            assert_eq!(reservation_b.slug, "x-3");
         });
     }
 
@@ -621,6 +668,108 @@ mod tests {
             h: 120,
             options: serde_json::Value::Null,
         }
+    }
+
+    fn sample_dashboard(name: &str, slug: &str) -> DashboardFile {
+        DashboardFile {
+            schema_version: 1,
+            name: name.into(),
+            slug: slug.into(),
+            layout: vec![sample_tile()],
+            created_at: "2026-05-26T00:00:00Z".into(),
+            updated_at: "2026-05-26T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn held_reservation_forces_next_allocator_to_use_suffix() {
+        with_temp(|| {
+            let first = allocate_unique_slug("race").unwrap();
+            assert_eq!(first.slug, "race");
+
+            let second = allocate_unique_slug("race").unwrap();
+            assert_eq!(second.slug, "race-2");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reserved_dashboard_write_keeps_reserved_file_as_final_path() {
+        with_temp(|| {
+            let reservation = allocate_unique_slug("reserved").unwrap();
+            let reserved_path = reservation.path.clone();
+            let reserved_ino = reservation.file.metadata().unwrap().ino();
+            let dashboard = sample_dashboard("Reserved", "reserved");
+
+            let written = write_reserved_dashboard_file(reservation, &dashboard).unwrap();
+
+            assert_eq!(written, reserved_path);
+            assert_eq!(std::fs::metadata(&written).unwrap().ino(), reserved_ino);
+            assert_eq!(read_one(&written).unwrap(), dashboard);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_to_new_slug_keeps_reserved_file_as_final_path() {
+        with_temp(|| {
+            write_one(&sample_dashboard("Old", "old")).unwrap();
+            write_one(&sample_dashboard("Target", "target")).unwrap();
+            let mut reserved_path = PathBuf::new();
+            let mut reserved_ino = 0;
+
+            let renamed = rename_dashboard_file_with_observer("old", "Target", |reservation| {
+                assert_eq!(reservation.slug, "target-2");
+                reserved_path = reservation.path.clone();
+                reserved_ino = reservation.file.metadata().unwrap().ino();
+
+                let raced = allocate_unique_slug("target").unwrap();
+                assert_eq!(raced.slug, "target-3");
+                let raced_path = raced.path.clone();
+                drop(raced);
+                std::fs::remove_file(raced_path).unwrap();
+            })
+            .unwrap();
+
+            assert_eq!(renamed, "target-2");
+            assert!(!dashboard_path("old").unwrap().exists());
+            assert_eq!(reserved_path, dashboard_path("target-2").unwrap());
+            assert_eq!(std::fs::metadata(&reserved_path).unwrap().ino(), reserved_ino);
+            let back = read_one(&reserved_path).unwrap();
+            assert_eq!(back.slug, "target-2");
+            assert_eq!(back.name, "Target");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn duplicate_keeps_reserved_file_as_final_path() {
+        with_temp(|| {
+            write_one(&sample_dashboard("Source", "source")).unwrap();
+            write_one(&sample_dashboard("Source (copy)", "source-copy")).unwrap();
+            let mut reserved_path = PathBuf::new();
+            let mut reserved_ino = 0;
+
+            let duplicate = duplicate_dashboard_file_with_observer("source", |reservation| {
+                assert_eq!(reservation.slug, "source-copy-2");
+                reserved_path = reservation.path.clone();
+                reserved_ino = reservation.file.metadata().unwrap().ino();
+
+                let raced = allocate_unique_slug("source-copy").unwrap();
+                assert_eq!(raced.slug, "source-copy-3");
+                let raced_path = raced.path.clone();
+                drop(raced);
+                std::fs::remove_file(raced_path).unwrap();
+            })
+            .unwrap();
+
+            assert_eq!(duplicate, "source-copy-2");
+            assert_eq!(reserved_path, dashboard_path("source-copy-2").unwrap());
+            assert_eq!(std::fs::metadata(&reserved_path).unwrap().ino(), reserved_ino);
+            let back = read_one(&reserved_path).unwrap();
+            assert_eq!(back.slug, "source-copy-2");
+            assert_eq!(back.name, "Source (copy)");
+        });
     }
 
     #[test]
