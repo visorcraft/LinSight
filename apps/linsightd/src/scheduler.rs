@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use linsight_core::{Sample, SensorId};
 use linsight_plugin_sdk::PluginError;
@@ -20,10 +20,23 @@ pub enum SchedError {
     Unknown(String),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Subscription {
+    sensor: SensorId,
+    period_micros: u64,
+}
+
+impl Subscription {
+    pub fn sensor(&self) -> &SensorId {
+        &self.sensor
+    }
+}
+
 struct Entry {
-    refcount: u32,
+    period_counts: BTreeMap<u64, u32>,
     period_micros: u64,
     next_due_at_micros: u64,
+    last_sampled_at_micros: Option<u64>,
     /// Value is constant for the process lifetime (sensor tagged
     /// [`linsight_plugin_sdk::STATIC_TAG`]). Sampled once per subscription,
     /// then parked: after a successful sample `tick()` sets
@@ -84,7 +97,7 @@ impl Scheduler {
         &mut self,
         id: &SensorId,
         requested_rate_hz: Option<f32>,
-    ) -> Result<(), SchedError> {
+    ) -> Result<Subscription, SchedError> {
         let descriptor = self
             .host
             .descriptors()
@@ -114,33 +127,54 @@ impl Scheduler {
         let period_micros = (1_000_000.0 / effective as f64) as u64;
 
         let is_static = descriptor.tags.iter().any(|t| t == linsight_plugin_sdk::STATIC_TAG);
+        let subscription = Subscription { sensor: id.clone(), period_micros };
 
         self.entries
             .entry(id.clone())
             .and_modify(|e| {
-                e.refcount += 1;
-                // A newly-connected client subscribing to an already-parked
-                // static sensor needs one fresh reading; un-park it.
-                if e.is_static {
-                    e.next_due_at_micros = 0;
-                }
+                *e.period_counts.entry(period_micros).or_insert(0) += 1;
+                e.period_micros = *e.period_counts.keys().next().expect("period_counts non-empty");
+                // A newly-connected client should get a fresh first reading
+                // rather than waiting behind an existing subscriber's cadence.
+                e.next_due_at_micros = 0;
             })
             .or_insert(Entry {
-                refcount: 1,
+                period_counts: BTreeMap::from([(period_micros, 1)]),
                 period_micros,
                 next_due_at_micros: 0,
+                last_sampled_at_micros: None,
                 is_static,
                 unsupported_strikes: 0,
             });
-        Ok(())
+        Ok(subscription)
     }
 
-    pub fn unsubscribe(&mut self, id: &SensorId) {
-        if let Some(entry) = self.entries.get_mut(id) {
-            entry.refcount = entry.refcount.saturating_sub(1);
-            if entry.refcount == 0 {
-                self.entries.remove(id);
+    pub fn unsubscribe(&mut self, subscription: &Subscription) {
+        let id = subscription.sensor();
+        let should_remove = if let Some(entry) = self.entries.get_mut(id) {
+            if let Some(count) = entry.period_counts.get_mut(&subscription.period_micros) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    entry.period_counts.remove(&subscription.period_micros);
+                }
             }
+            if entry.period_counts.is_empty() {
+                true
+            } else {
+                entry.period_micros =
+                    *entry.period_counts.keys().next().expect("period_counts non-empty");
+                if !entry.is_static {
+                    entry.next_due_at_micros = entry
+                        .last_sampled_at_micros
+                        .map_or(0, |last| last.saturating_add(entry.period_micros));
+                }
+                false
+            }
+        } else {
+            false
+        };
+        if should_remove {
+            self.entries.remove(id);
         }
     }
 
@@ -153,6 +187,7 @@ impl Scheduler {
             match self.host.sample_to(id, now_micros) {
                 Ok(sample) => {
                     entry.unsupported_strikes = 0;
+                    entry.last_sampled_at_micros = Some(now_micros);
                     if let Some(history) = &self.history {
                         history.record(sample.clone());
                     }
@@ -285,8 +320,8 @@ mod tests {
         let host = PluginHost::with_builtins();
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("cpu.util");
-        sched.subscribe(&id, None).unwrap();
-        sched.unsubscribe(&id);
+        let sub = sched.subscribe(&id, None).unwrap();
+        sched.unsubscribe(&sub);
         let samples = sched.tick(10_000_000);
         assert!(samples.is_empty());
     }
@@ -296,11 +331,11 @@ mod tests {
         let host = PluginHost::with_builtins();
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("cpu.util");
-        sched.subscribe(&id, None).unwrap();
-        sched.subscribe(&id, None).unwrap();
-        sched.unsubscribe(&id);
+        let first = sched.subscribe(&id, None).unwrap();
+        let second = sched.subscribe(&id, None).unwrap();
+        sched.unsubscribe(&first);
         assert_eq!(sched.tick(10_000_000).len(), 1);
-        sched.unsubscribe(&id);
+        sched.unsubscribe(&second);
         assert!(sched.tick(20_000_000).is_empty());
     }
 
@@ -313,6 +348,28 @@ mod tests {
         let _ = sched.tick(0);
         let samples_at_500ms = sched.tick(500_000);
         assert!(samples_at_500ms.is_empty(), "should still be once per second");
+    }
+
+    #[test]
+    fn fastest_period_recomputes_when_fast_subscription_leaves() {
+        let host = PluginHost::with_builtins();
+        let mut sched = Scheduler::new(host);
+        let id = SensorId::new("cpu.util");
+        let slow = sched.subscribe(&id, Some(0.5)).unwrap();
+        let fast = sched.subscribe(&id, None).unwrap();
+
+        assert_eq!(sched.tick(0).len(), 1);
+        assert_eq!(sched.tick(1_000_000).len(), 1);
+
+        sched.unsubscribe(&fast);
+        assert!(
+            sched.tick(2_000_000).is_empty(),
+            "slow subscriber should not inherit fast cadence"
+        );
+        assert_eq!(sched.tick(3_000_000).len(), 1);
+
+        sched.unsubscribe(&slow);
+        assert!(sched.tick(5_000_000).is_empty());
     }
 
     #[test]

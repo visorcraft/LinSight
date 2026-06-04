@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use subtle::ConstantTimeEq;
 
+use linsight_core::SensorId;
 use linsight_protocol::{
     ClientMsg, FrameError, FrameReader, FrameWriter, PROTOCOL_VERSION, PluginInfo, ServerMsg,
     verify_hello,
@@ -20,7 +21,7 @@ use linsight_protocol::{
 use tracing::{info, warn};
 
 use crate::hardware::HardwareRegistry;
-use crate::scheduler::Scheduler;
+use crate::scheduler::{Scheduler, Subscription};
 
 /// Polling interval when the listener has no pending connections. Smaller =
 /// more responsive shutdown, larger = lower idle CPU. 100ms is invisible to
@@ -47,10 +48,18 @@ const MAX_CLIENT_SESSIONS: usize = 64;
 /// `UNIX_EPOCH`. Distinguishable from real timestamps for downstream code.
 const TS_SENTINEL_BAD_CLOCK: u64 = u64::MAX;
 
-/// Shared map of per-client broadcast senders, keyed by a monotonic
-/// per-connection id. A SetNickname RPC pushes a fresh
-/// `SensorListBroadcast` onto every sender; each client thread reads
-/// from its matching receiver and forwards the message to its socket.
+/// Per-client subscription tokens, grouped by sensor for quick fan-out checks.
+type ClientSubscriptions = HashMap<SensorId, Vec<Subscription>>;
+
+struct ClientSink {
+    tx: std::sync::mpsc::Sender<ServerMsg>,
+    subscriptions: Arc<Mutex<ClientSubscriptions>>,
+}
+
+/// Shared map of per-client outbound senders, keyed by a monotonic
+/// per-connection id. The sampler and SetNickname RPC both push
+/// `ServerMsg`s onto every matching sender; each client thread reads
+/// from its receiver and forwards the message to its socket.
 ///
 /// Switched from `Vec<Sender>` to `HashMap<u64, Sender>` so a client
 /// can proactively deregister its own sender when `serve()` returns
@@ -60,15 +69,14 @@ const TS_SENTINEL_BAD_CLOCK: u64 = u64::MAX;
 /// changes meant the list could grow unboundedly between renames).
 ///
 /// `std::sync::Mutex` is fine here: the broadcast path is rare (a
-/// user renaming hardware) and the per-client pump uses
-/// `recv_timeout`, so a brief lock during the broadcast doesn't
-/// stall sample pumping.
-type BroadcastMap = Arc<Mutex<HashMap<u64, std::sync::mpsc::Sender<ServerMsg>>>>;
+/// user renaming hardware) and sample fan-out does only short
+/// per-client interest checks while holding it.
+type ClientMap = Arc<Mutex<HashMap<u64, ClientSink>>>;
 
 /// Process-wide monotonic counter used to mint a unique id for each
-/// accepted client. The id is only meaningful inside `BroadcastMap`
+/// accepted client. The id is only meaningful inside `ClientMap`
 /// — it's the key under which a `serve()` thread registers (and on
-/// exit deregisters) its broadcast sender. `Relaxed` ordering is
+/// exit deregisters) its outbound sender. `Relaxed` ordering is
 /// fine: we only need uniqueness, not a happens-before relation
 /// against any other variable.
 static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(0);
@@ -155,14 +163,12 @@ pub fn accept_loop(
 ) -> anyhow::Result<()> {
     let shared = scheduler;
     let sessions = Arc::new(AtomicUsize::new(0));
-    // Registry of per-client broadcast channels keyed by a unique
-    // per-connection id. SensorListBroadcast pushes a clone of the
-    // catalogue onto each client's sender; the client's pump thread
-    // reads from its receiver alongside the scheduler's sample drain.
-    // Each `serve()` thread removes its own entry on exit, so the
-    // map size tracks the live connection count instead of growing
-    // until the next broadcast prunes it.
-    let broadcasters: BroadcastMap = Arc::new(Mutex::new(HashMap::new()));
+    // Registry of per-client outbound channels and subscription interests.
+    // Each `serve()` thread removes its own entry on exit, so the map size
+    // tracks the live connection count instead of growing until a later send
+    // discovers a dead receiver.
+    let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
+    let sampler = spawn_sampler(Arc::clone(&shared), Arc::clone(&clients), Arc::clone(&shutdown));
     let mut consecutive_err: u32 = 0;
     let mut rate_limiter = AcceptRateLimiter::from_env();
     while !shutdown.load(Ordering::Relaxed) {
@@ -208,14 +214,12 @@ pub fn accept_loop(
                 }
                 let sched = Arc::clone(&shared);
                 let reg = Arc::clone(&registry);
-                let broadcasters_for_serve = Arc::clone(&broadcasters);
+                let clients_for_serve = Arc::clone(&clients);
                 let store_path_for_serve = store_path.clone();
                 let guard = SessionGuard(Arc::clone(&sessions));
                 thread::spawn(move || {
                     let _g = guard;
-                    if let Err(e) =
-                        serve(s, sched, reg, broadcasters_for_serve, store_path_for_serve)
-                    {
+                    if let Err(e) = serve(s, sched, reg, clients_for_serve, store_path_for_serve) {
                         warn!(error = ?e, "client session ended with error");
                     }
                 });
@@ -238,7 +242,48 @@ pub fn accept_loop(
         }
     }
     info!("shutdown signal received, exiting accept loop");
+    let _ = sampler.join();
     Ok(())
+}
+
+fn spawn_sampler(
+    sched: Arc<Mutex<Scheduler>>,
+    clients: ClientMap,
+    shutdown: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        while !shutdown.load(Ordering::Relaxed) {
+            // One scheduler owner avoids per-client pumps racing to advance
+            // global due times. Use the protocol minimum so clients that ask
+            // for lower latency are not capped by the shared sampler.
+            thread::sleep(Duration::from_millis(linsight_protocol::PUMP_INTERVAL_MIN_MS as u64));
+            let samples = {
+                let mut s = sched.lock().unwrap();
+                s.tick(now_micros())
+            };
+            if samples.is_empty() {
+                continue;
+            }
+
+            let mut map = clients.lock().unwrap();
+            map.retain(|_id, sink| {
+                let subscriptions = sink.subscriptions.lock().unwrap();
+                let interested: Vec<_> = samples
+                    .iter()
+                    .filter(|sample| subscriptions.contains_key(&sample.sensor))
+                    .cloned()
+                    .collect();
+                drop(subscriptions);
+
+                for sample in interested {
+                    if sink.tx.send(ServerMsg::Sample(sample)).is_err() {
+                        return false;
+                    }
+                }
+                true
+            });
+        }
+    })
 }
 
 fn now_micros() -> u64 {
@@ -297,7 +342,7 @@ fn serve(
     stream: UnixStream,
     sched: Arc<Mutex<Scheduler>>,
     registry: Arc<RwLock<HardwareRegistry>>,
-    broadcasters: BroadcastMap,
+    clients: ClientMap,
     store_path: PathBuf,
 ) -> Result<(), FrameError> {
     let peer = stream.peer_addr().ok();
@@ -362,16 +407,18 @@ fn serve(
     // clone of the same socket), so the kernel-side timeout applies.
     read_clone.set_read_timeout(None).map_err(FrameError::Io)?;
 
-    // Register ourselves as a broadcast target so SetNickname RPCs from
-    // any other client can push us an updated `SensorListBroadcast`.
-    // The sender lives in `broadcasters` under our unique
-    // `client_id`; the receiver is drained by the pump thread
-    // alongside the scheduler sample queue. We remove the entry
-    // ourselves at the end of this function so the map doesn't
-    // accumulate dead senders between broadcasts.
+    // Register ourselves as an outbound target so the shared sampler and
+    // SetNickname RPCs can push messages for this client. The receiver is
+    // drained by the pump thread below; the per-client subscription ledger
+    // lets fan-out filter samples without teaching the scheduler about
+    // connection identities.
     let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
-    let (bcast_tx, bcast_rx) = std::sync::mpsc::channel::<ServerMsg>();
-    broadcasters.lock().unwrap().insert(client_id, bcast_tx);
+    let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
+    let (outbound_tx, outbound_rx) = std::sync::mpsc::channel::<ServerMsg>();
+    clients.lock().unwrap().insert(
+        client_id,
+        ClientSink { tx: outbound_tx, subscriptions: Arc::clone(&subscriptions) },
+    );
 
     // Per-client pump-thread tick, in ms. Defaults to
     // `PUMP_INTERVAL_DEFAULT_MS` (150 ms); the client can adjust via
@@ -381,9 +428,8 @@ fn serve(
     let pump_interval_ms =
         Arc::new(AtomicU64::new(linsight_protocol::PUMP_INTERVAL_DEFAULT_MS as u64));
 
-    // 2) Sample-pumping thread.
+    // 2) Outbound-pumping thread.
     let pump_writer = Arc::clone(&writer);
-    let pump_sched = Arc::clone(&sched);
     let pump_interval_for_pump = Arc::clone(&pump_interval_ms);
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
     let pump = thread::spawn(move || {
@@ -397,11 +443,11 @@ fn serve(
             if stop_rx.recv_timeout(tick).is_ok() {
                 break;
             }
-            // Drain any pending broadcasts. The channel is unbounded;
+            // Drain any pending outbound messages. The channel is unbounded;
             // `try_recv` lets us pull multiple messages per tick
             // without blocking the sample drain when none are queued.
             loop {
-                match bcast_rx.try_recv() {
+                match outbound_rx.try_recv() {
                     Ok(msg) => {
                         let mut w = pump_writer.lock().unwrap();
                         if w.write_server(&msg).is_err() {
@@ -410,17 +456,6 @@ fn serve(
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-                }
-            }
-            let now = now_micros();
-            let samples = {
-                let mut s = pump_sched.lock().unwrap();
-                s.tick(now)
-            };
-            for sample in samples {
-                let mut w = pump_writer.lock().unwrap();
-                if w.write_server(&ServerMsg::Sample(sample)).is_err() {
-                    return;
                 }
             }
         }
@@ -443,10 +478,16 @@ fn serve(
                     let mut degraded = Vec::new();
                     {
                         let mut s = sched.lock().unwrap();
+                        let mut local = subscriptions.lock().unwrap();
                         for id in &sensors {
-                            if let Err(e) = s.subscribe(id, rate_hz) {
-                                warn!(error = ?e, "subscribe rejected");
-                                degraded.push((id.clone(), e.to_string()));
+                            match s.subscribe(id, rate_hz) {
+                                Ok(subscription) => {
+                                    local.entry(id.clone()).or_default().push(subscription);
+                                }
+                                Err(e) => {
+                                    warn!(error = ?e, "subscribe rejected");
+                                    degraded.push((id.clone(), e.to_string()));
+                                }
                             }
                         }
                     }
@@ -459,9 +500,25 @@ fn serve(
                     }
                 }
                 ClientMsg::Unsubscribe { sensors } => {
-                    let mut s = sched.lock().unwrap();
-                    for id in &sensors {
-                        s.unsubscribe(id);
+                    let mut removed = Vec::new();
+                    {
+                        let mut local = subscriptions.lock().unwrap();
+                        for id in &sensors {
+                            if let Some(entries) = local.get_mut(id) {
+                                if let Some(subscription) = entries.pop() {
+                                    removed.push(subscription);
+                                }
+                                if entries.is_empty() {
+                                    local.remove(id);
+                                }
+                            }
+                        }
+                    }
+                    if !removed.is_empty() {
+                        let mut s = sched.lock().unwrap();
+                        for subscription in &removed {
+                            s.unsubscribe(subscription);
+                        }
                     }
                 }
                 ClientMsg::Hello { .. } => {
@@ -478,7 +535,7 @@ fn serve(
                         op,
                         &sched,
                         &registry,
-                        &broadcasters,
+                        &clients,
                         &store_path,
                         &writer,
                         &pump_interval_ms,
@@ -490,13 +547,17 @@ fn serve(
 
     let _ = stop_tx.send(());
     let _ = pump.join();
-    // Proactively deregister from the broadcast map. Dropping the
-    // sender stored under `client_id` also closes the channel so the
-    // pump (already joined above) won't see further messages. Doing
-    // this here — instead of waiting for the next `broadcast_sensor_list`
-    // to `retain`-prune via a failed send — keeps the map size in
-    // step with the actual live-connection count.
-    broadcasters.lock().unwrap().remove(&client_id);
+    clients.lock().unwrap().remove(&client_id);
+    let removed: Vec<_> = {
+        let mut local = subscriptions.lock().unwrap();
+        local.drain().flat_map(|(_sensor, entries)| entries).collect()
+    };
+    if !removed.is_empty() {
+        let mut s = sched.lock().unwrap();
+        for subscription in &removed {
+            s.unsubscribe(subscription);
+        }
+    }
     result
 }
 
@@ -505,7 +566,7 @@ fn serve(
 /// can produce its own `Response` without indenting deeper than is
 /// already painful.
 // 8 args because every request handler needs access to the same shared
-// daemon state (scheduler, registry, broadcasters, store path, writer,
+// daemon state (scheduler, registry, clients, store path, writer,
 // per-client pump interval). Splitting them into a bag struct just to
 // satisfy clippy would add a layer of indirection without making the
 // call site any clearer.
@@ -515,7 +576,7 @@ fn handle_request(
     op: linsight_protocol::RequestOp,
     sched: &Arc<Mutex<Scheduler>>,
     registry: &Arc<RwLock<HardwareRegistry>>,
-    broadcasters: &BroadcastMap,
+    clients: &ClientMap,
     store_path: &std::path::Path,
     writer: &Arc<Mutex<FrameWriter<UnixStream>>>,
     pump_interval_ms: &Arc<AtomicU64>,
@@ -629,7 +690,7 @@ fn handle_request(
                 let r = registry.read().unwrap();
                 build_sensor_info_list(&s, &r)
             };
-            broadcast_sensor_list(broadcasters, infos);
+            broadcast_sensor_list(clients, infos);
             Ok(())
         }
         RequestOp::SetPumpIntervalMs { ms } => {
@@ -841,8 +902,8 @@ fn handle_request(
 /// unlikely window where a peer is in the process of disconnecting
 /// (its pump dropped the receiver but its `serve()` hasn't yet
 /// reached the `remove` call).
-fn broadcast_sensor_list(broadcasters: &BroadcastMap, infos: Vec<linsight_protocol::SensorInfo>) {
+fn broadcast_sensor_list(clients: &ClientMap, infos: Vec<linsight_protocol::SensorInfo>) {
     let msg = ServerMsg::SensorListBroadcast(infos);
-    let mut map = broadcasters.lock().unwrap();
-    map.retain(|_id, tx| tx.send(msg.clone()).is_ok());
+    let mut map = clients.lock().unwrap();
+    map.retain(|_id, sink| sink.tx.send(msg.clone()).is_ok());
 }

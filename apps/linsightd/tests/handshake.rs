@@ -5,7 +5,8 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use linsight_protocol::{
-    ClientMsg, FrameReader, FrameWriter, PROTOCOL_VERSION, RequestOp, ResponsePayload, ServerMsg,
+    ClientMsg, FrameError, FrameReader, FrameWriter, PROTOCOL_VERSION, RequestOp, ResponsePayload,
+    ServerMsg,
 };
 
 mod harness;
@@ -77,6 +78,46 @@ fn subscribe_receives_at_least_one_sample() {
     assert!(got_sample, "expected a cpu.util sample within 3 seconds");
 
     writer.write_client(&ClientMsg::Goodbye).unwrap();
+}
+
+#[test]
+fn disconnect_releases_subscriptions_before_next_client() {
+    let harness = DaemonHarness::spawn();
+    let (mut writer, mut reader) = open_session(&harness, "test-stale-a");
+
+    subscribe(&mut writer, "cpu.util");
+    assert!(
+        wait_for_sample(&mut reader, "cpu.util", Duration::from_secs(3)),
+        "first client did not receive subscribed cpu.util sample",
+    );
+
+    drop(writer);
+    drop(reader);
+
+    let (_next_writer, mut next_reader) = open_session(&harness, "test-stale-b");
+    assert_no_sample_for(&mut next_reader, "cpu.util", Duration::from_secs(2));
+}
+
+#[test]
+fn disjoint_client_subscriptions_do_not_cross_deliver() {
+    let harness = DaemonHarness::spawn();
+    let (mut cpu_writer, mut cpu_reader) = open_session(&harness, "test-disjoint-cpu");
+    let (mut mem_writer, mut mem_reader) = open_session(&harness, "test-disjoint-mem");
+
+    subscribe(&mut cpu_writer, "cpu.util");
+    subscribe(&mut mem_writer, "mem.used_bytes");
+
+    assert!(
+        samples_only_for(&mut cpu_reader, "cpu.util", Duration::from_secs(3)),
+        "cpu client did not receive a cpu.util sample",
+    );
+    assert!(
+        samples_only_for(&mut mem_reader, "mem.used_bytes", Duration::from_secs(3)),
+        "memory client did not receive a mem.used_bytes sample",
+    );
+
+    cpu_writer.write_client(&ClientMsg::Goodbye).unwrap();
+    mem_writer.write_client(&ClientMsg::Goodbye).unwrap();
 }
 
 #[test]
@@ -266,4 +307,85 @@ fn open_session(
     let welcome = reader.read_server().expect("welcome");
     assert!(matches!(welcome, ServerMsg::Welcome { .. }), "expected Welcome, got {welcome:?}");
     (writer, reader)
+}
+
+fn subscribe(writer: &mut FrameWriter<UnixStream>, sensor: &str) {
+    writer
+        .write_client(&ClientMsg::Subscribe {
+            sensors: vec![linsight_core::SensorId::new(sensor)],
+            rate_hz: None,
+        })
+        .unwrap();
+}
+
+fn wait_for_sample(reader: &mut FrameReader<UnixStream>, sensor: &str, duration: Duration) -> bool {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        match read_next_server(reader) {
+            Some(ServerMsg::Sample(sample)) if sample.sensor.as_str() == sensor => return true,
+            Some(_) => continue,
+            None => return false,
+        }
+    }
+    false
+}
+
+fn samples_only_for(
+    reader: &mut FrameReader<UnixStream>,
+    allowed_sensor: &str,
+    duration: Duration,
+) -> bool {
+    let deadline = Instant::now() + duration;
+    let mut saw_allowed = false;
+    while Instant::now() < deadline {
+        match read_next_server(reader) {
+            Some(ServerMsg::Sample(sample)) => {
+                assert_eq!(
+                    sample.sensor.as_str(),
+                    allowed_sensor,
+                    "client received a sample it did not subscribe to",
+                );
+                saw_allowed = true;
+            }
+            Some(_) => continue,
+            None => break,
+        }
+    }
+    saw_allowed
+}
+
+fn assert_no_sample_for(
+    reader: &mut FrameReader<UnixStream>,
+    forbidden_sensor: &str,
+    duration: Duration,
+) {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        match read_next_server(reader) {
+            Some(ServerMsg::Sample(sample)) => {
+                assert_ne!(
+                    sample.sensor.as_str(),
+                    forbidden_sensor,
+                    "client received stale sample after the original subscriber disconnected",
+                );
+            }
+            Some(_) => continue,
+            None => return,
+        }
+    }
+}
+
+fn read_next_server(reader: &mut FrameReader<UnixStream>) -> Option<ServerMsg> {
+    match reader.read_server() {
+        Ok(msg) => Some(msg),
+        Err(FrameError::Io(e))
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            None
+        }
+        Err(e) => panic!("read failed: {e:?}"),
+    }
 }
