@@ -9,7 +9,7 @@ use libloading::Library;
 use linsight_core::{HardwareDevice, Reading, Sample, SensorId};
 use linsight_plugin_sdk::{
     LINSIGHT_PLUGIN_ABI_VERSION, LinsightPlugin, LinsightPluginDyn, PluginCtx, PluginError,
-    PluginManifest, SensorDescriptor, host_init, host_sample,
+    PluginManifest, PluginMetadata, RPluginMetadata, SensorDescriptor, host_init, host_sample,
 };
 use linsight_sensors_amdgpu::AmdgpuPlugin;
 use linsight_sensors_containers::ContainersPlugin;
@@ -200,7 +200,7 @@ impl PluginHost {
                     continue;
                 }
             };
-            let LoadedPlugin { plugin, library } = match unsafe { load_one(&path) } {
+            let LoadedLibrary { library, metadata } = match unsafe { load_one(&path) } {
                 Ok(p) => p,
                 Err(e) => {
                     warn!(path = %path.display(), error = %e, "plugin load failed; skipping");
@@ -209,11 +209,42 @@ impl PluginHost {
             };
             info!(path = %path.display(), "loaded plugin");
 
+            if let Some(metadata) = metadata {
+                let config = plugin_configs
+                    .get(&metadata.plugin_id)
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                match unsafe { instantiate(&library) } {
+                    Ok(plugin) => self.register_with_config_checked(
+                        plugin,
+                        Some(library),
+                        config,
+                        Some(metadata.plugin_id.as_str()),
+                    ),
+                    Err(e) => {
+                        warn!(path = %path.display(), error = %e,
+                            "plugin instantiation failed; skipping");
+                    }
+                }
+                continue;
+            }
+
+            let plugin = match unsafe { instantiate(&library) } {
+                Ok(plugin) => plugin,
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e,
+                        "plugin instantiation failed; skipping");
+                    continue;
+                }
+            };
+
             // A plugin's id lives in its manifest, which is only known
             // after `init` runs — but `init` is also what consumes the
             // per-plugin config. Resolve the ordering problem by running a
             // throwaway "probe" `init` with an empty context to read the
-            // id, then look up the config keyed by that id.
+            // id, then look up the config keyed by that id. Newer SDK
+            // plugins export metadata so configured loads can avoid this
+            // fallback entirely.
             let probe_manifest = match host_init(plugin.as_ref(), &PluginCtx::default()) {
                 Ok(m) => m,
                 Err(e) => {
@@ -236,6 +267,11 @@ impl PluginHost {
                 // looked-up config. Using a new instance means no live
                 // plugin is ever double-initialized.
                 Some(config) => {
+                    warn!(
+                        path = %path.display(),
+                        plugin_id = %probe_manifest.plugin_id,
+                        "configured dynamic plugin lacks metadata symbol; probe init required"
+                    );
                     plugin.shutdown();
                     drop(plugin);
                     match unsafe { instantiate(&library) } {
@@ -258,6 +294,16 @@ impl PluginHost {
         library: Option<Library>,
         config: serde_json::Value,
     ) {
+        self.register_with_config_checked(plugin, library, config, None);
+    }
+
+    fn register_with_config_checked(
+        &mut self,
+        plugin: Arc<dyn LinsightPlugin>,
+        library: Option<Library>,
+        config: serde_json::Value,
+        expected_plugin_id: Option<&str>,
+    ) {
         let ctx = PluginCtx::default().with_config(config);
         let manifest = match host_init(plugin.as_ref(), &ctx) {
             Ok(m) => m,
@@ -266,6 +312,19 @@ impl PluginHost {
                 return;
             }
         };
+        if let Some(expected) = expected_plugin_id
+            && manifest.plugin_id != expected
+        {
+            warn!(
+                expected_plugin_id = expected,
+                manifest_plugin_id = %manifest.plugin_id,
+                "plugin metadata id does not match init manifest id; skipping"
+            );
+            plugin.shutdown();
+            drop(plugin);
+            drop(library);
+            return;
+        }
         self.finish_register(plugin, library, manifest);
     }
 
@@ -381,9 +440,9 @@ impl Drop for PluginHost {
     }
 }
 
-struct LoadedPlugin {
-    plugin: Arc<dyn LinsightPlugin>,
+struct LoadedLibrary {
     library: Library,
+    metadata: Option<PluginMetadata>,
 }
 
 /// The stabbified factory's return type. Must match what the SDK's
@@ -391,12 +450,17 @@ struct LoadedPlugin {
 type PluginFactory =
     extern "C" fn() -> dynptr!(stabby::boxed::Box<dyn LinsightPlugin + Send + Sync>);
 
+/// Optional metadata symbol emitted by the metadata form of
+/// `export_plugin!`. It is versioned independently from the plugin vtable:
+/// changing this shape should add a new symbol name, not bump ABI v6.
+type PluginMetadataFn = extern "C" fn() -> RPluginMetadata;
+
 /// SAFETY: the caller asserts the file at `path` exports the
 /// `linsight_plugin_abi_version` symbol and a `#[stabby::export]`-annotated
-/// `linsight_plugin_v6` factory whose return type is
-/// `dynptr!(Box<dyn LinsightPlugin + Send + Sync>)`. Type compatibility is
-/// verified via stabby's reflection (`StabbyLibrary::get_stabbied`).
-unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
+/// `linsight_plugin_v6` factory. The optional metadata symbol is loaded
+/// before the factory so configured plugins can resolve config without a
+/// throwaway `init`.
+unsafe fn load_one(path: &Path) -> Result<LoadedLibrary, String> {
     let library = unsafe { Library::new(path) }.map_err(|e| format!("dlopen: {e}"))?;
     let version_fn: libloading::Symbol<'_, unsafe extern "C" fn() -> u32> = unsafe {
         library
@@ -411,8 +475,23 @@ unsafe fn load_one(path: &Path) -> Result<LoadedPlugin, String> {
              linsight-plugin-sdk v{LINSIGHT_PLUGIN_ABI_VERSION}"
         ));
     }
-    let plugin = unsafe { instantiate(&library) }?;
-    Ok(LoadedPlugin { plugin, library })
+    let metadata = unsafe { load_metadata(&library) }?;
+    Ok(LoadedLibrary { library, metadata })
+}
+
+unsafe fn load_metadata(library: &Library) -> Result<Option<PluginMetadata>, String> {
+    let has_symbol =
+        unsafe { library.get::<unsafe extern "C" fn()>(b"linsight_plugin_metadata_v1\0").is_ok() };
+    if !has_symbol {
+        return Ok(None);
+    }
+
+    let metadata_fn = unsafe {
+        library
+            .get_stabbied::<PluginMetadataFn>(b"linsight_plugin_metadata_v1")
+            .map_err(|e| format!("stabbied metadata symbol load failed: {e}"))?
+    };
+    Ok(Some(metadata_fn().into()))
 }
 
 /// Build a plugin instance from an already-opened, version-checked
@@ -488,37 +567,49 @@ mod tests {
 
     use super::*;
 
-    /// Build `examples/echo-plugin` once via escargot and return its `.so`.
-    fn echo_plugin_so() -> PathBuf {
-        static PATH: OnceLock<PathBuf> = OnceLock::new();
-        PATH.get_or_init(|| {
-            let build = escargot::CargoBuild::new()
-                .package("linsight-example-echo-plugin")
-                .exec()
-                .expect("cargo build the echo example plugin");
-            for msg in build {
-                let msg = msg.expect("read cargo build message");
-                if let escargot::format::Message::CompilerArtifact(art) =
-                    msg.decode().expect("decode cargo message")
-                    && art.target.name == "linsight_example_echo_plugin"
-                {
-                    for path in art.filenames {
-                        let p: PathBuf = path.into_owned();
-                        if p.extension().and_then(|s| s.to_str()) == Some("so") {
-                            return p;
-                        }
+    fn dynamic_plugin_so(package: &'static str, target: &'static str) -> PathBuf {
+        static PATHS: OnceLock<std::sync::Mutex<HashMap<&'static str, PathBuf>>> = OnceLock::new();
+        let paths = PATHS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+        if let Some(path) = paths.lock().unwrap().get(package).cloned() {
+            return path;
+        }
+        let build = escargot::CargoBuild::new()
+            .package(package)
+            .exec()
+            .unwrap_or_else(|e| panic!("cargo build {package}: {e}"));
+        for msg in build {
+            let msg = msg.expect("read cargo build message");
+            if let escargot::format::Message::CompilerArtifact(art) =
+                msg.decode().expect("decode cargo message")
+                && art.target.name == target
+            {
+                for path in art.filenames {
+                    let p: PathBuf = path.into_owned();
+                    if p.extension().and_then(|s| s.to_str()) == Some("so") {
+                        paths.lock().unwrap().insert(package, p.clone());
+                        return p;
                     }
                 }
             }
-            panic!("escargot produced no .so for the echo plugin");
-        })
-        .clone()
+        }
+        panic!("escargot produced no .so for {package}");
+    }
+
+    /// Build `examples/echo-plugin` once via escargot and return its `.so`.
+    fn echo_plugin_so() -> PathBuf {
+        dynamic_plugin_so("linsight-example-echo-plugin", "linsight_example_echo_plugin")
+    }
+
+    fn staged_plugin_dir_for(package: &'static str, target: &'static str) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::copy(dynamic_plugin_so(package, target), dir.path().join("libplugin.so")).unwrap();
+        dir
     }
 
     /// Stage the built echo `.so` into a fresh temp plugin directory.
     fn staged_plugin_dir() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().unwrap();
-        std::fs::copy(echo_plugin_so(), dir.path().join("libecho.so")).unwrap();
+        std::fs::copy(echo_plugin_so(), dir.path().join("libplugin.so")).unwrap();
         dir
     }
 
@@ -553,6 +644,60 @@ mod tests {
         assert!(
             ids.contains(&"example.echo.extra"),
             "dynamically-loaded plugin did not receive its per-plugin config; sensors = {ids:?}",
+        );
+    }
+
+    #[test]
+    fn dynamic_plugin_metadata_avoids_configured_probe_init() {
+        let dir = staged_plugin_dir_for(
+            "linsight-example-init-count-plugin",
+            "linsight_example_init_count_plugin",
+        );
+        let mut host = empty_host();
+        let mut configs: HashMap<String, serde_json::Value> = HashMap::new();
+        configs.insert(
+            "com.visorcraft.linsight.example.init-count".to_string(),
+            serde_json::json!({ "enable_extra": true }),
+        );
+
+        host.load_from_dir(dir.path(), &configs);
+
+        let ids: Vec<&str> = host.descriptors().map(|d| d.id.as_str()).collect();
+        assert!(
+            ids.contains(&"example.init_count.extra"),
+            "metadata-loaded plugin did not receive its per-plugin config; sensors = {ids:?}",
+        );
+        let reading = host.sample(&SensorId::new("example.init_count.value")).unwrap();
+        assert!(
+            matches!(reading, Reading::Scalar(v) if v == 1.0),
+            "metadata-loaded plugin init should run once, got {reading:?}",
+        );
+    }
+
+    #[test]
+    fn dynamic_plugin_without_metadata_still_falls_back_to_probe_init() {
+        let dir = staged_plugin_dir_for(
+            "linsight-example-legacy-init-count-plugin",
+            "linsight_example_legacy_init_count_plugin",
+        );
+        let mut host = empty_host();
+        let mut configs: HashMap<String, serde_json::Value> = HashMap::new();
+        configs.insert(
+            "com.visorcraft.linsight.example.legacy-init-count".to_string(),
+            serde_json::json!({ "enable_extra": true }),
+        );
+
+        host.load_from_dir(dir.path(), &configs);
+
+        let ids: Vec<&str> = host.descriptors().map(|d| d.id.as_str()).collect();
+        assert!(
+            ids.contains(&"example.legacy_init_count.extra"),
+            "fallback-loaded plugin did not receive its per-plugin config; sensors = {ids:?}",
+        );
+        let reading = host.sample(&SensorId::new("example.legacy_init_count.value")).unwrap();
+        assert!(
+            matches!(reading, Reading::Scalar(v) if v == 2.0),
+            "fallback plugin should probe once and configure once, got {reading:?}",
         );
     }
 

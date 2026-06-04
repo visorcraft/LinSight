@@ -39,6 +39,13 @@ pub struct PluginManifest {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct PluginMetadata {
+    pub plugin_id: String,
+    pub display_name: String,
+    pub version: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct SensorDescriptor {
     pub id: SensorId,
     pub display_name: String,
@@ -98,6 +105,14 @@ pub struct RPluginManifest {
     pub sensors: SVec<RSensorDescriptor>,
     /// ABI v4: plugin-declared hardware devices. See ADR-0002.
     pub devices: SVec<RHardwareDevice>,
+}
+
+#[stabby::stabby]
+#[derive(Clone, Debug)]
+pub struct RPluginMetadata {
+    pub plugin_id: SString,
+    pub display_name: SString,
+    pub version: SString,
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +191,26 @@ impl From<RPluginManifest> for PluginManifest {
             version: r.version.as_str().to_owned(),
             sensors,
             devices,
+        }
+    }
+}
+
+impl From<PluginMetadata> for RPluginMetadata {
+    fn from(m: PluginMetadata) -> Self {
+        Self {
+            plugin_id: m.plugin_id.as_str().into(),
+            display_name: m.display_name.as_str().into(),
+            version: m.version.as_str().into(),
+        }
+    }
+}
+
+impl From<RPluginMetadata> for PluginMetadata {
+    fn from(r: RPluginMetadata) -> Self {
+        Self {
+            plugin_id: r.plugin_id.as_str().to_owned(),
+            display_name: r.display_name.as_str().to_owned(),
+            version: r.version.as_str().to_owned(),
         }
     }
 }

@@ -150,7 +150,14 @@ impl LinsightPlugin for MyPlugin {
     }
 }
 
-export_plugin!(MyPlugin);
+export_plugin!(
+    MyPlugin,
+    metadata: {
+        plugin_id: "io.example.myplugin",
+        display_name: "My plugin",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+);
 "#,
     )
     .with_context(|| format!("write {}", lib_rs.display()))?;

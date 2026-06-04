@@ -19,12 +19,51 @@
 /// plugin's `.so` will fail symbol lookup at load time rather than
 /// silently exchanging vtables whose methods differ in unwind ABI (v6
 /// switches the trait methods to `extern "C-unwind"` for panic isolation).
+///
+/// The metadata form emits an additional optional
+/// `linsight_plugin_metadata_v1` symbol. The daemon uses it, when present,
+/// to look up per-plugin config before constructing or initializing the
+/// plugin. The one-argument form is kept for ABI-v6 plugins built before
+/// metadata existed; those plugins still load through the daemon's probe
+/// fallback.
 #[macro_export]
 macro_rules! export_plugin {
     ($ty:ty) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn linsight_plugin_abi_version() -> u32 {
             $crate::LINSIGHT_PLUGIN_ABI_VERSION
+        }
+
+        #[$crate::stabby::export]
+        pub extern "C" fn linsight_plugin_v6() -> $crate::stabby::dynptr!(
+            $crate::stabby::boxed::Box<dyn $crate::LinsightPlugin + Send + Sync>
+        ) {
+            let boxed: $crate::stabby::boxed::Box<$ty> =
+                $crate::stabby::boxed::Box::new(<$ty as Default>::default());
+            boxed.into()
+        }
+    };
+    (
+        $ty:ty,
+        metadata: {
+            plugin_id: $plugin_id:expr,
+            display_name: $display_name:expr,
+            version: $version:expr $(,)?
+        } $(,)?
+    ) => {
+        #[unsafe(no_mangle)]
+        pub extern "C" fn linsight_plugin_abi_version() -> u32 {
+            $crate::LINSIGHT_PLUGIN_ABI_VERSION
+        }
+
+        #[$crate::stabby::export]
+        pub extern "C" fn linsight_plugin_metadata_v1() -> $crate::RPluginMetadata {
+            $crate::PluginMetadata {
+                plugin_id: $plugin_id.into(),
+                display_name: $display_name.into(),
+                version: $version.into(),
+            }
+            .into()
         }
 
         #[$crate::stabby::export]

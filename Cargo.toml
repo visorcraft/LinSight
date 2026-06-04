@@ -27,6 +27,8 @@ members = [
     "crates/linsight-sensors/sock",
     "crates/linsight-sensors/containers",
     "examples/echo-plugin",
+    "examples/init-count-plugin",
+    "examples/legacy-init-count-plugin",
 ]
 resolver = "3"
 

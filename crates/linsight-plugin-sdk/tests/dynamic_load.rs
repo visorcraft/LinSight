@@ -28,28 +28,33 @@ use linsight_core::{Reading, SensorId};
 use linsight_plugin_sdk::stabby::dynptr;
 use linsight_plugin_sdk::stabby::libloading::StabbyLibrary;
 use linsight_plugin_sdk::{
-    LINSIGHT_PLUGIN_ABI_VERSION, LinsightPlugin, LinsightPluginDyn, PluginCtx, host_init,
-    host_sample,
+    LINSIGHT_PLUGIN_ABI_VERSION, LinsightPlugin, LinsightPluginDyn, PluginCtx, PluginMetadata,
+    RPluginMetadata, host_init, host_sample,
 };
 
 type PluginFactory = extern "C" fn() -> dynptr!(
     linsight_plugin_sdk::stabby::boxed::Box<dyn LinsightPlugin + Send + Sync>
 );
 
-fn echo_plugin_so() -> &'static PathBuf {
-    static PATH: OnceLock<PathBuf> = OnceLock::new();
-    PATH.get_or_init(|| {
+type PluginMetadataFn = extern "C" fn() -> RPluginMetadata;
+
+fn dynamic_plugin_so(
+    slot: &'static OnceLock<PathBuf>,
+    package: &str,
+    target: &str,
+) -> &'static PathBuf {
+    slot.get_or_init(|| {
         // escargot already sets --message-format=json internally;
         // adding it ourselves causes a "two kinds of message-format"
         // error. Just package + exec_with_messages.
         let bin = escargot::CargoBuild::new()
-            .package("linsight-example-echo-plugin")
+            .package(package)
             .exec()
-            .expect("cargo build the example plugin");
+            .unwrap_or_else(|e| panic!("cargo build {package}: {e}"));
         for msg in bin {
             let msg = msg.expect("read cargo build message");
             if let escargot::format::Message::CompilerArtifact(art) = msg.decode().expect("decode")
-                && art.target.name == "linsight_example_echo_plugin"
+                && art.target.name == target
             {
                 for path in art.filenames {
                     let p: PathBuf = path.into_owned();
@@ -59,8 +64,22 @@ fn echo_plugin_so() -> &'static PathBuf {
                 }
             }
         }
-        panic!("escargot did not produce a .so for linsight-example-echo-plugin");
+        panic!("escargot did not produce a .so for {package}");
     })
+}
+
+fn echo_plugin_so() -> &'static PathBuf {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    dynamic_plugin_so(&PATH, "linsight-example-echo-plugin", "linsight_example_echo_plugin")
+}
+
+fn init_count_plugin_so() -> &'static PathBuf {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    dynamic_plugin_so(
+        &PATH,
+        "linsight-example-init-count-plugin",
+        "linsight_example_init_count_plugin",
+    )
 }
 
 #[test]
@@ -87,6 +106,22 @@ fn dynamic_load_exercises_get_stabbied_factory() {
             .expect("stabby reflection accepts the factory")
     };
     let _dyn_box = factory();
+}
+
+#[test]
+fn dynamic_load_exercises_metadata_symbol() {
+    let so = init_count_plugin_so();
+    let library = unsafe { Library::new(so) }.expect("dlopen init-count plugin");
+    let metadata_fn = unsafe {
+        library
+            .get_stabbied::<PluginMetadataFn>(b"linsight_plugin_metadata_v1")
+            .expect("stabby reflection accepts the metadata symbol")
+    };
+
+    let metadata: PluginMetadata = metadata_fn().into();
+    assert_eq!(metadata.plugin_id, "com.visorcraft.linsight.example.init-count");
+    assert_eq!(metadata.display_name, "Init Count");
+    assert_eq!(metadata.version, env!("CARGO_PKG_VERSION"));
 }
 
 struct DynBoxPlugin(

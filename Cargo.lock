@@ -1295,6 +1295,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "linsight-example-init-count-plugin"
+version = "1.8.0"
+dependencies = [
+ "linsight-plugin-sdk",
+ "stabby",
+]
+
+[[package]]
+name = "linsight-example-legacy-init-count-plugin"
+version = "1.8.0"
+dependencies = [
+ "linsight-plugin-sdk",
+ "stabby",
+]
+
+[[package]]
 name = "linsight-plugin-sdk"
 version = "1.8.0"
 dependencies = [

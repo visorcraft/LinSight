@@ -90,7 +90,14 @@ impl LinsightPlugin for MyPlugin {
     }
 }
 
-export_plugin!(MyPlugin);
+export_plugin!(
+    MyPlugin,
+    metadata: {
+        plugin_id: "io.example.myplugin",
+        display_name: "My plugin",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+);
 ```
 
 The `extern "C-unwind" fn` calling convention on every trait method is a
@@ -119,6 +126,14 @@ rather than loading with an incompatible vtable.
 `extern "C" fn init/sample/shutdown` in your `impl LinsightPlugin` to
 `extern "C-unwind" fn` and rebuild — the compiler flags any you miss. No
 other source changes are required.
+
+Current ABI-v6 plugins may also export the optional
+`linsight_plugin_metadata_v1` symbol via the metadata form of
+`export_plugin!`. This is not an ABI bump: daemons still load v6 plugins that
+lack it. When present, the daemon reads the plugin id/display/version from the
+symbol before constructing the plugin, so it can find the matching
+`plugins.toml` entry and call the live plugin's `init()` exactly once with its
+configured context.
 
 The ABI uses **R-mirror types** in `linsight_plugin_sdk::mirror`
 (`RUnit`, `RSensorKind`, `RCategory`, `RReading`, `RTableRow`,
@@ -150,7 +165,15 @@ Sensor-id collisions log a warning; first registration wins.
 
 - One plugin = one hardware family or one feature surface.
 - `init()` should be cheap and idempotent — it runs synchronously
-  before the daemon accepts client connections.
+  before the daemon accepts client connections. Put externally visible
+  side effects (opening exclusive hardware handles, spawning threads,
+  allocating scarce resources) behind the real configured initialization
+  path, and clean them up from `shutdown()`.
+- Prefer the metadata form of `export_plugin!` and keep its `plugin_id`
+  identical to the manifest id returned from `init()`. Older ABI-v6
+  plugins without the metadata symbol still load, but if they have
+  per-plugin config the daemon must run a throwaway probe `init()` to
+  discover the id, then initialize a fresh live instance with config.
 - `sample()` runs on the per-client pump thread. Block all you
   want, but keep latency low: <1 ms per sample keeps the daemon
   responsive across many subscribers.
