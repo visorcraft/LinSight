@@ -5,11 +5,22 @@
 //! Holds the rule list as a JSON string so QML can `JSON.parse` it.
 
 use std::pin::Pin;
+use std::thread;
 use std::time::Duration;
 
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
+use linsight_protocol::AlertRuleJson;
 
+use crate::client::ClientHandle;
 use crate::qobjects::workspace_handle::with_workspace;
+
+const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+
+enum AlertMutation {
+    Upsert { name: String, expr: String, notify: Vec<String>, enabled: Option<bool> },
+    Delete { name: String },
+}
 
 #[cxx_qt::bridge]
 pub mod ffi {
@@ -59,6 +70,8 @@ pub mod ffi {
         #[qinvokable]
         fn test_expr(self: Pin<&mut AlertModel>, expr: &QString);
     }
+
+    impl cxx_qt::Threading for AlertModel {}
 }
 
 #[derive(Default)]
@@ -67,23 +80,66 @@ pub struct AlertModelRust {
     is_loading: bool,
     last_error: QString,
     test_result: QString,
+    request_generation: u64,
+}
+
+fn alert_rules_json(rules: &[AlertRuleJson]) -> String {
+    serde_json::to_string(rules).unwrap_or_else(|_| "[]".into())
+}
+
+fn alert_test_status(is_true: bool, error: Option<String>) -> String {
+    match error {
+        Some(err) => format!("Error: {err}"),
+        None if is_true => "✓ Condition is TRUE with current values".into(),
+        None => "✗ Condition is FALSE with current values".into(),
+    }
+}
+
+fn load_alert_rules_json(client: &ClientHandle) -> Result<String, String> {
+    client
+        .list_alerts(RPC_TIMEOUT)
+        .map(|rules| alert_rules_json(&rules))
+        .map_err(|e| format!("{e}"))
+}
+
+fn apply_alert_mutation_and_reload(
+    client: &ClientHandle,
+    mutation: AlertMutation,
+) -> Result<String, String> {
+    match mutation {
+        AlertMutation::Upsert { name, expr, notify, enabled } => {
+            client.upsert_alert(&name, &expr, None, notify, enabled, RPC_TIMEOUT).map(|_| ())
+        }
+        AlertMutation::Delete { name } => client.delete_alert(&name, RPC_TIMEOUT).map(|_| ()),
+    }
+    .map_err(|e| format!("{e}"))?;
+    load_alert_rules_json(client)
 }
 
 impl ffi::AlertModel {
     pub fn reload(mut self: Pin<&mut Self>) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_generation += 1;
+            rust.request_generation
+        };
+        let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        match client.list_alerts(Duration::from_secs(5)) {
-            Ok(rules) => {
-                let json = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
-                self.as_mut().set_rules_json(QString::from(json.as_str()));
-            }
-            Err(e) => {
-                self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-            }
-        }
-        self.as_mut().set_is_loading(false);
+        thread::spawn(move || {
+            let result = load_alert_rules_json(&client);
+            let _ = qt_thread.queue(move |mut pin| {
+                if pin.as_mut().rust().request_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(json) => pin.as_mut().set_rules_json(QString::from(json.as_str())),
+                    Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
+                }
+                pin.as_mut().set_is_loading(false);
+            });
+        });
     }
 
     pub fn upsert(
@@ -108,73 +164,119 @@ impl ffi::AlertModel {
             -1 => Some(false),
             _ => None,
         };
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_generation += 1;
+            rust.request_generation
+        };
+        let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        match client.upsert_alert(&n, &e, None, not, enabled, Duration::from_secs(5)) {
-            Ok(_) => {
-                // Reload to reflect the change
-                drop(client);
-                let client2 = with_workspace(|w| w.client());
-                match client2.list_alerts(Duration::from_secs(5)) {
-                    Ok(rules) => {
-                        let json = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
-                        self.as_mut().set_rules_json(QString::from(json.as_str()));
-                    }
-                    Err(e) => {
-                        self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-                    }
+        thread::spawn(move || {
+            let result = apply_alert_mutation_and_reload(
+                &client,
+                AlertMutation::Upsert { name: n, expr: e, notify: not, enabled },
+            );
+            let _ = qt_thread.queue(move |mut pin| {
+                if pin.as_mut().rust().request_generation != generation {
+                    return;
                 }
-            }
-            Err(e) => {
-                self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-            }
-        }
-        self.as_mut().set_is_loading(false);
+                match result {
+                    Ok(json) => pin.as_mut().set_rules_json(QString::from(json.as_str())),
+                    Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
+                }
+                pin.as_mut().set_is_loading(false);
+            });
+        });
     }
 
     pub fn delete_rule(mut self: Pin<&mut Self>, name: &QString) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
         let n = name.to_string();
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_generation += 1;
+            rust.request_generation
+        };
+        let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        match client.delete_alert(&n, Duration::from_secs(5)) {
-            Ok(_) => {
-                drop(client);
-                let client2 = with_workspace(|w| w.client());
-                match client2.list_alerts(Duration::from_secs(5)) {
-                    Ok(rules) => {
-                        let json = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
-                        self.as_mut().set_rules_json(QString::from(json.as_str()));
-                    }
-                    Err(e) => {
-                        self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-                    }
+        thread::spawn(move || {
+            let result =
+                apply_alert_mutation_and_reload(&client, AlertMutation::Delete { name: n });
+            let _ = qt_thread.queue(move |mut pin| {
+                if pin.as_mut().rust().request_generation != generation {
+                    return;
                 }
-            }
-            Err(e) => {
-                self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-            }
-        }
-        self.as_mut().set_is_loading(false);
+                match result {
+                    Ok(json) => pin.as_mut().set_rules_json(QString::from(json.as_str())),
+                    Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
+                }
+                pin.as_mut().set_is_loading(false);
+            });
+        });
     }
 
     pub fn test_expr(mut self: Pin<&mut Self>, expr: &QString) {
         self.as_mut().set_is_loading(true);
+        self.as_mut().set_last_error(QString::from(""));
         self.as_mut().set_test_result(QString::from("testing..."));
         let e = expr.to_string();
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_generation += 1;
+            rust.request_generation
+        };
+        let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        match client.test_alert_expr(&e, Duration::from_secs(5)) {
-            Ok((is_true, error)) => {
-                let msg = match error {
-                    Some(err) => format!("Error: {err}"),
-                    None if is_true => "✓ Condition is TRUE with current values".into(),
-                    None => "✗ Condition is FALSE with current values".into(),
-                };
-                self.as_mut().set_test_result(QString::from(msg.as_str()));
-            }
-            Err(e) => {
-                self.as_mut().set_test_result(QString::from(format!("RPC error: {e}").as_str()));
-            }
-        }
-        self.as_mut().set_is_loading(false);
+        thread::spawn(move || {
+            let result = client
+                .test_alert_expr(&e, RPC_TIMEOUT)
+                .map(|(is_true, error)| alert_test_status(is_true, error))
+                .unwrap_or_else(|e| format!("RPC error: {e}"));
+            let _ = qt_thread.queue(move |mut pin| {
+                if pin.as_mut().rust().request_generation != generation {
+                    return;
+                }
+                pin.as_mut().set_test_result(QString::from(result.as_str()));
+                pin.as_mut().set_is_loading(false);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linsight_protocol::AlertRuleJson;
+    use serde_json::Value;
+
+    #[test]
+    fn alert_rules_json_preserves_wire_shape() {
+        let rules = vec![AlertRuleJson {
+            name: "high-temp".into(),
+            expr: "cpu.temp_c > 85".into(),
+            for_duration: Some("30s".into()),
+            notify: vec!["desktop".into(), "exec:notify-send alert".into()],
+            enabled: false,
+        }];
+
+        let json = alert_rules_json(&rules);
+        let parsed: Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed[0]["name"], "high-temp");
+        assert_eq!(parsed[0]["expr"], "cpu.temp_c > 85");
+        assert_eq!(parsed[0]["for_duration"], "30s");
+        assert_eq!(parsed[0]["notify"][1], "exec:notify-send alert");
+        assert!(!parsed[0]["enabled"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn alert_test_status_messages_match_qml_copy() {
+        assert_eq!(alert_test_status(true, None), "✓ Condition is TRUE with current values");
+        assert_eq!(alert_test_status(false, None), "✗ Condition is FALSE with current values");
+        assert_eq!(
+            alert_test_status(false, Some("unknown sensor".into())),
+            "Error: unknown sensor"
+        );
     }
 }

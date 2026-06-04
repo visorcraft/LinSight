@@ -6,19 +6,24 @@
 //! as a JSON string (so QML can `JSON.parse` it once and bind a
 //! `Repeater` to the result without bridging a `QAbstractListModel`).
 //!
-//! Nickname edits trigger an eager `reload()` so the page reflects the
+//! Nickname edits trigger an eager refresh so the page reflects the
 //! change immediately. The daemon's `SensorListBroadcast` will also
 //! refresh `OverviewModel`'s tile labels via the catalogue listener
 //! installed in Phase H — those two paths are independent.
 
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::thread;
 use std::time::Duration;
 
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use linsight_core::HardwareDevice;
 use serde::Serialize;
 
 use crate::qobjects::workspace_handle::with_workspace;
+
+const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// JSON shape sent to QML. `HardwareDevice` is flattened so existing
 /// `deviceJson.model` / `deviceJson.key` bindings keep working; the
@@ -58,12 +63,14 @@ pub mod ffi {
         fn reload(self: Pin<&mut HardwareModel>);
 
         /// Send `set_nickname` for `key`. An empty / whitespace-only
-        /// `value` clears the nickname. On success, eagerly calls
-        /// `reload` so the UI updates without waiting for the
+        /// `value` clears the nickname. On success, eagerly refreshes
+        /// the inventory so the UI updates without waiting for the
         /// daemon's `SensorListBroadcast` to arrive.
         #[qinvokable]
         fn apply_nickname(self: Pin<&mut HardwareModel>, key: &QString, value: &QString);
     }
+
+    impl cxx_qt::Threading for HardwareModel {}
 }
 
 #[derive(Default)]
@@ -71,59 +78,118 @@ pub struct HardwareModelRust {
     devices_json: QString,
     is_loading: bool,
     last_error: QString,
+    request_generation: u64,
+}
+
+fn devices_json(devices: &[HardwareDevice], nicknames: &HashMap<String, String>) -> String {
+    let payload: Vec<DeviceWithNickname<'_>> = devices
+        .iter()
+        .map(|d| DeviceWithNickname {
+            inner: d,
+            nickname: nicknames.get(d.key.as_str()).map(String::as_str),
+            label: linsight_core::compute_device_label(d, devices, nicknames),
+        })
+        .collect();
+    serde_json::to_string(&payload).unwrap_or_else(|_| "[]".into())
 }
 
 impl ffi::HardwareModel {
     pub fn reload(mut self: Pin<&mut Self>) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_generation += 1;
+            rust.request_generation
+        };
+        let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        match client.get_hardware(Duration::from_secs(5)) {
-            Ok((devices, nicknames)) => {
-                let payload: Vec<DeviceWithNickname<'_>> = devices
-                    .iter()
-                    .map(|d| DeviceWithNickname {
-                        inner: d,
-                        nickname: nicknames.get(d.key.as_str()).map(String::as_str),
-                        label: linsight_core::compute_device_label(d, &devices, &nicknames),
-                    })
-                    .collect();
-                let json = serde_json::to_string(&payload).unwrap_or_else(|_| "[]".into());
-                self.as_mut().set_devices_json(QString::from(json.as_str()));
-            }
-            Err(e) => {
-                self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-            }
-        }
-        self.as_mut().set_is_loading(false);
+        thread::spawn(move || {
+            let result = client
+                .get_hardware(RPC_TIMEOUT)
+                .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
+                .map_err(|e| format!("{e}"));
+            let _ = qt_thread.queue(move |mut pin| {
+                if pin.as_mut().rust().request_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(json) => pin.as_mut().set_devices_json(QString::from(json.as_str())),
+                    Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
+                }
+                pin.as_mut().set_is_loading(false);
+            });
+        });
     }
 
     pub fn apply_nickname(mut self: Pin<&mut Self>, key: &QString, value: &QString) {
         let key_s = key.to_string();
         let value_s = value.to_string();
         let value_opt = if value_s.trim().is_empty() { None } else { Some(value_s) };
-        // Flip `isLoading` for the duration of the round-trip so the
-        // QML page can dim / disable the TextField. Without this the
-        // user has no feedback during the (sub-second on a local
-        // socket, multi-second over the mTLS tunnel) RPC.
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
+        let generation = {
+            let mut rust = self.as_mut().rust_mut();
+            rust.request_generation += 1;
+            rust.request_generation
+        };
+        let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        let result = client.set_nickname(&key_s, value_opt, Duration::from_secs(5));
-        // Always clear isLoading before returning, even on error —
-        // otherwise a failed RPC would freeze the field permanently.
-        self.as_mut().set_is_loading(false);
-        match result {
-            Ok(()) => {
-                // Eagerly reload for snappy UI feedback. The daemon's
-                // SensorListBroadcast will also refresh OverviewModel's
-                // tile labels via the catalogue listener Phase H wired.
-                // `reload` will set/clear isLoading on its own pass.
-                self.as_mut().reload();
-            }
-            Err(e) => {
-                self.as_mut().set_last_error(QString::from(format!("{e}").as_str()));
-            }
+        thread::spawn(move || {
+            let result = client
+                .set_nickname(&key_s, value_opt, RPC_TIMEOUT)
+                .and_then(|()| client.get_hardware(RPC_TIMEOUT))
+                .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
+                .map_err(|e| format!("{e}"));
+            let _ = qt_thread.queue(move |mut pin| {
+                if pin.as_mut().rust().request_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(json) => pin.as_mut().set_devices_json(QString::from(json.as_str())),
+                    Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
+                }
+                pin.as_mut().set_is_loading(false);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linsight_core::{HardwareCategory, HardwareDeviceKey};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    fn device(key: &str, model: &str, plugin_device_id: &str) -> HardwareDevice {
+        HardwareDevice {
+            key: HardwareDeviceKey::try_new(key).unwrap(),
+            category: HardwareCategory::Gpu,
+            model: model.into(),
+            vendor: Some("VisorCraft".into()),
+            location: Some("slot 1".into()),
+            plugin_id: "test".into(),
+            plugin_device_id: plugin_device_id.into(),
+            sensor_ids: Vec::new(),
         }
+    }
+
+    #[test]
+    fn devices_json_includes_nickname_and_display_label() {
+        let devices = vec![
+            device("pci:0000:01:00.0", "Arc GPU", "gpu0"),
+            device("pci:0000:02:00.0", "Arc GPU", "gpu1"),
+        ];
+        let nicknames = HashMap::from([("pci:0000:02:00.0".into(), "Render GPU".into())]);
+
+        let json = devices_json(&devices, &nicknames);
+        let parsed: Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed[0]["model"], "Arc GPU");
+        assert!(parsed[0].get("nickname").is_none());
+        assert_eq!(parsed[0]["label"], "Arc GPU");
+        assert_eq!(parsed[1]["nickname"], "Render GPU");
+        assert_eq!(parsed[1]["label"], "Render GPU");
     }
 }
