@@ -20,9 +20,9 @@
 //! control.
 //!
 //! On each scrape we synchronously call into the [`Scheduler`] to grab a
-//! fresh sample for every registered sensor under a SINGLE lock acquisition
-//! so the whole scrape represents one consistent snapshot — Prometheus
-//! requires every series in a single response to share a timestamp.
+//! fresh sample for every registered sensor. We keep one fixed scrape
+//! timestamp for consistency, but sample under smaller lock acquisitions so
+//! GUI/CLI subscription work is not blocked behind one full scrape.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -41,6 +41,9 @@ use crate::scheduler::Scheduler;
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_PROM_CONNECTIONS: usize = 10;
+const PROM_READ_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_REQUEST_LINE_BYTES: usize = 2048;
+const MAX_HEADER_BYTES: usize = 16 * 1024;
 
 /// Spawn the exporter accept loop. Returns the shutdown flag — flip it to
 /// `true` to stop the accept loop on the next poll interval. The runtime
@@ -84,6 +87,11 @@ fn accept_loop(
     while !shutdown.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((s, _addr)) => {
+                if let Err(e) = s.set_read_timeout(Some(PROM_READ_TIMEOUT)) {
+                    warn!(error = ?e, "failed setting prom socket read timeout; dropping connection");
+                    drop(s);
+                    continue;
+                }
                 if active.load(Ordering::Relaxed) >= MAX_PROM_CONNECTIONS {
                     warn!("prom connection cap reached, dropping new connection");
                     let _ = s
@@ -118,24 +126,104 @@ fn accept_loop(
     info!("prom exporter accept loop exiting");
 }
 
+enum RequestReadError {
+    TooLong,
+    Timeout,
+    Io(std::io::Error),
+}
+
+fn read_limited_line(
+    reader: &mut BufReader<std::net::TcpStream>,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>, RequestReadError> {
+    let mut out = Vec::new();
+    loop {
+        let chunk = match reader.fill_buf() {
+            Ok(chunk) => chunk,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                return Err(RequestReadError::Timeout);
+            }
+            Err(e) => return Err(RequestReadError::Io(e)),
+        };
+        if chunk.is_empty() {
+            return if out.is_empty() { Ok(None) } else { Ok(Some(out)) };
+        }
+        let mut consume = chunk.len();
+        if let Some(pos) = chunk.iter().position(|b| *b == b'\n') {
+            consume = pos + 1;
+        }
+        if out.len().saturating_add(consume) > max_bytes {
+            return Err(RequestReadError::TooLong);
+        }
+        out.extend_from_slice(&chunk[..consume]);
+        reader.consume(consume);
+        if out.last().is_some_and(|b| *b == b'\n') {
+            return Ok(Some(out));
+        }
+    }
+}
+
+fn write_static_response(writer: &mut std::net::TcpStream, response: &[u8]) {
+    let _ = writer.write_all(response);
+}
+
 fn serve_one(
     stream: std::net::TcpStream,
     scheduler: Arc<Mutex<Scheduler>>,
     registry: Arc<RwLock<HardwareRegistry>>,
 ) -> Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-    // Drain headers (we don't care; skipping them keeps the parser one-shot).
-    let mut hdr = String::new();
+    let mut writer = stream;
+    let request_line = match read_limited_line(&mut reader, MAX_REQUEST_LINE_BYTES) {
+        Ok(Some(line)) => line,
+        Ok(None) => return Ok(()),
+        Err(RequestReadError::TooLong) => {
+            write_static_response(&mut writer, b"HTTP/1.0 400 Bad Request\r\n\r\n");
+            return Ok(());
+        }
+        Err(RequestReadError::Timeout) => {
+            write_static_response(&mut writer, b"HTTP/1.0 408 Request Timeout\r\n\r\n");
+            return Ok(());
+        }
+        Err(RequestReadError::Io(e)) => return Err(e.into()),
+    };
+    let mut header_bytes = 0usize;
     loop {
-        hdr.clear();
-        let n = reader.read_line(&mut hdr)?;
-        if n == 0 || hdr == "\r\n" || hdr == "\n" {
+        let remaining = MAX_HEADER_BYTES.saturating_sub(header_bytes);
+        if remaining == 0 {
+            write_static_response(&mut writer, b"HTTP/1.0 400 Bad Request\r\n\r\n");
+            return Ok(());
+        }
+        let header_line = match read_limited_line(&mut reader, remaining) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(RequestReadError::TooLong) => {
+                write_static_response(&mut writer, b"HTTP/1.0 400 Bad Request\r\n\r\n");
+                return Ok(());
+            }
+            Err(RequestReadError::Timeout) => {
+                write_static_response(&mut writer, b"HTTP/1.0 408 Request Timeout\r\n\r\n");
+                return Ok(());
+            }
+            Err(RequestReadError::Io(e)) => return Err(e.into()),
+        };
+        header_bytes += header_line.len();
+        if header_line == b"\r\n" || header_line == b"\n" {
             break;
         }
     }
-    let mut writer = stream;
+    let request_line = match std::str::from_utf8(&request_line) {
+        Ok(line) => line,
+        Err(_) => {
+            write_static_response(&mut writer, b"HTTP/1.0 400 Bad Request\r\n\r\n");
+            return Ok(());
+        }
+    };
     let parts: Vec<&str> = request_line.split_whitespace().collect();
     if parts.len() < 3 || parts[0] != "GET" {
         writer.write_all(b"HTTP/1.0 405 Method Not Allowed\r\n\r\n")?;
@@ -163,6 +251,7 @@ fn serve_one(
 /// doesn't carry one (older plugins predating ABI v4's `device_key` field
 /// still ship through the same exporter path).
 type ScrapeRow = (SensorDescriptor, Option<Sample>, String);
+type ScrapeTarget = (SensorDescriptor, String);
 
 /// Acquire the scheduler + registry locks, build the per-scrape input,
 /// then hand off to the pure [`render`] helper. Split this way so tests
@@ -170,24 +259,45 @@ type ScrapeRow = (SensorDescriptor, Option<Sample>, String);
 fn render_for_scrape(scheduler: &Mutex<Scheduler>, registry: &RwLock<HardwareRegistry>) -> String {
     let now =
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_micros() as u64).unwrap_or(0);
-    // Single-snapshot scrape: hold the scheduler lock for the WHOLE pass so
-    // every series in this response is from one consistent instant. Before
-    // this, render() re-acquired the lock per sensor and interleaved with
-    // the pump-thread tick(), producing scrapes whose timestamps spread
-    // over the scrape duration.
-    let snapshot: Vec<ScrapeRow> = {
+    // Keep the lock scope narrow: snapshot scrape targets up front, then
+    // re-acquire only around each sample call so subscribe/unsubscribe work
+    // can proceed between sensors.
+    let targets: Vec<ScrapeTarget> = {
         let s = scheduler.lock().unwrap();
-        s.descriptors()
-            .cloned()
-            .map(|d| {
-                let sample = s.sample_now(&d.id, now);
-                let plugin_id = s.plugin_id_for(&d.id).unwrap_or("unknown").to_owned();
-                (d, sample, plugin_id)
-            })
-            .collect()
+        s.scrape_targets()
     };
+    let snapshot = collect_scrape_rows(scheduler, targets, now);
     let reg = registry.read().unwrap();
     render(&reg, &snapshot)
+}
+
+fn collect_scrape_rows(
+    scheduler: &Mutex<Scheduler>,
+    targets: Vec<ScrapeTarget>,
+    now: u64,
+) -> Vec<ScrapeRow> {
+    collect_scrape_rows_with_after_sample(scheduler, targets, now, |_| {})
+}
+
+fn collect_scrape_rows_with_after_sample<F>(
+    scheduler: &Mutex<Scheduler>,
+    targets: Vec<ScrapeTarget>,
+    now: u64,
+    mut after_sample: F,
+) -> Vec<ScrapeRow>
+where
+    F: FnMut(&Mutex<Scheduler>),
+{
+    let mut rows = Vec::with_capacity(targets.len());
+    for (descriptor, plugin_id) in targets {
+        let sample = {
+            let s = scheduler.lock().unwrap();
+            s.sample_now(&descriptor.id, now)
+        };
+        rows.push((descriptor, sample, plugin_id));
+        after_sample(scheduler);
+    }
+    rows
 }
 
 /// Pure render: take a hardware registry snapshot + a vector of
@@ -308,6 +418,10 @@ fn sanitize_metric_name(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
 
     use linsight_core::{
         Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, Sample, SensorId,
@@ -315,6 +429,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::plugin_host::PluginHost;
 
     fn dev(key: &str, model: &str, vendor: Option<&str>) -> HardwareDevice {
         HardwareDevice {
@@ -349,6 +464,32 @@ mod tests {
 
     fn sample_scalar(id: &str, v: f64) -> Sample {
         Sample { sensor: SensorId::new(id), ts_micros: 1_000_000, reading: Reading::Scalar(v) }
+    }
+
+    fn test_scheduler() -> Arc<Mutex<Scheduler>> {
+        Arc::new(Mutex::new(Scheduler::new(PluginHost::with_builtins())))
+    }
+
+    fn connected_stream_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    fn run_serve_one_with_request(request: &[u8]) -> String {
+        let (mut client, server) = connected_stream_pair();
+        server.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+        let scheduler = test_scheduler();
+        let registry = Arc::new(RwLock::new(test_registry()));
+        let handle = thread::spawn(move || serve_one(server, scheduler, registry).unwrap());
+        client.write_all(request).unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        handle.join().unwrap();
+        response
     }
 
     /// One-device, one-sensor fixture used by most tests. The sensor
@@ -464,5 +605,76 @@ mod tests {
             body.contains(r#"device_key="pci:0000:06:00.0""#),
             "expected device_key resolved via key_for; body was:\n{body}",
         );
+    }
+
+    #[test]
+    fn exporter_rejects_oversized_request_line() {
+        let path = "x".repeat(MAX_REQUEST_LINE_BYTES + 64);
+        let req = format!("GET /{path} HTTP/1.0\r\n\r\n");
+        let response = run_serve_one_with_request(req.as_bytes());
+        assert!(
+            response.starts_with("HTTP/1.0 400 Bad Request"),
+            "expected 400 for oversized request line, got:\n{response}",
+        );
+    }
+
+    #[test]
+    fn exporter_rejects_oversized_headers() {
+        let huge = "y".repeat(MAX_HEADER_BYTES + 64);
+        let req = format!("GET /metrics HTTP/1.0\r\nX-Huge: {huge}\r\n\r\n");
+        let response = run_serve_one_with_request(req.as_bytes());
+        assert!(
+            response.starts_with("HTTP/1.0 400 Bad Request"),
+            "expected 400 for oversized headers, got:\n{response}",
+        );
+    }
+
+    #[test]
+    fn exporter_times_out_on_slow_header() {
+        let (mut client, server) = connected_stream_pair();
+        server.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let scheduler = test_scheduler();
+        let registry = Arc::new(RwLock::new(test_registry()));
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = done_tx.send(serve_one(server, scheduler, registry));
+        });
+        client.write_all(b"GET /metrics HTTP/1.0\r\nX-Slow: partial").unwrap();
+
+        let start = Instant::now();
+        let result = done_rx.recv_timeout(Duration::from_secs(1)).expect("serve_one should return");
+        assert!(result.is_ok(), "timeout path should be handled without bubbling an error");
+        assert!(
+            start.elapsed() < Duration::from_millis(700),
+            "slow header should return promptly, elapsed={:?}",
+            start.elapsed(),
+        );
+        client.shutdown(Shutdown::Write).unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+        let mut response = String::new();
+        let _ = client.read_to_string(&mut response);
+        assert!(
+            response.is_empty() || response.starts_with("HTTP/1.0 408 Request Timeout"),
+            "expected empty close or 408 timeout response; got:\n{response}",
+        );
+    }
+
+    #[test]
+    fn scrape_sampling_releases_scheduler_lock_between_sensors() {
+        let scheduler = Mutex::new(Scheduler::new(PluginHost::with_builtins()));
+        let targets = {
+            let s = scheduler.lock().unwrap();
+            s.scrape_targets()
+        };
+        assert!(targets.len() >= 2, "builtins should expose at least two scrape targets");
+        let targets: Vec<ScrapeTarget> = targets.into_iter().take(2).collect();
+        let mut lock_reacquired = 0usize;
+        let rows = collect_scrape_rows_with_after_sample(&scheduler, targets, 42, |sched| {
+            if let Ok(_guard) = sched.try_lock() {
+                lock_reacquired += 1;
+            }
+        });
+        assert_eq!(rows.len(), 2);
+        assert_eq!(lock_reacquired, 2, "scheduler mutex should be released after each sample",);
     }
 }

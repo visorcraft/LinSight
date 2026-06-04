@@ -237,6 +237,17 @@ impl Scheduler {
         self.host.plugin_id_for(id)
     }
 
+    /// Snapshot `(descriptor, plugin_id)` pairs for a scrape plan.
+    pub fn scrape_targets(&self) -> Vec<(linsight_plugin_sdk::SensorDescriptor, String)> {
+        self.host
+            .descriptors()
+            .map(|d| {
+                let plugin_id = self.host.plugin_id_for(&d.id).unwrap_or("unknown").to_owned();
+                (d.clone(), plugin_id)
+            })
+            .collect()
+    }
+
     /// Take a single sample of `id` outside the subscribe/tick flow. Used
     /// by the Prometheus exporter, which scrapes on demand rather than
     /// subscribing. Returns `None` on plugin error.
