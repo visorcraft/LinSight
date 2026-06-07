@@ -121,7 +121,33 @@ in-process to inter-process.
   live in the Secret Service (KWallet / GNOME Keyring) under the
   `com.visorcraft.LinSight` service, never on disk.
 
-## Reporting
+## Reporting a vulnerability
 
-Please email `security@visorcraft.com` for vulnerabilities. We'll
-acknowledge within 72 hours.
+**Do not file a public GitHub issue, discussion, or pull request for
+security problems.** Report privately through **GitHub's private
+vulnerability reporting**:
+
+1. Go to the repository's **Security** tab.
+2. Click **Report a vulnerability**.
+3. Fill in the advisory form with the details below.
+
+This keeps the report confidential between you and the maintainers
+until a fix is ready. Please include as much as you can:
+
+- a description of the issue and its impact,
+- step-by-step reproduction steps,
+- the LinSight version and your Linux distribution / kernel,
+- the relevant configuration, logs, or a proof-of-concept,
+- a suggested fix or mitigation, if you have one.
+
+### What to expect
+
+- **Acknowledgement** of your report within a few days.
+- An initial assessment and, where confirmed, a remediation plan.
+- Progress updates through the private advisory thread until the
+  issue is resolved.
+- Credit for your responsible disclosure in the advisory, unless you
+  prefer to remain anonymous.
+
+We ask that you give us a reasonable opportunity to ship a fix before
+any public disclosure.
