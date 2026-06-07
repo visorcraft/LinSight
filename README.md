@@ -259,7 +259,7 @@ Bugs / feature requests:
 - [Architecture](docs/architecture.md)
 - [Plugin ABI ADR-0001](docs/adr/0001-plugin-abi-stabby-deferral.md)
 - [Remote tunnel](apps/linsight-tunnel/README.md)
-- [Security](docs/security.md)
+- [Security](docs/SECURITY.md)
 - [Changelog](CHANGELOG.md)
 - [Third-party credits](docs/third-party-notices.md)
 
