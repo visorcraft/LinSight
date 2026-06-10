@@ -9,11 +9,18 @@ default**; enable it with the environment variable `LINSIGHT_ALERTS=1`.
 
 ## Enabling alerts
 
-The systemd user unit (`linsight.service`) already gates the alert engine
-via `Environment=LINSIGHT_ALERTS=1`. For manual or development launches:
+For manual or development launches:
 
 ```bash
 LINSIGHT_ALERTS=1 linsightd
+```
+
+When running under the systemd user unit, add the variable via
+`systemctl --user edit linsight`:
+
+```ini
+[Service]
+Environment=LINSIGHT_ALERTS=1
 ```
 
 Rules are read from `$XDG_CONFIG_HOME/linsight/alerts.toml` (usually
@@ -40,11 +47,11 @@ enabled = true
   expression. Sensor IDs are written with dots (`cpu.util`,
   `disk.nvme0n1.temp_c`) and are bound to the latest scalar value.
 - `for` *(optional)* — debounce window. The expression must stay true for
-  this long before the rule fires. Suffixes: `s`, `ms`, `m`, `h`, `d`.
+  this long before the rule fires. Suffixes: `s`, `ms`, `m`, `h`.
   Default: immediate.
 - `cooldown` *(optional)* — flap-suppression window. After a rule fires,
   it cannot fire again until this duration elapses, even if the expression
-  goes false and true again. Suffixes: `s`, `ms`, `m`, `h`, `d`.
+  goes false and true again. Suffixes: `s`, `ms`, `m`, `h`.
   Default: no cooldown.
 - `notify` — list of targets (see below).
 - `enabled` — `true` or `false`. Disabled rules are skipped entirely.
@@ -54,10 +61,9 @@ enabled = true
 - `"desktop"` — libnotify popup via `notify-rust`.  
   **Caveat:** the daemon must have access to the session D-Bus. This works
   when the daemon is launched from a desktop session, but may fail when
-  running under a systemd user unit without the `DISPLAY` / `WAYLAND_DISPLAY`
-  and `XDG_RUNTIME_DIR` environment variables propagated. The systemd unit
-  in `packaging/systemd/linsight.service` includes `Environment=DISPLAY=...`
-  when those variables are present at install time; verify with
+  running under a systemd user unit without `DISPLAY`, `WAYLAND_DISPLAY`,
+  and `XDG_RUNTIME_DIR` propagated. If desktop notifications do not appear,
+  check that those variables are present in the service environment:
   `systemctl --user show-environment | grep DISPLAY`.
 
 - `"exec:<argv>"` — execute a program directly. Tokens are split using
@@ -67,15 +73,17 @@ enabled = true
   wrapper script if you need shell features.  
   Example: `notify = ["exec:/usr/bin/notify-send 'GPU alarm' 'temp > 85'"]`
 
+- `"webhook:<url>"` — HTTP POST to an external URL. The URL must use
+  `http://` or `https://`. Loopback, link-local, private, and unspecified
+  addresses are rejected, as are obfuscated numeric IPs (e.g. `2130706433`
+  for `127.0.0.1`). Redirects are not followed. The POST body is a JSON
+  object with `rule`, `expr`, `fired_at`, and `value` fields.
+
 ## Event log
 
 Every fire and clear is recorded in an in-memory ring buffer (capacity 512
 events). The GUI's Alerts page shows the most recent events with a relative
-timestamp (e.g. "2 minutes ago"). Events are also available via the CLI:
-
-```bash
-linsight-cli alert events
-```
+timestamp (e.g. "2 minutes ago").
 
 Events are lost when the daemon restarts; they are not persisted to disk.
 
@@ -94,19 +102,14 @@ checkbox toggles the `"desktop"` target without editing the TOML manually.
 # List all rules
 linsight-cli alert list
 
-# Read a specific rule
-linsight-cli alert read "GPU hot"
-
 # Add or update a rule (creates the file if absent)
-linsight-cli alert add --name "GPU hot" \
-  --expr "xe.gpu0.temp_c > 85" \
-  --for 30s \
+linsight-cli alert add "GPU hot" "xe.gpu0.temp_c > 85" \
+  --for-duration 30s \
   --cooldown 5m \
-  --notify desktop \
-  --enabled
+  --notify desktop
 
 # Delete a rule
-linsight-cli alert delete "GPU hot"
+linsight-cli alert remove "GPU hot"
 ```
 
 ## Security
