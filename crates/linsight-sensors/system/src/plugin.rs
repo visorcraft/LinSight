@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -13,6 +15,8 @@ use linsight_plugin_sdk::{
     LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
     RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
 };
+
+const CACHE_TTL: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,6 +36,7 @@ fn read_line(path: &Path) -> Result<String, PluginError> {
 
 /// Parse `/proc/loadavg`: 5 whitespace-separated fields.
 /// Fields: 1m 5m 15m running/total last_pid
+#[derive(Clone)]
 struct LoadAvg {
     load_1m: f64,
     load_5m: f64,
@@ -264,6 +269,27 @@ struct Inner {
     /// share the same file, so reading once per tick is cheaper.
     prev_ctxt: Option<u64>,
     prev_processes: Option<u64>,
+    cache: Option<SystemCache>,
+}
+
+#[derive(Clone)]
+struct SystemSnapshot {
+    loadavg: LoadAvg,
+    uptime: f64,
+    ctxt: u64,
+    processes: u64,
+    entropy: u64,
+    psi_cpu: (f64, f64, f64),
+    psi_mem_some: (f64, f64, f64),
+    psi_mem_full: (f64, f64, f64),
+    psi_io_some: (f64, f64, f64),
+    psi_io_full: (f64, f64, f64),
+    thermal: HashMap<String, f64>,
+}
+
+struct SystemCache {
+    captured_at: Instant,
+    snapshot: SystemSnapshot,
 }
 
 impl SystemPlugin {
@@ -483,89 +509,105 @@ impl SystemPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("SystemPlugin poisoned");
+        let mut inner = self.inner.lock().expect("SystemPlugin poisoned");
         let id = sensor.as_str();
+        let snap = Self::snapshot(&mut inner)?;
 
         match id {
             // --- A2: loadavg ---
-            "system.load_1m"
-            | "system.load_5m"
-            | "system.load_15m"
-            | "system.procs_running"
-            | "system.procs_total" => {
-                let la = read_loadavg(inner.sysroot.as_deref())?;
-                match id {
-                    "system.load_1m" => Ok(Reading::Scalar(la.load_1m)),
-                    "system.load_5m" => Ok(Reading::Scalar(la.load_5m)),
-                    "system.load_15m" => Ok(Reading::Scalar(la.load_15m)),
-                    "system.procs_running" => Ok(Reading::Scalar(la.procs_running as f64)),
-                    "system.procs_total" => Ok(Reading::Scalar(la.procs_total as f64)),
-                    _ => unreachable!(),
-                }
-            }
+            "system.load_1m" => Ok(Reading::Scalar(snap.loadavg.load_1m)),
+            "system.load_5m" => Ok(Reading::Scalar(snap.loadavg.load_5m)),
+            "system.load_15m" => Ok(Reading::Scalar(snap.loadavg.load_15m)),
+            "system.procs_running" => Ok(Reading::Scalar(snap.loadavg.procs_running as f64)),
+            "system.procs_total" => Ok(Reading::Scalar(snap.loadavg.procs_total as f64)),
 
-            "system.uptime_secs" => Ok(Reading::Scalar(read_uptime(inner.sysroot.as_deref())?)),
+            "system.uptime_secs" => Ok(Reading::Scalar(snap.uptime)),
 
-            "system.ctxt_switches" => Ok(Reading::Counter(read_ctxt(inner.sysroot.as_deref())?)),
+            "system.ctxt_switches" => Ok(Reading::Counter(snap.ctxt)),
 
-            "system.procs_created" => {
-                Ok(Reading::Counter(read_processes(inner.sysroot.as_deref())?))
-            }
+            "system.procs_created" => Ok(Reading::Counter(snap.processes)),
 
-            "system.entropy_bits" => {
-                let path = match &inner.sysroot {
-                    Some(r) => r.join("proc/sys/kernel/random/entropy_avail"),
-                    None => PathBuf::from("/proc/sys/kernel/random/entropy_avail"),
-                };
-                let v = read_u64(&path)?;
-                Ok(Reading::Scalar(v as f64))
-            }
+            "system.entropy_bits" => Ok(Reading::Scalar(snap.entropy as f64)),
 
             // --- B5: PSI ---
-            "psi.cpu_some_10" | "psi.cpu_some_60" | "psi.cpu_some_300" => {
-                let ps = read_psi_some(inner.sysroot.as_deref(), "cpu")?;
-                let v = match id {
-                    "psi.cpu_some_10" => ps.0,
-                    "psi.cpu_some_60" => ps.1,
-                    "psi.cpu_some_300" => ps.2,
-                    _ => unreachable!(),
-                };
-                Ok(Reading::Scalar(v))
-            }
-            "psi.mem_some_10" => {
-                let ps = read_psi_some(inner.sysroot.as_deref(), "memory")?;
-                Ok(Reading::Scalar(ps.0))
-            }
-            "psi.mem_full_10" => {
-                let ps = read_psi_full(inner.sysroot.as_deref(), "memory")?;
-                Ok(Reading::Scalar(ps.0))
-            }
-            "psi.io_some_10" => {
-                let ps = read_psi_some(inner.sysroot.as_deref(), "io")?;
-                Ok(Reading::Scalar(ps.0))
-            }
-            "psi.io_full_10" => {
-                let ps = read_psi_full(inner.sysroot.as_deref(), "io")?;
-                Ok(Reading::Scalar(ps.0))
-            }
+            "psi.cpu_some_10" => Ok(Reading::Scalar(snap.psi_cpu.0)),
+            "psi.cpu_some_60" => Ok(Reading::Scalar(snap.psi_cpu.1)),
+            "psi.cpu_some_300" => Ok(Reading::Scalar(snap.psi_cpu.2)),
+            "psi.mem_some_10" => Ok(Reading::Scalar(snap.psi_mem_some.0)),
+            "psi.mem_full_10" => Ok(Reading::Scalar(snap.psi_mem_full.0)),
+            "psi.io_some_10" => Ok(Reading::Scalar(snap.psi_io_some.0)),
+            "psi.io_full_10" => Ok(Reading::Scalar(snap.psi_io_full.0)),
 
             // --- A6: thermal zones ---
             _ if id.starts_with("thermal.") && id.ends_with(".temp_c") => {
                 let label = &id["thermal.".len()..id.len() - ".temp_c".len()];
-                let zones = inner
-                    .thermal_zones
-                    .as_ref()
+                let temp = snap
+                    .thermal
+                    .get(label)
+                    .copied()
                     .ok_or_else(|| PluginError::Unsupported(id.to_string()))?;
-                let zone = zones
-                    .iter()
-                    .find(|z| z.safe_label == label)
-                    .ok_or_else(|| PluginError::Unsupported(id.to_string()))?;
-                let milli = read_u64(&zone.temp_path)?;
-                Ok(Reading::Scalar(milli as f64 / 1000.0))
+                Ok(Reading::Scalar(temp))
             }
 
             _ => Err(PluginError::Unsupported(id.to_string())),
         }
+    }
+
+    fn snapshot(inner: &mut Inner) -> Result<SystemSnapshot, PluginError> {
+        if let Some(cache) = &inner.cache
+            && cache.captured_at.elapsed() <= CACHE_TTL
+        {
+            return Ok(cache.snapshot.clone());
+        }
+
+        let sysroot = inner.sysroot.as_deref();
+        let loadavg = read_loadavg(sysroot)?;
+        let uptime = read_uptime(sysroot)?;
+        let ctxt = read_ctxt(sysroot)?;
+        let processes = read_processes(sysroot)?;
+
+        let entropy_path = match &inner.sysroot {
+            Some(r) => r.join("proc/sys/kernel/random/entropy_avail"),
+            None => PathBuf::from("/proc/sys/kernel/random/entropy_avail"),
+        };
+        let entropy = read_u64(&entropy_path).unwrap_or(0);
+
+        let psi_cpu = read_psi_some(sysroot, "cpu").unwrap_or((0.0, 0.0, 0.0));
+        let psi_mem_some = read_psi_some(sysroot, "memory").unwrap_or((0.0, 0.0, 0.0));
+        let psi_mem_full = read_psi_full(sysroot, "memory").unwrap_or((0.0, 0.0, 0.0));
+        let psi_io_some = read_psi_some(sysroot, "io").unwrap_or((0.0, 0.0, 0.0));
+        let psi_io_full = read_psi_full(sysroot, "io").unwrap_or((0.0, 0.0, 0.0));
+
+        let mut thermal = HashMap::new();
+        let mut files_read = 0usize;
+        if let Some(zones) = &inner.thermal_zones {
+            for zone in zones {
+                if let Ok(milli) = read_u64(&zone.temp_path) {
+                    thermal.insert(zone.safe_label.clone(), milli as f64 / 1000.0);
+                    files_read += 1;
+                }
+            }
+        }
+
+        let snapshot = SystemSnapshot {
+            loadavg,
+            uptime,
+            ctxt,
+            processes,
+            entropy,
+            psi_cpu,
+            psi_mem_some,
+            psi_mem_full,
+            psi_io_some,
+            psi_io_full,
+            thermal,
+        };
+        tracing::debug!(target: "linsight_sensors::reads", plugin = "system", files_read);
+        inner.cache = Some(SystemCache {
+            captured_at: Instant::now(),
+            snapshot: snapshot.clone(),
+        });
+        Ok(snapshot)
     }
 }
 
@@ -857,5 +899,46 @@ mod tests {
         host_init(&p, &ctx).unwrap();
         let err = host_sample(&p, SensorId::new("nope.nope")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
+    }
+
+    #[test]
+    fn cache_reuses_loadavg_snapshot_within_ttl() {
+        let dir = fake_sysroot();
+        let p = SystemPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&p, &ctx).unwrap();
+
+        // First sample populates cache
+        let r1 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        assert!(matches!(r1, Reading::Scalar(v) if (v - 1.23).abs() < 1e-6));
+
+        // Mutate loadavg
+        fs::write(dir.path().join("proc/loadavg"), "9.99 9.99 9.99 99/999 99999\n").unwrap();
+
+        // Second sample immediately should still see cached value
+        let r2 = host_sample(&p, SensorId::new("system.load_5m")).unwrap();
+        assert!(matches!(r2, Reading::Scalar(v) if (v - 0.89).abs() < 1e-6), "cache should serve stale value");
+    }
+
+    #[test]
+    fn cache_expires_after_ttl() {
+        let dir = fake_sysroot();
+        let p = SystemPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&p, &ctx).unwrap();
+
+        // First sample
+        let r1 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        assert!(matches!(r1, Reading::Scalar(v) if (v - 1.23).abs() < 1e-6));
+
+        // Mutate loadavg
+        fs::write(dir.path().join("proc/loadavg"), "9.99 9.99 9.99 99/999 99999\n").unwrap();
+
+        // Wait for cache expiry
+        std::thread::sleep(std::time::Duration::from_millis(60));
+
+        // Second sample should see new value
+        let r2 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        assert!(matches!(r2, Reading::Scalar(v) if (v - 9.99).abs() < 1e-6), "cache should reflect new value after expiry");
     }
 }
