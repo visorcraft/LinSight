@@ -18,6 +18,11 @@ Rectangle {
     property var tileRows: []
     property var tileOptions: ({})
     property var tileSparkline: []
+    // Sensor id passed through to the history dialog. When empty no click
+    // handler is active (e.g. static/table tiles without a scalar history).
+    property string tileSensorId: ""
+    // Short unit suffix forwarded to HistoryDialog (e.g. "°C", "%").
+    property string tileUnit: ""
 
     property real thresholdOk: 50.0
     property real thresholdWarn: 80.0
@@ -258,5 +263,35 @@ Rectangle {
         if (b >= 1048576) return (b / 1048576).toFixed(2) + " MiB";
         if (b >= 1024) return (b / 1024).toFixed(2) + " KiB";
         return b + " B";
+    }
+
+    // Hover highlight: a subtle overlay that appears when the tile has a
+    // sensor id wired and the user can click to open the history dialog.
+    Rectangle {
+        anchors.fill: parent
+        radius: root.radius
+        color: Qt.rgba(app.tokens.accent.r, app.tokens.accent.g, app.tokens.accent.b, 0.07)
+        visible: tileHover.hovered && root.tileSensorId.length > 0
+        opacity: 1
+        z: 2
+    }
+
+    // TapHandler opens the history dialog for this sensor. Only active when
+    // tileSensorId is set — static or table-only tiles leave it empty.
+    TapHandler {
+        id: tapHandler
+        enabled: root.tileSensorId.length > 0
+        cursorShape: root.tileSensorId.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onTapped: {
+            const label = (root.tileOptions && root.tileOptions.labelOverride)
+                ? root.tileOptions.labelOverride
+                : root.tileName
+            app.openHistory(root.tileSensorId, label, root.tileUnit)
+        }
+    }
+
+    HoverHandler {
+        id: tileHover
+        enabled: root.tileSensorId.length > 0
     }
 }

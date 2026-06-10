@@ -86,6 +86,20 @@ Kirigami.ApplicationWindow {
         id: theAlerts
     }
 
+    // HistoryModel — shared instance for the per-sensor history dialog.
+    // A single instance is intentional: only one sensor's history is shown
+    // at a time. QML reaches it via `app.historyModel`.
+    property var historyModel: theHistoryModel
+    HistoryModel {
+        id: theHistoryModel
+    }
+
+    // Open the history dialog for a given sensor. Called from SensorTile
+    // via app.openHistory(sensorId, label, unit).
+    function openHistory(sensorId, label, unit) {
+        historyDialog.openForSensor(sensorId, label, unit)
+    }
+
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
     pageStack.initialPage: overviewPage
 
@@ -610,6 +624,12 @@ Kirigami.ApplicationWindow {
     Component { id: creditsPage;   CreditsPage   { dashModel: app.dashModel } }
 
     GplLicenseDialog { id: gplLicenseDialog; dashModel: app.dashModel }
+
+    HistoryDialog {
+        id: historyDialog
+        anchors.centerIn: parent
+        historyModel: app.historyModel
+    }
 
     NewDashboardDialog {
         id: newDashboardDialog

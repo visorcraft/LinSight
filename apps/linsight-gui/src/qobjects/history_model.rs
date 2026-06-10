@@ -6,6 +6,13 @@
 //! Properties: `sensorId`, `rangeMinutes`, `pointsJson`, `isLoading`,
 //! `lastError`. Call `reload()` to fetch; when the history subsystem
 //! is disabled the daemon error lands verbatim in `lastError`.
+//!
+//! **Stale points on error:** `pointsJson` is never cleared on failure so the
+//! last successful fetch remains visible while an error banner is shown.
+//!
+//! **Property writes do not auto-fetch:** changing `sensorId` or
+//! `rangeMinutes` does *not* trigger a network call. Call `reload()` explicitly
+//! after mutating those properties.
 
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,6 +26,9 @@ use crate::qobjects::rpc_worker::{RequestGenerated, spawn_rpc};
 use crate::qobjects::workspace_handle::with_workspace;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Maximum number of points requested from the daemon per history fetch.
+const MAX_POINTS: u32 = 500;
 
 /// JSON point shape consumed by QML chart components.
 #[derive(Serialize)]
@@ -113,6 +123,10 @@ impl RequestGenerated for HistoryModelRust {
 impl ffi::HistoryModel {
     pub fn reload(mut self: Pin<&mut Self>) {
         let sensor = self.as_mut().rust().sensor_id.to_string();
+        // No-op when sensorId is empty — nothing useful to fetch.
+        if sensor.is_empty() {
+            return;
+        }
         let range_minutes = self.as_mut().rust().range_minutes;
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
@@ -129,7 +143,7 @@ impl ffi::HistoryModel {
             generation,
             move || {
                 client
-                    .get_history(&sensor, since_micros, until_micros, Some(500), RPC_TIMEOUT)
+                    .get_history(&sensor, since_micros, until_micros, Some(MAX_POINTS), RPC_TIMEOUT)
                     .map(|samples| samples_to_points_json(&samples))
                     .map_err(|e| format!("{e}"))
             },

@@ -342,6 +342,8 @@ Kirigami.Page {
                                 item.tileValue = modelData.value
                                 item.tileKind = modelData.kind || "scalar"
                                 item.tileRows = modelData.rows || []
+                                item.tileSensorId = (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
+                                item.tileUnit = modelData.unit || ""
                             }
                         }
                     }
