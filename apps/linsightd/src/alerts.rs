@@ -60,8 +60,6 @@ pub struct AlertEvent {
     pub rule: String,
     pub ts_micros: u64,
     pub kind: AlertEventKind,
-    /// Sensor reading that drove the decision, when cheaply available.
-    pub value: Option<f64>,
 }
 
 pub enum EvalOutcome {
@@ -209,16 +207,8 @@ impl AlertEngineHandle {
             .map(|r| AlertRuleJson {
                 name: r.name.clone(),
                 expr: r.expr.clone(),
-                for_duration: if r.for_duration == Duration::ZERO {
-                    None
-                } else {
-                    Some(format_duration(r.for_duration))
-                },
-                cooldown: if r.cooldown == Duration::ZERO {
-                    None
-                } else {
-                    Some(format_duration(r.cooldown))
-                },
+                for_duration: opt_format_duration(r.for_duration),
+                cooldown: opt_format_duration(r.cooldown),
                 notify: r.notify.clone(),
                 enabled: r.enabled,
             })
@@ -235,14 +225,8 @@ impl AlertEngineHandle {
         notify: Vec<String>,
         enabled: Option<bool>,
     ) -> Result<(), String> {
-        let for_duration = match for_duration {
-            Some(s) if !s.is_empty() => parse_duration(s).map_err(|e| e.to_string())?,
-            _ => Duration::ZERO,
-        };
-        let cooldown = match cooldown {
-            Some(s) if !s.is_empty() => parse_duration(s).map_err(|e| e.to_string())?,
-            _ => Duration::ZERO,
-        };
+        let for_duration = opt_parse_duration(for_duration).map_err(|e| e.to_string())?;
+        let cooldown = opt_parse_duration(cooldown).map_err(|e| e.to_string())?;
         let mut eng = self.inner.lock().unwrap();
         let referenced_sensors = extract_sensor_refs(expr);
         if let Some(existing) = eng.rules.iter_mut().find(|r| r.name == name) {
@@ -293,16 +277,8 @@ impl AlertEngineHandle {
                     .map(|r| RuleConfig {
                         name: r.name.clone(),
                         expr: r.expr.clone(),
-                        for_duration: if r.for_duration == Duration::ZERO {
-                            None
-                        } else {
-                            Some(format_duration(r.for_duration))
-                        },
-                        cooldown: if r.cooldown == Duration::ZERO {
-                            None
-                        } else {
-                            Some(format_duration(r.cooldown))
-                        },
+                        for_duration: opt_format_duration(r.for_duration),
+                        cooldown: opt_format_duration(r.cooldown),
                         notify: r.notify.clone(),
                         enabled: if r.enabled { None } else { Some(false) },
                     })
@@ -338,16 +314,10 @@ impl AlertEngine {
             toml::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
         let mut compiled = Vec::with_capacity(config.rules.len());
         for r in config.rules {
-            let for_duration = match r.for_duration.as_deref() {
-                None | Some("") => Duration::ZERO,
-                Some(s) => parse_duration(s)
-                    .with_context(|| format!("rule {}: bad `for` = {s:?}", r.name))?,
-            };
-            let cooldown = match r.cooldown.as_deref() {
-                None | Some("") => Duration::ZERO,
-                Some(s) => parse_duration(s)
-                    .with_context(|| format!("rule {}: bad `cooldown` = {s:?}", r.name))?,
-            };
+            let for_duration = opt_parse_duration(r.for_duration.as_deref())
+                .with_context(|| format!("rule {}: bad `for`", r.name))?;
+            let cooldown = opt_parse_duration(r.cooldown.as_deref())
+                .with_context(|| format!("rule {}: bad `cooldown`", r.name))?;
             let referenced_sensors = extract_sensor_refs(&r.expr);
             compiled.push(CompiledRule {
                 name: r.name,
@@ -450,7 +420,6 @@ impl AlertEngine {
                         rule: name,
                         ts_micros: wall_micros(),
                         kind: AlertEventKind::Fired,
-                        value: None,
                     });
                 }
             }
@@ -462,7 +431,6 @@ impl AlertEngine {
                     rule: name,
                     ts_micros: wall_micros(),
                     kind: AlertEventKind::Cleared,
-                    value: None,
                 });
             }
         }
@@ -756,6 +724,19 @@ fn format_duration(d: Duration) -> String {
         format!("{}ms", d.as_millis())
     } else {
         format!("{}s", secs)
+    }
+}
+
+/// Format a duration as a human-readable string, or `None` if zero.
+fn opt_format_duration(d: Duration) -> Option<String> {
+    if d == Duration::ZERO { None } else { Some(format_duration(d)) }
+}
+
+/// Parse a duration string, returning `Duration::ZERO` for `None` or empty input.
+fn opt_parse_duration(s: Option<&str>) -> Result<Duration> {
+    match s {
+        Some(s) if !s.is_empty() => parse_duration(s),
+        _ => Ok(Duration::ZERO),
     }
 }
 

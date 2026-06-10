@@ -176,6 +176,7 @@ pub struct AlertRuleJson {
     pub name: String,
     pub expr: String,
     pub for_duration: Option<String>,
+    #[serde(default)]
     pub cooldown: Option<String>,
     pub notify: Vec<String>,
     #[serde(default = "default_true")]

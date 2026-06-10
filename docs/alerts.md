@@ -77,7 +77,7 @@ enabled = true
   `http://` or `https://`. Loopback, link-local, private, and unspecified
   addresses are rejected, as are obfuscated numeric IPs (e.g. `2130706433`
   for `127.0.0.1`). Redirects are not followed. The POST body is a JSON
-  object with `rule`, `expr`, `fired_at`, and `value` fields.
+  object with `name`, `expr`, and `source` fields.
 
 ## Event log
 
