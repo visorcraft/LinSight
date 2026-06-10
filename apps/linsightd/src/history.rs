@@ -276,19 +276,16 @@ pub(crate) fn parse_retention(s: &str) -> Option<Duration> {
     let (digits, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
     let n: u64 = digits.parse().ok().filter(|&v| v > 0)?;
     let secs = match unit {
-        "d" => n * 86_400,
-        "h" => n * 3_600,
-        "m" => n * 60,
+        "d" => n.checked_mul(86_400)?,
+        "h" => n.checked_mul(3_600)?,
+        "m" => n.checked_mul(60)?,
         _ => return None,
     };
     Some(Duration::from_secs(secs))
 }
 
-/// Read `LINSIGHT_HISTORY_RETENTION` and return the parsed retention window.
-///
-/// - `None` (env var unset) → default 30 days.
-/// - `"0"` → `None` (keep forever).
-/// - Unparseable value → warn + default 30 days.
+/// Read `LINSIGHT_HISTORY_RETENTION` and return the parsed retention window
+/// (unset → 30d default; `"0"` → `None` keep-forever; unparseable → warn + 30d default).
 pub(crate) fn retention_from_env(raw: Option<&str>) -> Option<Duration> {
     const DEFAULT: Duration = Duration::from_secs(30 * 86_400);
     match raw {
@@ -321,13 +318,27 @@ mod tests {
     fn retention_parses_day_hour_suffixes() {
         assert_eq!(parse_retention("30d"), Some(Duration::from_secs(30 * 86_400)));
         assert_eq!(parse_retention("12h"), Some(Duration::from_secs(12 * 3_600)));
+        assert_eq!(parse_retention("45m"), Some(Duration::from_secs(45 * 60)));
         assert_eq!(parse_retention("0"), None);
         assert_eq!(parse_retention("garbage"), None);
+        // overflow in the multiply must be rejected, not wrapped
+        assert_eq!(parse_retention("99999999999999999999d"), None);
+        assert_eq!(parse_retention("999999999999999999h"), None);
     }
 
     #[test]
     fn retention_env_default_is_30_days() {
         assert_eq!(retention_from_env(None), Some(Duration::from_secs(30 * 86_400)));
+    }
+
+    #[test]
+    fn retention_env_zero_is_keep_forever() {
+        assert_eq!(retention_from_env(Some("0")), None);
+    }
+
+    #[test]
+    fn retention_env_garbage_falls_back_to_default() {
+        assert_eq!(retention_from_env(Some("garbage")), Some(Duration::from_secs(30 * 86_400)));
     }
 
     #[test]
