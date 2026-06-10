@@ -263,6 +263,49 @@ pub fn query(
     Ok(samples)
 }
 
+/// Parse a retention string into a `Duration`.
+///
+/// Accepts integer values with a `d` (days), `h` (hours), or `m` (minutes)
+/// suffix. A bare `"0"` returns `None` (keep forever). Any other input that
+/// doesn't match returns `None`.
+pub(crate) fn parse_retention(s: &str) -> Option<Duration> {
+    let s = s.trim();
+    if s == "0" {
+        return None;
+    }
+    let (digits, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
+    let n: u64 = digits.parse().ok().filter(|&v| v > 0)?;
+    let secs = match unit {
+        "d" => n * 86_400,
+        "h" => n * 3_600,
+        "m" => n * 60,
+        _ => return None,
+    };
+    Some(Duration::from_secs(secs))
+}
+
+/// Read `LINSIGHT_HISTORY_RETENTION` and return the parsed retention window.
+///
+/// - `None` (env var unset) → default 30 days.
+/// - `"0"` → `None` (keep forever).
+/// - Unparseable value → warn + default 30 days.
+pub(crate) fn retention_from_env(raw: Option<&str>) -> Option<Duration> {
+    const DEFAULT: Duration = Duration::from_secs(30 * 86_400);
+    match raw {
+        None => Some(DEFAULT),
+        Some(s) => {
+            if let Some(d) = parse_retention(s) {
+                Some(d)
+            } else if s.trim() == "0" {
+                None
+            } else {
+                warn!(value = %s, "LINSIGHT_HISTORY_RETENTION unparseable; using default 30d");
+                Some(DEFAULT)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -273,6 +316,19 @@ mod tests {
     use linsight_core::SensorId;
 
     use super::*;
+
+    #[test]
+    fn retention_parses_day_hour_suffixes() {
+        assert_eq!(parse_retention("30d"), Some(Duration::from_secs(30 * 86_400)));
+        assert_eq!(parse_retention("12h"), Some(Duration::from_secs(12 * 3_600)));
+        assert_eq!(parse_retention("0"), None);
+        assert_eq!(parse_retention("garbage"), None);
+    }
+
+    #[test]
+    fn retention_env_default_is_30_days() {
+        assert_eq!(retention_from_env(None), Some(Duration::from_secs(30 * 86_400)));
+    }
 
     #[test]
     fn write_and_query() {

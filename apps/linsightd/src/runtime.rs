@@ -86,6 +86,13 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     let mut _history_join: Option<std::thread::JoinHandle<()>> = None;
     if std::env::var_os("LINSIGHT_HISTORY").is_some() {
         let db_path = history_db_path();
+        let retention = history::retention_from_env(
+            std::env::var("LINSIGHT_HISTORY_RETENTION").ok().as_deref(),
+        );
+        match retention {
+            Some(d) => info!(retention_secs = d.as_secs(), "history retention window"),
+            None => info!("history retention: keep forever"),
+        }
         match history::spawn(db_path.clone()) {
             Ok((writer, join)) => {
                 scheduler.set_history_writer(Some(writer));
