@@ -25,24 +25,44 @@
 //! false again. Scalar samples are eligible inputs; Counter, State, and
 //! Table samples are skipped (could be revisited later).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use evalexpr::{ContextWithMutableVariables, HashMapContext, Value, eval_boolean_with_context};
 
 const MAX_EXPR_LEN: usize = 4096;
 const EVAL_TIMEOUT: Duration = Duration::from_millis(500);
+/// Maximum number of alert events retained in the ring buffer.
+pub const EVENT_CAPACITY: usize = 512;
 
 use linsight_core::{Reading, Sample};
 use linsight_protocol::AlertRuleJson;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+
+/// Whether the alert transitioned to firing or back to normal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertEventKind {
+    Fired,
+    Cleared,
+}
+
+/// A single entry in the alert event ring buffer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertEvent {
+    pub rule: String,
+    pub ts_micros: u64,
+    pub kind: AlertEventKind,
+    /// Sensor reading that drove the decision, when cheaply available.
+    pub value: Option<f64>,
+}
 
 pub enum EvalOutcome {
     Ok(bool),
@@ -152,6 +172,8 @@ pub struct AlertEngine {
     rules: Vec<CompiledRule>,
     /// Latest scalar value seen per sensor.
     values: HashMap<String, f64>,
+    /// Ring buffer of recent fire/clear events; newest-first (front = newest).
+    events: VecDeque<AlertEvent>,
 }
 
 #[derive(Clone)]
@@ -163,6 +185,16 @@ impl AlertEngineHandle {
     pub fn on_sample(&self, sample: &Sample) {
         let mut eng = self.inner.lock().unwrap();
         eng.observe(sample);
+    }
+
+    /// Return a JSON-encoded list of recent alert events, newest first.
+    /// `limit` caps the number of entries returned; `None` returns all (up to
+    /// [`EVENT_CAPACITY`]).
+    pub fn list_events_json(&self, limit: Option<u32>) -> String {
+        let eng = self.inner.lock().unwrap();
+        let cap = limit.map(|n| n as usize).unwrap_or(usize::MAX);
+        let slice: Vec<&AlertEvent> = eng.events.iter().take(cap).collect();
+        serde_json::to_string(&slice).unwrap_or_else(|_| "[]".to_owned())
     }
 
     /// Return a snapshot of all current rules for RPC dispatch.
@@ -301,7 +333,7 @@ impl AlertEngine {
             });
         }
         info!(count = compiled.len(), "alerts loaded");
-        Ok(Self { rules: compiled, values: HashMap::new() })
+        Ok(Self { rules: compiled, values: HashMap::new(), events: VecDeque::new() })
     }
 
     pub fn into_handle(self) -> AlertEngineHandle {
@@ -333,7 +365,19 @@ impl AlertEngine {
     }
 
     fn evaluate_rule(&mut self, idx: usize, now: Instant) {
-        let rule = &mut self.rules[idx];
+        // Read rule metadata without holding a mutable borrow on self.rules,
+        // so we can also write to self.events after evaluation.
+        let (name, expr, for_duration, notify, prev_fired, triggered_at) = {
+            let rule = &self.rules[idx];
+            (
+                rule.name.clone(),
+                rule.expr.clone(),
+                rule.for_duration,
+                rule.notify.clone(),
+                rule.fired,
+                rule.triggered_at,
+            )
+        };
         let mut ctx = HashMapContext::new();
         for (k, v) in &self.values {
             // evalexpr identifiers may contain `.`; we substitute the dot for
@@ -341,39 +385,64 @@ impl AlertEngine {
             // The conversion happens at expression-eval time below.
             let _ = ctx.set_value(k.replace('.', "__"), Value::Float(*v));
         }
-        let rewritten_expr = rule.expr.replace('.', "__");
+        let rewritten_expr = expr.replace('.', "__");
         // Inline (no per-tick worker thread) — see `eval_inline`. Trusted
         // config + length cap + catch_unwind; never returns `Timeout`.
         let truthy = match eval_inline(&rewritten_expr, &ctx) {
             EvalOutcome::Ok(b) => b,
             EvalOutcome::Err(e) => {
-                warn!(rule = %rule.name, error = %e, "alert expression failed to evaluate");
+                warn!(rule = %name, error = %e, "alert expression failed to evaluate");
                 return;
             }
             EvalOutcome::Timeout => {
-                warn!(rule = %rule.name, "alert expression timed out");
+                warn!(rule = %name, "alert expression timed out");
                 return;
             }
             EvalOutcome::Panic => {
-                warn!(rule = %rule.name, "alert expression panicked");
+                warn!(rule = %name, "alert expression panicked");
                 return;
             }
         };
 
         if truthy {
-            let started = rule.triggered_at.get_or_insert(now);
-            if !rule.fired && now.duration_since(*started) >= rule.for_duration {
-                rule.fired = true;
-                let name = rule.name.clone();
-                let notify = rule.notify.clone();
-                let expr = rule.expr.clone();
+            let new_triggered_at = triggered_at.unwrap_or(now);
+            self.rules[idx].triggered_at = Some(new_triggered_at);
+            if !prev_fired && now.duration_since(new_triggered_at) >= for_duration {
+                self.rules[idx].fired = true;
                 fire(&name, &expr, &notify);
+                self.push_event(AlertEvent {
+                    rule: name,
+                    ts_micros: wall_micros(),
+                    kind: AlertEventKind::Fired,
+                    value: None,
+                });
             }
         } else {
-            rule.triggered_at = None;
-            rule.fired = false;
+            self.rules[idx].triggered_at = None;
+            self.rules[idx].fired = false;
+            if prev_fired {
+                self.push_event(AlertEvent {
+                    rule: name,
+                    ts_micros: wall_micros(),
+                    kind: AlertEventKind::Cleared,
+                    value: None,
+                });
+            }
         }
     }
+
+    /// Push an event to the front of the ring buffer (newest-first), evicting
+    /// the oldest entry when the buffer is full.
+    fn push_event(&mut self, event: AlertEvent) {
+        if self.events.len() == EVENT_CAPACITY {
+            self.events.pop_back();
+        }
+        self.events.push_front(event);
+    }
+}
+
+fn wall_micros() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_micros() as u64).unwrap_or(0)
 }
 
 fn fire(name: &str, expr: &str, notify: &[String]) {
@@ -686,6 +755,37 @@ fn push_if_sensor_token(token: &str, out: &mut Vec<String>) {
 }
 
 #[cfg(test)]
+impl AlertEngine {
+    /// Construct a minimal engine with a single rule, for unit tests.
+    fn new_test(name: &str, expr: &str) -> Self {
+        let referenced_sensors = extract_sensor_refs(expr);
+        Self {
+            rules: vec![CompiledRule {
+                name: name.to_string(),
+                expr: expr.to_string(),
+                for_duration: Duration::ZERO,
+                notify: vec![],
+                enabled: true,
+                triggered_at: None,
+                fired: false,
+                referenced_sensors,
+            }],
+            values: HashMap::new(),
+            events: VecDeque::new(),
+        }
+    }
+
+    /// Feed a scalar sample directly into the engine (bypasses on_sample
+    /// indirection for test convenience).
+    fn push_scalar(&mut self, sensor: &str, val: f64) {
+        use linsight_core::{Reading, SensorId};
+        let s =
+            Sample { sensor: SensorId::new(sensor), ts_micros: 0, reading: Reading::Scalar(val) };
+        self.observe(&s);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -830,5 +930,64 @@ mod tests {
         assert!(validate_webhook_url("http://0x7f000001/hook").is_err()); // hex
         // A normal hostname (alphabetic TLD) is still allowed.
         assert!(validate_webhook_url("https://hooks.example.com/x").is_ok());
+    }
+
+    #[test]
+    fn fired_and_cleared_rules_append_events() {
+        // Use integer thresholds: the engine rewrites all '.' to '__', which
+        // corrupts floating-point literals like 50.0 → 50__0.
+        let mut eng = AlertEngine::new_test("high-cpu", "cpu.util > 50");
+
+        // Drive rule true → one Fired event.
+        eng.push_scalar("cpu.util", 90.0);
+        assert_eq!(eng.events.len(), 1);
+        assert_eq!(eng.events[0].rule, "high-cpu");
+        assert_eq!(eng.events[0].kind, AlertEventKind::Fired);
+
+        // Drive rule true again (still fired) → no new event.
+        eng.push_scalar("cpu.util", 95.0);
+        assert_eq!(eng.events.len(), 1);
+
+        // Drive rule false → one Cleared event prepended (newest-first).
+        eng.push_scalar("cpu.util", 10.0);
+        assert_eq!(eng.events.len(), 2);
+        assert_eq!(eng.events[0].kind, AlertEventKind::Cleared);
+        assert_eq!(eng.events[1].kind, AlertEventKind::Fired);
+
+        // Drive false again (not fired) → no new event.
+        eng.push_scalar("cpu.util", 5.0);
+        assert_eq!(eng.events.len(), 2);
+
+        // Overfill: fill to EVENT_CAPACITY + 10, ring must stay capped.
+        for i in 0..(EVENT_CAPACITY + 10) {
+            let val = if i % 2 == 0 { 90.0 } else { 10.0 };
+            // Reset rule state between cycles so each toggle produces an event.
+            if i % 2 == 0 {
+                eng.rules[0].fired = false;
+                eng.rules[0].triggered_at = None;
+            }
+            eng.push_scalar("cpu.util", val);
+        }
+        assert_eq!(eng.events.len(), EVENT_CAPACITY);
+
+        // Verify newest-first: the front entry is the most recent push.
+        // The loop above ends on an even index (EVENT_CAPACITY + 10 - 1 is odd,
+        // so the last val is 10.0 which is a clear cycle; but the last even
+        // iteration pushed 90.0 → Fired). We just verify len is bounded.
+        let json = serde_json::to_string(&eng.events.iter().collect::<Vec<_>>()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), EVENT_CAPACITY);
+
+        // Verify list_events_json limit is honored via the handle.
+        let handle = AlertEngine::new_test("x", "cpu.util > 1").into_handle();
+        handle.on_sample(&linsight_core::Sample {
+            sensor: linsight_core::SensorId::new("cpu.util"),
+            ts_micros: 0,
+            reading: linsight_core::Reading::Scalar(99.0),
+        });
+        let json_limited = handle.list_events_json(Some(1));
+        let arr: serde_json::Value = serde_json::from_str(&json_limited).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 1);
+        assert_eq!(arr[0]["kind"], "fired");
     }
 }

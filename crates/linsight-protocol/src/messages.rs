@@ -72,6 +72,10 @@ pub enum RequestOp {
     DeleteAlert { name: String },
     /// Dry-run an expression against current sensor values.
     TestAlertExpr { expr: String },
+    /// Fetch the most recent alert fire/clear events. `limit` caps the number
+    /// of entries returned; `None` returns all (up to the engine's ring-buffer
+    /// capacity). New variant — appended at end per wire-format stability rules.
+    ListAlertEvents { limit: Option<u32> },
 }
 
 /// A daemon → client message.
@@ -130,6 +134,10 @@ pub enum ResponsePayload {
     /// Reply to `RequestOp::TestAlertExpr`. Reports whether the expression
     /// evaluated to true given current sensor values, or an error.
     AlertTestResult { is_true: bool, error: Option<String> },
+    /// Reply to `RequestOp::ListAlertEvents`. JSON-encoded array of recent
+    /// fire/clear events, newest first. New variant — appended at end per
+    /// wire-format stability rules.
+    AlertEventList { events_json: String },
 }
 
 /// Failure payload for a v2 `ServerMsg::Response`.
@@ -513,6 +521,33 @@ mod tests {
         round_trip(ClientMsg::Request {
             req_id: 15,
             op: RequestOp::TestAlertExpr { expr: "cpu.util > 50".into() },
+        });
+    }
+
+    #[test]
+    fn request_list_alert_events_round_trips() {
+        round_trip(ClientMsg::Request {
+            req_id: 16,
+            op: RequestOp::ListAlertEvents { limit: Some(100) },
+        });
+        round_trip(ClientMsg::Request {
+            req_id: 17,
+            op: RequestOp::ListAlertEvents { limit: None },
+        });
+    }
+
+    #[test]
+    fn response_alert_event_list_round_trips() {
+        round_trip(ServerMsg::Response {
+            req_id: 16,
+            result: Ok(ResponsePayload::AlertEventList {
+                events_json:
+                    r#"[{"rule":"high-cpu","ts_micros":1000,"kind":"fired","value":null}]"#.into(),
+            }),
+        });
+        round_trip(ServerMsg::Response {
+            req_id: 17,
+            result: Ok(ResponsePayload::AlertEventList { events_json: "[]".into() }),
         });
     }
 }
