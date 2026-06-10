@@ -162,8 +162,8 @@ Rectangle {
 
             readonly property color statusColor: {
                 var s = root.tileValue.toLowerCase();
-                if (s === "up" || s === "running" || s === "active") return app.tokens.positive;
-                if (s === "down" || s === "error" || s === "dead") return app.tokens.negative;
+                if (s === "up" || s === "running" || s === "active" || s === "ok") return app.tokens.positive;
+                if (s === "down" || s === "error" || s === "dead" || s === "failing") return app.tokens.negative;
                 return app.tokens.neutral;
             }
 

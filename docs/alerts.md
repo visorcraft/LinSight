@@ -79,6 +79,37 @@ enabled = true
   for `127.0.0.1`). Redirects are not followed. The POST body is a JSON
   object with `name`, `expr`, and `source` fields.
 
+## Disk health alerts
+
+SMART sensors are available for ATA and NVMe drives when udisks2 is on the
+system bus (NVMe SMART requires udisks2 ≥ 2.10). The sensor IDs follow the
+`disk.<name>.<metric>` pattern:
+
+- `disk.nvme0n1.smart_temp_c` — temperature in °C
+- `disk.nvme0n1.smart_health` — `ok` or `failing` (state sensor)
+- `disk.nvme0n1.smart_power_on_hours` — power-on hours
+- `disk.nvme0n1.smart_wear_pct` — wear percentage (NVMe only)
+- `disk.nvme0n1.smart_realloc_sectors` — reallocated sector count (ATA only)
+
+Example rules:
+
+```toml
+[[rule]]
+name = "NVMe temperature"
+expr = "disk.nvme0n1.smart_temp_c > 70"
+for = "1m"
+cooldown = "15m"
+notify = ["desktop"]
+enabled = true
+
+[[rule]]
+name = "NVMe health"
+expr = "disk.nvme0n1.smart_health == \"failing\""
+for = "30s"
+notify = ["desktop"]
+enabled = true
+```
+
 ## Event log
 
 Every fire and clear is recorded in an in-memory ring buffer (capacity 512
