@@ -64,12 +64,27 @@ impl HistoryWriter {
     }
 }
 
+/// Delete all rows with `ts < cutoff_micros`. Returns the number of rows removed.
+pub(crate) fn prune_older_than(conn: &Connection, cutoff_micros: u64) -> Result<usize> {
+    let removed =
+        conn.execute("DELETE FROM samples WHERE ts < ?1", params![cutoff_micros as i64])?;
+    Ok(removed)
+}
+
 /// Open the history database (creating it if needed) and spawn the writer
 /// thread. Returns a producer handle for the scheduler plus a join handle
 /// the runtime should keep so it can detect a thread crash on shutdown.
 /// The writer exits cleanly when every clone of the producer handle is
 /// dropped.
-pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)> {
+///
+/// `retention` controls automatic pruning inside the writer thread.
+/// `None` means keep rows forever; `Some(d)` prunes rows older than `d`
+/// at most once per hour (with a short initial delay so the first prune
+/// happens shortly after startup rather than waiting a full hour).
+pub fn spawn(
+    db_path: PathBuf,
+    retention: Option<Duration>,
+) -> Result<(HistoryWriter, thread::JoinHandle<()>)> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
         // Make the data dir owner-only: this closes the brief window in which
@@ -114,7 +129,7 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
     let writer_dropped = Arc::clone(&dropped);
     let (tx, rx) = sync_channel::<Sample>(QUEUE_CAPACITY);
     let handle = thread::spawn(move || {
-        if let Err(e) = run_writer(conn, rx, writer_dropped) {
+        if let Err(e) = run_writer(conn, rx, writer_dropped, retention) {
             error!(error = ?e, "history writer thread crashed");
         }
     });
@@ -122,9 +137,22 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
     Ok((HistoryWriter { tx, dropped }, handle))
 }
 
-fn run_writer(mut conn: Connection, rx: Receiver<Sample>, dropped: Arc<AtomicU64>) -> Result<()> {
+const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+// Prime last_prune so the first prune fires after this delay rather than
+// waiting a full hour.
+const PRUNE_INITIAL_DELAY: Duration = Duration::from_secs(300);
+
+fn run_writer(
+    mut conn: Connection,
+    rx: Receiver<Sample>,
+    dropped: Arc<AtomicU64>,
+    retention: Option<Duration>,
+) -> Result<()> {
     let mut pending: Vec<Sample> = Vec::with_capacity(MAX_BATCH);
     let mut last_flush = Instant::now();
+    let mut last_prune = Instant::now()
+        .checked_sub(PRUNE_INTERVAL - PRUNE_INITIAL_DELAY)
+        .unwrap_or_else(Instant::now);
     loop {
         match rx.recv_timeout(FLUSH_INTERVAL) {
             Ok(s) => pending.push(s),
@@ -151,6 +179,24 @@ fn run_writer(mut conn: Connection, rx: Receiver<Sample>, dropped: Arc<AtomicU64
             }
             pending.clear();
             last_flush = Instant::now();
+
+            if let Some(retention) = retention
+                && last_prune.elapsed() >= PRUNE_INTERVAL
+            {
+                let now_micros = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_micros() as u64;
+                let cutoff = now_micros.saturating_sub(retention.as_micros() as u64);
+                match prune_older_than(&conn, cutoff) {
+                    Ok(n) if n > 0 => {
+                        info!(removed = n, "pruned history rows past retention window")
+                    }
+                    Ok(_) => {}
+                    Err(e) => warn!(error = ?e, "history prune failed"),
+                }
+                last_prune = Instant::now();
+            }
         }
     }
 }
@@ -345,7 +391,7 @@ mod tests {
     fn write_and_query() {
         let dir = tempfile::TempDir::new().unwrap();
         let db = dir.path().join("h.db");
-        let (writer, handle) = spawn(db.clone()).unwrap();
+        let (writer, handle) = spawn(db.clone(), None).unwrap();
         for ts in 0..10 {
             writer.record(Sample {
                 sensor: SensorId::new("cpu.util"),
@@ -393,10 +439,38 @@ mod tests {
     }
 
     #[test]
+    fn prune_removes_rows_older_than_cutoff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = dir.path().join("h.db");
+        let (writer, handle) = spawn(db.clone(), None).unwrap();
+        writer.record(Sample {
+            sensor: SensorId::new("cpu.util"),
+            ts_micros: 1_000,
+            reading: Reading::Scalar(1.0),
+        });
+        writer.record(Sample {
+            sensor: SensorId::new("cpu.util"),
+            ts_micros: 2_000_000,
+            reading: Reading::Scalar(2.0),
+        });
+        drop(writer);
+        handle.join().expect("writer thread panicked");
+
+        let conn = Connection::open(&db).unwrap();
+        let removed = prune_older_than(&conn, 1_500_000).unwrap();
+        assert_eq!(removed, 1);
+
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+        let ts: i64 = conn.query_row("SELECT ts FROM samples", [], |r| r.get(0)).unwrap();
+        assert_eq!(ts, 2_000_000);
+    }
+
+    #[test]
     fn query_downsamples_with_bounded_even_spread() {
         let dir = tempfile::TempDir::new().unwrap();
         let db = dir.path().join("h.db");
-        let (writer, handle) = spawn(db.clone()).unwrap();
+        let (writer, handle) = spawn(db.clone(), None).unwrap();
 
         for ts in 0..103_u64 {
             writer.record(Sample {

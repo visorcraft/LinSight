@@ -93,7 +93,7 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
             Some(d) => info!(retention_secs = d.as_secs(), "history retention window"),
             None => info!("history retention: keep forever"),
         }
-        match history::spawn(db_path.clone()) {
+        match history::spawn(db_path.clone(), retention) {
             Ok((writer, join)) => {
                 scheduler.set_history_writer(Some(writer));
                 scheduler.set_history_db_path(Some(db_path));
