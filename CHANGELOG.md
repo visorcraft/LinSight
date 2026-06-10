@@ -9,6 +9,15 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+- **History retention.** The SQLite history no longer grows forever: with
+  `LINSIGHT_HISTORY=1`, rows older than `LINSIGHT_HISTORY_RETENTION`
+  (default `30d`; `0` keeps everything; `d`/`h`/`m` suffixes) are pruned
+  hourly — including on idle daemons. The daemon never VACUUMs, so the file
+  doesn't shrink in place; the new `linsight-cli db stats` and
+  `linsight-cli db prune --older-than <dur> [--vacuum]` commands cover
+  offline inspection and space reclamation, and work without (or safely
+  alongside) a running daemon.
+
 ## [1.9.0] — 2026-06-04
 
 - **Daemon correctness and resource hardening.** Per-client subscriptions are
