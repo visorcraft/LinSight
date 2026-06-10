@@ -265,10 +265,6 @@ pub struct SystemPlugin {
 struct Inner {
     sysroot: Option<PathBuf>,
     thermal_zones: Option<Vec<ThermalZone>>,
-    /// Cached /proc/stat content for "ctxt" and "processes" — these fields
-    /// share the same file, so reading once per tick is cheaper.
-    prev_ctxt: Option<u64>,
-    prev_processes: Option<u64>,
     cache: Option<linsight_core::SnapshotCache<SystemSnapshot>>,
 }
 
@@ -292,8 +288,6 @@ impl SystemPlugin {
         let mut inner = self.inner.lock().expect("SystemPlugin poisoned");
         inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
         inner.thermal_zones = None;
-        inner.prev_ctxt = None;
-        inner.prev_processes = None;
 
         let sys_key = HardwareDeviceKey::try_new("system:0").expect("static key");
         let device = HardwareDevice {

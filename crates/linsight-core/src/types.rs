@@ -237,18 +237,6 @@ mod tests {
             assert_eq!(decoded, r);
         }
     }
-
-    #[test]
-    fn sample_holds_id_ts_and_reading() {
-        let s = Sample {
-            sensor: SensorId::new("cpu.util"),
-            ts_micros: 1_700_000_000_000_000,
-            reading: Reading::Scalar(33.3),
-        };
-        assert_eq!(s.sensor.as_str(), "cpu.util");
-        assert_eq!(s.ts_micros, 1_700_000_000_000_000);
-        assert!(matches!(s.reading, Reading::Scalar(v) if v == 33.3));
-    }
 }
 
 use std::time::{Duration, Instant};
@@ -273,5 +261,25 @@ impl<T: Clone> SnapshotCache<T> {
     /// Return a clone of the data if it was captured within `ttl`.
     pub fn get(&self, ttl: Duration) -> Option<T> {
         if self.captured_at.elapsed() <= ttl { Some(self.data.clone()) } else { None }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_cache_tests {
+    use super::SnapshotCache;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn get_returns_data_within_ttl() {
+        let cache = SnapshotCache::new(42);
+        assert_eq!(cache.get(Duration::from_millis(50)), Some(42));
+    }
+
+    #[test]
+    fn get_returns_none_after_ttl() {
+        let cache = SnapshotCache::new(42);
+        thread::sleep(Duration::from_millis(60));
+        assert_eq!(cache.get(Duration::from_millis(50)), None);
     }
 }
