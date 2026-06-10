@@ -37,6 +37,7 @@ pub mod ffi {
         #[qproperty(bool, is_loading)]
         #[qproperty(QString, last_error)]
         #[qproperty(QString, test_result)]
+        #[qproperty(QString, events_json)]
         type AlertModel = super::AlertModelRust;
 
         /// Re-fetch all alert rules from the daemon.
@@ -70,6 +71,10 @@ pub mod ffi {
         /// Test an expression against current sensor values.
         #[qinvokable]
         fn test_expr(self: Pin<&mut AlertModel>, expr: &QString);
+
+        /// Re-fetch recent alert events from the daemon.
+        #[qinvokable]
+        fn reload_events(self: Pin<&mut AlertModel>);
     }
 
     impl cxx_qt::Threading for AlertModel {}
@@ -81,6 +86,7 @@ pub struct AlertModelRust {
     is_loading: bool,
     last_error: QString,
     test_result: QString,
+    events_json: QString,
     request_generation: u64,
 }
 
@@ -237,6 +243,28 @@ impl ffi::AlertModel {
             },
             |mut pin, result| {
                 pin.as_mut().set_test_result(QString::from(result.as_str()));
+                pin.as_mut().set_is_loading(false);
+            },
+        );
+    }
+
+    pub fn reload_events(mut self: Pin<&mut Self>) {
+        self.as_mut().set_is_loading(true);
+        self.as_mut().set_last_error(QString::from(""));
+        let generation = self.as_mut().rust_mut().bump_request_generation();
+        let qt_thread = self.qt_thread();
+        let client = with_workspace(|w| w.client());
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || client
+                .list_alert_events(Some(50), RPC_TIMEOUT)
+                .map_err(|e| format!("{e}")),
+            |mut pin, result| {
+                match result {
+                    Ok(json) => pin.as_mut().set_events_json(QString::from(json.as_str())),
+                    Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
+                }
                 pin.as_mut().set_is_loading(false);
             },
         );

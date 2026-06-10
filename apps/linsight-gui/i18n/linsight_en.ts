@@ -128,160 +128,220 @@
     </message>
     <message>
         <location filename="../qml/AlertsPage.qml" line="17"/>
-        <location filename="../qml/AlertsPage.qml" line="78"/>
+        <location filename="../qml/AlertsPage.qml" line="108"/>
         <source>Alert Rules</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="85"/>
+        <location filename="../qml/AlertsPage.qml" line="65"/>
+        <source>%1s ago</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="67"/>
+        <source>%1m ago</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="69"/>
+        <source>%1h ago</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="71"/>
+        <source>%1d ago</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="115"/>
         <source>Set conditions that trigger notifications</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="93"/>
+        <location filename="../qml/AlertsPage.qml" line="123"/>
         <source>Add Rule</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="98"/>
+        <location filename="../qml/AlertsPage.qml" line="128"/>
         <source>Reload</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="116"/>
+        <location filename="../qml/AlertsPage.qml" line="151"/>
         <source>No alert rules configured.
 Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="206"/>
+        <location filename="../qml/AlertsPage.qml" line="242"/>
         <source>Notify:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="224"/>
-        <location filename="../qml/AlertsPage.qml" line="440"/>
+        <location filename="../qml/AlertsPage.qml" line="260"/>
+        <location filename="../qml/AlertsPage.qml" line="566"/>
         <source>Test</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="236"/>
+        <location filename="../qml/AlertsPage.qml" line="272"/>
         <source>Edit</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="247"/>
+        <location filename="../qml/AlertsPage.qml" line="284"/>
         <source>Delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="261"/>
-        <location filename="../qml/AlertsPage.qml" line="272"/>
+        <location filename="../qml/AlertsPage.qml" line="313"/>
+        <source>Recent Events</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="323"/>
+        <source>Refresh</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="358"/>
+        <source>Fired</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="358"/>
+        <source>Cleared</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="384"/>
+        <location filename="../qml/AlertsPage.qml" line="397"/>
         <source>Add Alert Rule</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="282"/>
+        <location filename="../qml/AlertsPage.qml" line="408"/>
         <source>Edit Rule: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="290"/>
+        <location filename="../qml/AlertsPage.qml" line="416"/>
         <source>Name and expression are required.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="299"/>
+        <location filename="../qml/AlertsPage.qml" line="425"/>
         <source>Saving rule &apos;%1&apos;...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="308"/>
+        <location filename="../qml/AlertsPage.qml" line="434"/>
         <source>Rule Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="315"/>
+        <location filename="../qml/AlertsPage.qml" line="441"/>
         <source>e.g. high-cpu</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="319"/>
+        <location filename="../qml/AlertsPage.qml" line="445"/>
         <source>Expression</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="326"/>
+        <location filename="../qml/AlertsPage.qml" line="452"/>
         <source>e.g. cpu.util &gt; 90 &amp;&amp; mem.used_bytes &gt; 8e9</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="335"/>
+        <location filename="../qml/AlertsPage.qml" line="461"/>
         <source>Insert:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="411"/>
+        <location filename="../qml/AlertsPage.qml" line="537"/>
         <source>Sensor:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="460"/>
+        <location filename="../qml/AlertsPage.qml" line="586"/>
         <source>Expression Syntax</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="470"/>
+        <location filename="../qml/AlertsPage.qml" line="596"/>
         <source>Sensor IDs are variables (e.g. &lt;b&gt;cpu.util&lt;/b&gt;, &lt;b&gt;mem.used_bytes&lt;/b&gt;).&lt;br&gt;Compare: &lt;b&gt;&gt;&lt;/b&gt; &lt;b&gt;&lt;&lt;/b&gt; &lt;b&gt;&gt;=&lt;/b&gt; &lt;b&gt;&lt;=&lt;/b&gt; &lt;b&gt;==&lt;/b&gt; &lt;b&gt;!=&lt;/b&gt;&lt;br&gt;Combine: &lt;b&gt;&amp;&amp;&lt;/b&gt; (AND) &lt;b&gt;||&lt;/b&gt; (OR) &lt;b&gt;!&lt;/b&gt; (NOT)&lt;br&gt;Group: &lt;b&gt;( )&lt;/b&gt; parentheses for precedence&lt;br&gt;&lt;br&gt;Examples:&lt;br&gt;  cpu.util &gt; 90&lt;br&gt;  cpu.util &gt; 80 &amp;&amp; mem.used_bytes &gt; 8e9&lt;br&gt;  (xe.gpu0.temp_c &gt; 85 || xe.gpu1.temp_c &gt; 85)&lt;br&gt;  !(cpu.util &gt; 10) &amp;&amp; system.load_1m &gt; 4</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="490"/>
+        <location filename="../qml/AlertsPage.qml" line="616"/>
         <source>Hide Syntax Help</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="490"/>
+        <location filename="../qml/AlertsPage.qml" line="616"/>
         <source>Show Syntax Help</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="495"/>
+        <location filename="../qml/AlertsPage.qml" line="621"/>
         <source>Notification Targets</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="502"/>
+        <location filename="../qml/AlertsPage.qml" line="628"/>
         <source>desktop, webhook:https://...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="506"/>
+        <location filename="../qml/AlertsPage.qml" line="632"/>
         <source>Comma-separated. Supported: desktop, exec:/path, webhook:url</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="517"/>
+        <location filename="../qml/AlertsPage.qml" line="640"/>
+        <source>Desktop notification</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="655"/>
+        <source>Cooldown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="663"/>
+        <source>e.g. 5m (0 = no cooldown)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="667"/>
+        <source>Minimum time between re-notifications. Supports: s, m, h, ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/AlertsPage.qml" line="678"/>
         <source>Test Expression</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="526"/>
+        <location filename="../qml/AlertsPage.qml" line="687"/>
         <source>Waiting for result...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="535"/>
+        <location filename="../qml/AlertsPage.qml" line="696"/>
         <source>Delete Rule</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="542"/>
+        <location filename="../qml/AlertsPage.qml" line="703"/>
         <source>Delete rule &apos;%1&apos;?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="554"/>
+        <location filename="../qml/AlertsPage.qml" line="715"/>
         <source>Deleted rule &apos;%1&apos;</source>
         <translation type="unfinished"></translation>
     </message>
@@ -567,7 +627,7 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CategoryPage.qml" line="392"/>
+        <location filename="../qml/CategoryPage.qml" line="404"/>
         <source>No %1 sensors detected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -815,17 +875,17 @@ Add one using the button above.</source>
 <context>
     <name>HistoryChart</name>
     <message>
-        <location filename="../qml/HistoryChart.qml" line="184"/>
+        <location filename="../qml/HistoryChart.qml" line="194"/>
         <source>Min</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryChart.qml" line="185"/>
+        <location filename="../qml/HistoryChart.qml" line="195"/>
         <source>Avg</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryChart.qml" line="186"/>
+        <location filename="../qml/HistoryChart.qml" line="196"/>
         <source>Max</source>
         <translation type="unfinished"></translation>
     </message>

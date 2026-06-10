@@ -22,13 +22,20 @@ Kirigami.Page {
     property QtObject dashModel: null
 
     property var rules: []
+    property var events: []
     property string testResultText: ""
 
-    Component.onCompleted: if (page.alertModel) page.alertModel.reload()
+    Component.onCompleted: {
+        if (page.alertModel) {
+            page.alertModel.reload()
+            page.alertModel.reloadEvents()
+        }
+    }
 
     Connections {
         target: page.alertModel
         function onRulesJsonChanged() { page.parseRules() }
+        function onEventsJsonChanged() { page.parseEvents() }
     }
 
     function parseRules() {
@@ -39,6 +46,29 @@ Kirigami.Page {
         } catch (e) {
             page.rules = []
         }
+    }
+
+    function parseEvents() {
+        if (!page.alertModel) return
+        try {
+            const arr = JSON.parse(page.alertModel.eventsJson || "[]")
+            page.events = Array.isArray(arr) ? arr : []
+        } catch (e) {
+            page.events = []
+        }
+    }
+
+    function relativeTime(micros) {
+        const now = Date.now() * 1000
+        const diff = Math.max(0, now - micros)
+        const secs = Math.floor(diff / 1000000)
+        if (secs < 60) return qsTr("%1s ago").arg(secs)
+        const mins = Math.floor(secs / 60)
+        if (mins < 60) return qsTr("%1m ago").arg(mins)
+        const hrs = Math.floor(mins / 60)
+        if (hrs < 24) return qsTr("%1h ago").arg(hrs)
+        const days = Math.floor(hrs / 24)
+        return qsTr("%1d ago").arg(days)
     }
 
     function sensorIds() {
@@ -96,7 +126,12 @@ Kirigami.Page {
             ThemedButton {
                 icon.name: "view-refresh-symbolic"
                 text: qsTr("Reload")
-                onClicked: if (page.alertModel) page.alertModel.reload()
+                onClicked: {
+                    if (page.alertModel) {
+                        page.alertModel.reload()
+                        page.alertModel.reloadEvents()
+                    }
+                }
             }
         }
     }
@@ -253,6 +288,92 @@ Kirigami.Page {
                         }
                     }
                 }
+
+                // ── Recent events ──────────────────────────────────
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: page.events.length > 0
+                    radius: app.tokens.radiusCard
+                    color: app.tokens.surface1
+                    border.width: 1
+                    border.color: app.tokens.separator
+                    implicitHeight: eventsHeader.implicitHeight + eventsList.implicitHeight + app.tokens.spaceXL * 2
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: app.tokens.spaceM
+                        spacing: app.tokens.spaceS
+
+                        RowLayout {
+                            id: eventsHeader
+                            Layout.fillWidth: true
+                            spacing: app.tokens.spaceM
+
+                            Controls.Label {
+                                text: qsTr("Recent Events")
+                                font.pixelSize: app.tokens.textBody
+                                font.weight: app.tokens.weightBold
+                                color: app.tokens.textPrimary
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Controls.Button {
+                                icon.name: "view-refresh-symbolic"
+                                text: qsTr("Refresh")
+                                flat: true
+                                onClicked: if (page.alertModel) page.alertModel.reloadEvents()
+                            }
+                        }
+
+                        ColumnLayout {
+                            id: eventsList
+                            Layout.fillWidth: true
+                            spacing: app.tokens.spaceXS
+
+                            Repeater {
+                                model: page.events.slice(0, 10)
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: app.tokens.spaceS
+
+                                    Rectangle {
+                                        width: 8
+                                        height: 8
+                                        radius: 4
+                                        color: modelData.kind === "fired"
+                                               ? app.tokens.accent || "#4fc3f7"
+                                               : app.tokens.textSecondary
+                                    }
+
+                                    Controls.Label {
+                                        text: modelData.rule || ""
+                                        font.pixelSize: app.tokens.textCaption
+                                        color: app.tokens.textPrimary
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Controls.Label {
+                                        text: modelData.kind === "fired" ? qsTr("Fired") : qsTr("Cleared")
+                                        font.pixelSize: app.tokens.textCaption
+                                        font.weight: app.tokens.weightBold
+                                        color: modelData.kind === "fired"
+                                               ? app.tokens.accent || "#4fc3f7"
+                                               : app.tokens.textSecondary
+                                    }
+
+                                    Controls.Label {
+                                        text: page.relativeTime(modelData.ts_micros || 0)
+                                        font.pixelSize: app.tokens.textCaption
+                                        opacity: 0.6
+                                        color: app.tokens.textPrimary
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -299,7 +420,7 @@ Kirigami.Page {
             if (page.alertModel) {
                 // 0 = preserve current enabled flag; the edit dialog
                 // doesn't surface enable/disable, so we shouldn't touch it.
-                page.alertModel.upsert(name, expr, notifyStr, 0, editDialog.editingCooldown)
+                page.alertModel.upsert(name, expr, notifyStr, 0, cooldownField.text.trim())
             }
             app.showPassiveNotification(qsTr("Saving rule '%1'...").arg(name), 2000)
         }
@@ -509,6 +630,41 @@ Kirigami.Page {
 
             Controls.Label {
                 text: qsTr("Comma-separated. Supported: desktop, exec:/path, webhook:url")
+                font.pixelSize: app.tokens.textCaption
+                opacity: 0.6
+                color: app.tokens.textPrimary
+            }
+
+            Controls.CheckBox {
+                id: desktopNotifyCheck
+                text: qsTr("Desktop notification")
+                checked: notifyField.text.split(",").some(function(s) { return s.trim() === "desktop" })
+                onClicked: {
+                    var parts = notifyField.text.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
+                    var hasDesktop = parts.indexOf("desktop") >= 0
+                    if (checked && !hasDesktop) {
+                        parts.push("desktop")
+                    } else if (!checked && hasDesktop) {
+                        parts = parts.filter(function(s) { return s !== "desktop" })
+                    }
+                    notifyField.text = parts.join(", ")
+                }
+            }
+
+            Controls.Label {
+                text: qsTr("Cooldown")
+                font.weight: app.tokens.weightSemibold
+                color: app.tokens.textPrimary
+            }
+            Controls.TextField {
+                id: cooldownField
+                Layout.fillWidth: true
+                text: editDialog.editingCooldown
+                placeholderText: qsTr("e.g. 5m (0 = no cooldown)")
+            }
+
+            Controls.Label {
+                text: qsTr("Minimum time between re-notifications. Supports: s, m, h, ms")
                 font.pixelSize: app.tokens.textCaption
                 opacity: 0.6
                 color: app.tokens.textPrimary
