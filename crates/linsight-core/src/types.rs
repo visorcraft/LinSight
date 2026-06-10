@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::fmt;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -238,8 +239,6 @@ mod tests {
         }
     }
 }
-
-use std::time::{Duration, Instant};
 
 /// Generic time-bounded cache for sensor snapshot data.
 ///
