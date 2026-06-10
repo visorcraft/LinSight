@@ -1457,6 +1457,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "linsight-sensors-smart"
+version = "1.9.0"
+dependencies = [
+ "linsight-core",
+ "linsight-plugin-sdk",
+ "tempfile",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "linsight-sensors-sock"
 version = "1.9.0"
 dependencies = [

@@ -26,6 +26,7 @@ members = [
     "crates/linsight-sensors/systemd",
     "crates/linsight-sensors/sock",
     "crates/linsight-sensors/containers",
+    "crates/linsight-sensors/smart",
     "examples/echo-plugin",
     "examples/init-count-plugin",
     "examples/legacy-init-count-plugin",
@@ -64,6 +65,7 @@ predicates = "3.1"
 proptest = "1.7"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 libc = "0.2"
+zbus = { version = "5.5", features = ["blocking"] }
 
 # Tunnel + future async surfaces. Versioned here so the workspace can
 # share one tokio / rustls revision across crates as the async surface
