@@ -149,6 +149,13 @@ pub(crate) const PRUNE_INITIAL_DELAY: Duration = Duration::from_secs(300);
 /// without sleeping. `last_prune` is updated unconditionally after an attempt
 /// so a failed prune backs off for a full interval rather than hammering the
 /// disk on a persistent error.
+///
+/// Split time domains by design: `now`/`last_prune` are monotonic `Instant`s
+/// (testable, never go backward) that gate the hourly interval; the prune
+/// cutoff uses `SystemTime::now()` (wall clock) because sample timestamps are
+/// microseconds since the Unix epoch and cannot be derived from a monotonic
+/// origin. Do not replace the wall-clock call with `now` — it would always
+/// yield an epoch-relative value near zero and delete every row.
 pub(crate) fn maybe_prune(
     conn: &Connection,
     retention: Option<Duration>,
@@ -325,37 +332,22 @@ pub fn query(
     Ok(samples)
 }
 
-/// Parse a retention string into a `Duration`.
-///
-/// Accepts integer values with a `d` (days), `h` (hours), or `m` (minutes)
-/// suffix. A bare `"0"` returns `None` (keep forever). Any other input that
-/// doesn't match the grammar returns `None`.
-///
-/// Grammar is shared with `linsight_core::parse_duration_dhm`; this wrapper
-/// only adds the `"0"` sentinel (which the core parser rejects as zero-value).
-pub(crate) fn parse_retention(s: &str) -> Option<Duration> {
-    let trimmed = s.trim();
-    if trimmed == "0" {
-        return None;
-    }
-    parse_duration_dhm(trimmed)
-}
-
 /// Read `LINSIGHT_HISTORY_RETENTION` and return the parsed retention window
 /// (unset → 30d default; `"0"` → `None` keep-forever; unparseable → warn + 30d default).
 pub(crate) fn retention_from_env(raw: Option<&str>) -> Option<Duration> {
     const DEFAULT: Duration = Duration::from_secs(30 * 86_400);
-    match raw {
-        None => Some(DEFAULT),
-        Some(s) => {
-            if let Some(d) = parse_retention(s) {
-                Some(d)
-            } else if s.trim() == "0" {
-                None
-            } else {
-                warn!(value = %s, "LINSIGHT_HISTORY_RETENTION unparseable; using default 30d");
-                Some(DEFAULT)
-            }
+    let Some(s) = raw else { return Some(DEFAULT) };
+    // Check the keep-forever sentinel before the parser so "0" is handled
+    // exactly once. `parse_duration_dhm` rejects bare "0" (zero value), so
+    // without this guard it would fall through to the warn+default branch.
+    if s.trim() == "0" {
+        return None;
+    }
+    match parse_duration_dhm(s.trim()) {
+        Some(d) => Some(d),
+        None => {
+            warn!(value = %s, "LINSIGHT_HISTORY_RETENTION unparseable; using default 30d");
+            Some(DEFAULT)
         }
     }
 }
@@ -373,7 +365,7 @@ mod tests {
 
     #[test]
     fn retention_zero_sentinel_is_none() {
-        assert_eq!(parse_retention("0"), None);
+        assert_eq!(retention_from_env(Some("0")), None);
     }
 
     #[test]
@@ -514,12 +506,14 @@ mod tests {
         insert_row(&conn, 1_000);
 
         // Way past PRUNE_INTERVAL — but retention=None means prune never fires.
-        let long_ago = Instant::now().checked_sub(PRUNE_INTERVAL * 2).unwrap();
-        let mut last_prune = long_ago;
-        maybe_prune(&conn, None, &mut last_prune, Instant::now());
+        // Use forward-addition so this works even on fresh CI runners with low uptime.
+        let last_prune = Instant::now();
+        let now = last_prune + PRUNE_INTERVAL * 2;
+        let mut last_prune_mut = last_prune;
+        maybe_prune(&conn, None, &mut last_prune_mut, now);
 
         // last_prune must NOT advance (gate never ran).
-        assert!(last_prune.duration_since(long_ago) < Duration::from_millis(1));
+        assert!(last_prune_mut.duration_since(last_prune) < Duration::from_millis(1));
         assert_eq!(row_count(&conn), 1);
     }
 
@@ -560,15 +554,18 @@ mod tests {
         insert_row(&conn, now_micros);
         assert_eq!(row_count(&conn), 2);
 
-        // Simulate: last_prune is PRUNE_INTERVAL in the past.
-        let last_prune_base = Instant::now().checked_sub(PRUNE_INTERVAL).unwrap();
+        // Simulate: last_prune is PRUNE_INTERVAL in the past by setting a fixed
+        // base and advancing now forward. Forward-addition avoids checked_sub,
+        // which panics on CI runners with uptime shorter than PRUNE_INTERVAL.
+        let last_prune_base = Instant::now();
         let mut last_prune = last_prune_base;
+        let now = last_prune_base + PRUNE_INTERVAL + Duration::from_millis(1);
 
         // Short retention — 1 second is more than enough to catch the row at ts=1.
         let retention = Some(Duration::from_secs(1));
 
-        // `now` is the current instant (> last_prune by PRUNE_INTERVAL → gate opens).
-        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
+        // `now` is PRUNE_INTERVAL + 1ms past `last_prune` → gate opens.
+        maybe_prune(&conn, retention, &mut last_prune, now);
 
         // Old row deleted, fresh row kept.
         assert_eq!(row_count(&conn), 1, "old row should have been pruned");
@@ -582,10 +579,12 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let (conn, _) = open_test_db(&dir);
         // No rows — prune will delete 0 rows but gate still fires.
-        let last_prune_base = Instant::now().checked_sub(PRUNE_INTERVAL).unwrap();
+        // Forward-addition avoids checked_sub panics on low-uptime CI runners.
+        let last_prune_base = Instant::now();
         let mut last_prune = last_prune_base;
+        let now = last_prune_base + PRUNE_INTERVAL + Duration::from_millis(1);
         let retention = Some(Duration::from_secs(1));
-        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
+        maybe_prune(&conn, retention, &mut last_prune, now);
         assert!(last_prune > last_prune_base, "last_prune must advance even when 0 rows deleted");
     }
 

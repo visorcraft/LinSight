@@ -10,6 +10,7 @@ use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Context;
+use linsight_core::history_db_path;
 use tracing::{info, warn};
 
 use crate::alerts::AlertEngine;
@@ -143,16 +144,6 @@ pub fn nickname_store_path() -> PathBuf {
         PathBuf::from(h).join(".config/linsight/hardware.json")
     } else {
         PathBuf::from("/tmp/linsight-hardware.json")
-    }
-}
-
-fn history_db_path() -> PathBuf {
-    if let Some(d) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(d).join("linsight/history.db")
-    } else if let Some(h) = std::env::var_os("HOME") {
-        PathBuf::from(h).join(".local/share/linsight/history.db")
-    } else {
-        PathBuf::from("/tmp/linsight-history.db")
     }
 }
 

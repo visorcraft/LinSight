@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use linsight_core::parse_duration_dhm;
+use linsight_core::{history_db_path, parse_duration_dhm};
 use rusqlite::{Connection, OpenFlags};
 
 // NOTE: The d/h/m integer-suffix grammar is shared with `apps/linsightd/src/history.rs`
@@ -32,16 +32,10 @@ pub(crate) fn parse_duration(s: &str) -> Result<Duration> {
     })
 }
 
-/// Resolve the default history DB path, mirroring `history_db_path()` in
-/// `apps/linsightd/src/runtime.rs` exactly.
+/// Resolve the default history DB path. Delegates to the shared resolver
+/// in `linsight_core::paths` so the CLI and daemon always agree on the location.
 pub(crate) fn default_db_path() -> PathBuf {
-    if let Some(d) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(d).join("linsight/history.db")
-    } else if let Some(h) = std::env::var_os("HOME") {
-        PathBuf::from(h).join(".local/share/linsight/history.db")
-    } else {
-        PathBuf::from("/tmp/linsight-history.db")
-    }
+    history_db_path()
 }
 
 fn open_db(path: &std::path::Path, flags: OpenFlags) -> Result<Connection> {
