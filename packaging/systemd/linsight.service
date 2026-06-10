@@ -25,6 +25,9 @@ Restart=on-failure
 RestartSec=2s
 Environment=LINSIGHT_LOG=info
 Environment=LINSIGHT_HISTORY=1
+# Retention window for history rows (d/h/m suffix; 0 = keep forever; default 30d).
+# Uncomment and adjust to override the default:
+# Environment=LINSIGHT_HISTORY_RETENTION=30d
 Environment=LINSIGHT_PROM_BIND=127.0.0.1:9777
 # Modest resource limits — the daemon is designed to fit well within these.
 MemoryMax=64M

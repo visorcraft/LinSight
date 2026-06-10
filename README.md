@@ -120,6 +120,9 @@ just run-cli list                   # sensor catalogue (52+ entries)
 just run-cli read cpu.util --count 5
 just run-cli read mem.used_bytes --count 3
 just run-cli plugin new my-sensor   # scaffold a third-party plugin
+just run-cli db stats               # row count, sensors, time span, file size
+just run-cli db prune --older-than 7d          # delete rows older than 7 days
+just run-cli db prune --older-than 7d --vacuum # also reclaim file space
 ```
 
 **Remote (mTLS, non-SSH topologies)**
@@ -204,6 +207,15 @@ history (`LINSIGHT_HISTORY`), alerts (`LINSIGHT_ALERTS`), and the
 Prometheus exporter (`LINSIGHT_PROM_BIND`), all off by default. The
 Settings page shows each subsystem's env-var status.
 
+When history is enabled, `LINSIGHT_HISTORY_RETENTION` controls how long
+samples are kept. The format is an integer with a `d`, `h`, or `m` suffix
+(e.g. `30d`, `12h`, `45m`). Unset defaults to `30d`; `0` keeps rows
+forever. An unparseable value logs a warning and falls back to `30d`.
+The daemon prunes rows older than the window at most once per hour, with
+the first prune ~5 minutes after startup. The database file does not
+shrink after pruning — freed pages are reused; use
+`linsight-cli db prune --vacuum` for offline space reclamation.
+
 ---
 
 ## Architecture
@@ -228,7 +240,8 @@ Settings page shows each subsystem's env-var status.
   family / metric source (cpu, mem, net, nvme, nvml, xe, amdgpu, i915,
   disk, fs, hwmon, proc, system, systemd, zram).
 - **`crates/linsight-cli/`** — `list` / `read` / `plugin {new, install,
-  ls, remove}`.
+  ls, remove}` / `db {stats, prune}` (offline history-DB inspection and
+  maintenance; works without a running daemon).
 - **`examples/echo-plugin/`** — minimal third-party plugin built as a
   `cdylib`; exercised by the SDK's `tests/dynamic_load.rs`.
 
