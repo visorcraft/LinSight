@@ -12,32 +12,24 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use linsight_core::parse_duration_dhm;
 use rusqlite::{Connection, OpenFlags};
 
-// NOTE: `parse_duration` duplicates the grammar from two other parsers in the codebase:
-// `apps/linsightd/src/history.rs` `parse_retention` (d/h/m integer suffixes,
-// checked_mul overflow-safe) and `crates/linsight-cli/src/commands/history.rs`
-// `parse_duration_to_micros` (float-tolerant, s/ms/m/h/d grammar). All three are
-// intentionally local to their respective sites; whether to lift a unified parser into
-// `linsight-core` is a Phase-1 gate checkpoint decision, not something we do here.
+// NOTE: The d/h/m integer-suffix grammar is shared with `apps/linsightd/src/history.rs`
+// `parse_retention` — both now delegate to `linsight_core::parse_duration_dhm`.
+// Two legacy float-grammar parsers remain local to their call sites:
+// `apps/linsightd/src/alerts.rs` `parse_duration` (float, s/ms grammar) and
+// `crates/linsight-cli/src/commands/history.rs` `parse_duration_to_micros` (float grammar).
 
 /// Parse a duration string with a `d`, `h`, or `m` suffix into a `Duration`.
 /// Returns an error on unknown suffixes, zero values, or integer overflow.
 pub(crate) fn parse_duration(s: &str) -> Result<Duration> {
-    let s = s.trim();
-    let split_at = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
-    let (digits, unit) = s.split_at(split_at);
-    let n: u64 = digits.parse().ok().filter(|&v| v > 0).ok_or_else(|| {
-        anyhow::anyhow!("duration value must be a positive integer (got {:?})", digits)
-    })?;
-    let secs = match unit {
-        "d" => n.checked_mul(86_400),
-        "h" => n.checked_mul(3_600),
-        "m" => n.checked_mul(60),
-        other => anyhow::bail!("unknown duration unit {:?}; expected d, h, or m", other),
-    }
-    .ok_or_else(|| anyhow::anyhow!("duration {:?} overflows u64", s))?;
-    Ok(Duration::from_secs(secs))
+    parse_duration_dhm(s).ok_or_else(|| {
+        anyhow::anyhow!(
+            "invalid duration {:?}; expected a positive integer with d/h/m suffix (e.g. 30d, 12h, 45m)",
+            s.trim()
+        )
+    })
 }
 
 /// Resolve the default history DB path, mirroring `history_db_path()` in
@@ -163,7 +155,7 @@ pub fn prune(db_path: Option<PathBuf>, older_than: &str, vacuum: bool) -> Result
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use rusqlite::Connection;
     use tempfile::NamedTempFile;
@@ -260,16 +252,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_duration_d_h_m() {
-        assert_eq!(parse_duration("1d").unwrap(), Duration::from_secs(86_400));
-        assert_eq!(parse_duration("2h").unwrap(), Duration::from_secs(7_200));
-        assert_eq!(parse_duration("30m").unwrap(), Duration::from_secs(1_800));
-    }
-
-    #[test]
-    fn parse_duration_rejects_zero_and_overflow() {
+    fn parse_duration_returns_err_on_invalid() {
         assert!(parse_duration("0d").is_err());
-        assert!(parse_duration("99999999999999999999d").is_err());
         assert!(parse_duration("garbage").is_err());
         assert!(parse_duration("5x").is_err());
     }

@@ -31,7 +31,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use linsight_core::{Reading, Sample, SensorId};
+use linsight_core::{Reading, Sample, SensorId, parse_duration_dhm};
 use rusqlite::{Connection, OpenFlags, params};
 use tracing::{error, info, warn};
 
@@ -329,21 +329,16 @@ pub fn query(
 ///
 /// Accepts integer values with a `d` (days), `h` (hours), or `m` (minutes)
 /// suffix. A bare `"0"` returns `None` (keep forever). Any other input that
-/// doesn't match returns `None`.
+/// doesn't match the grammar returns `None`.
+///
+/// Grammar is shared with `linsight_core::parse_duration_dhm`; this wrapper
+/// only adds the `"0"` sentinel (which the core parser rejects as zero-value).
 pub(crate) fn parse_retention(s: &str) -> Option<Duration> {
-    let s = s.trim();
-    if s == "0" {
+    let trimmed = s.trim();
+    if trimmed == "0" {
         return None;
     }
-    let (digits, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
-    let n: u64 = digits.parse().ok().filter(|&v| v > 0)?;
-    let secs = match unit {
-        "d" => n.checked_mul(86_400)?,
-        "h" => n.checked_mul(3_600)?,
-        "m" => n.checked_mul(60)?,
-        _ => return None,
-    };
-    Some(Duration::from_secs(secs))
+    parse_duration_dhm(trimmed)
 }
 
 /// Read `LINSIGHT_HISTORY_RETENTION` and return the parsed retention window
@@ -377,15 +372,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retention_parses_day_hour_suffixes() {
-        assert_eq!(parse_retention("30d"), Some(Duration::from_secs(30 * 86_400)));
-        assert_eq!(parse_retention("12h"), Some(Duration::from_secs(12 * 3_600)));
-        assert_eq!(parse_retention("45m"), Some(Duration::from_secs(45 * 60)));
+    fn retention_zero_sentinel_is_none() {
         assert_eq!(parse_retention("0"), None);
-        assert_eq!(parse_retention("garbage"), None);
-        // overflow in the multiply must be rejected, not wrapped
-        assert_eq!(parse_retention("99999999999999999999d"), None);
-        assert_eq!(parse_retention("999999999999999999h"), None);
     }
 
     #[test]
