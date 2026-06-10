@@ -567,7 +567,7 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CategoryPage.qml" line="390"/>
+        <location filename="../qml/CategoryPage.qml" line="392"/>
         <source>No %1 sensors detected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -815,17 +815,17 @@ Add one using the button above.</source>
 <context>
     <name>HistoryChart</name>
     <message>
-        <location filename="../qml/HistoryChart.qml" line="135"/>
+        <location filename="../qml/HistoryChart.qml" line="184"/>
         <source>Min</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryChart.qml" line="136"/>
+        <location filename="../qml/HistoryChart.qml" line="185"/>
         <source>Avg</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryChart.qml" line="137"/>
+        <location filename="../qml/HistoryChart.qml" line="186"/>
         <source>Max</source>
         <translation type="unfinished"></translation>
     </message>
@@ -838,32 +838,32 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryDialog.qml" line="69"/>
+        <location filename="../qml/HistoryDialog.qml" line="70"/>
         <source>15 m</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryDialog.qml" line="70"/>
+        <location filename="../qml/HistoryDialog.qml" line="71"/>
         <source>1 h</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryDialog.qml" line="71"/>
+        <location filename="../qml/HistoryDialog.qml" line="72"/>
         <source>24 h</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryDialog.qml" line="72"/>
+        <location filename="../qml/HistoryDialog.qml" line="73"/>
         <source>7 d</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryDialog.qml" line="122"/>
+        <location filename="../qml/HistoryDialog.qml" line="123"/>
         <source>History recording is not enabled on this daemon. Set LINSIGHT_HISTORY=1 in the daemon&apos;s environment and restart it to enable history.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/HistoryDialog.qml" line="152"/>
+        <location filename="../qml/HistoryDialog.qml" line="153"/>
         <source>No data in this range.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1121,17 +1121,17 @@ Add one using the button above.</source>
         <translation>CPU</translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="107"/>
+        <location filename="../qml/OverviewPage.qml" line="108"/>
         <source>Memory</source>
         <translation>Speicher</translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="117"/>
+        <location filename="../qml/OverviewPage.qml" line="119"/>
         <source>CPU temperature</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/OverviewPage.qml" line="126"/>
+        <location filename="../qml/OverviewPage.qml" line="129"/>
         <source>CPU frequency</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1184,57 +1184,77 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <location filename="../qml/SettingsPage.qml" line="178"/>
+        <source>Tile sparklines</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../qml/SettingsPage.qml" line="179"/>
+        <source>Show a mini trend chart inside each scalar sensor tile.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="197"/>
+        <source>Enabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="197"/>
+        <source>Disabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="206"/>
         <source>Always-on mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="180"/>
+        <location filename="../qml/SettingsPage.qml" line="207"/>
         <source>History, alerts, and Prometheus continue running after the GUI closes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="184"/>
+        <location filename="../qml/SettingsPage.qml" line="211"/>
         <source>Today these subsystems are enabled via environment variables and the systemd user unit at &lt;code&gt;packaging/systemd/linsight.service&lt;/code&gt;. Edit + &lt;code&gt;systemctl --user daemon-reload &amp;&amp; systemctl --user restart linsight&lt;/code&gt; to flip them.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="192"/>
+        <location filename="../qml/SettingsPage.qml" line="219"/>
         <source>SQLite history (~/.local/share/linsight/history.db)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="193"/>
+        <location filename="../qml/SettingsPage.qml" line="220"/>
         <source>Alert rules (~/.config/linsight/alerts.toml)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="194"/>
+        <location filename="../qml/SettingsPage.qml" line="221"/>
         <source>Prometheus exporter (default 127.0.0.1:9777)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="217"/>
+        <location filename="../qml/SettingsPage.qml" line="244"/>
         <source>enabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="218"/>
+        <location filename="../qml/SettingsPage.qml" line="245"/>
         <source>disabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="237"/>
+        <location filename="../qml/SettingsPage.qml" line="264"/>
         <source>Command-line tools</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="238"/>
+        <location filename="../qml/SettingsPage.qml" line="265"/>
         <source>The CLI and daemon ship alongside the GUI.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="242"/>
+        <location filename="../qml/SettingsPage.qml" line="269"/>
         <source>&lt;code&gt;linsight-cli list&lt;/code&gt; shows every sensor the daemon advertises.&lt;br&gt;&lt;code&gt;linsight-cli read &amp;lt;sensor&amp;gt; --count N&lt;/code&gt; streams live values.&lt;br&gt;&lt;code&gt;linsight-cli plugin new &amp;lt;name&amp;gt;&lt;/code&gt; scaffolds a third-party plugin crate.</source>
         <translation type="unfinished"></translation>
     </message>

@@ -18,6 +18,9 @@ Rectangle {
     property var tileRows: []
     property var tileOptions: ({})
     property var tileSparkline: []
+    // When true and the tile has a varying scalar sparkline, renders a mini
+    // HistoryChart strip under the value. Wired from app.preferences.sparklines.
+    property bool sparklinesEnabled: false
     // Sensor id passed through to the history dialog. When empty no click
     // handler is active (e.g. static/table tiles without a scalar history).
     property string tileSensorId: ""
@@ -120,44 +123,19 @@ Rectangle {
             }
         }
 
-        // C1 — Sparkline mini chart (scalar sensors only). Only drawn when
-        // the series actually varies — a constant value (e.g. GPU memory
-        // total) carries no trend and shouldn't get a chart.
-        Canvas {
-            id: sparklineCanvas
+        // C1 — Mini sparkline chart (scalar/counter sensors only).
+        // Visible only when sparklinesEnabled is true and the series varies.
+        HistoryChart {
+            id: miniSparkline
             Layout.fillWidth: true
             height: 36
-            visible: root.tileKind !== "table" && root.__sparklineVaries
-
-            onPaint: {
-                const ctx = getContext("2d")
-                const w = width
-                const h = height
-                ctx.clearRect(0, 0, w, h)
-                const pts = root.tileSparkline
-                if (!pts || pts.length < 2) return
-                let min = pts[0], max = pts[0]
-                for (let k = 1; k < pts.length; ++k) {
-                    if (pts[k] < min) min = pts[k]
-                    if (pts[k] > max) max = pts[k]
-                }
-                const range = Math.max(max - min, 1e-10)
-                ctx.strokeStyle = app.tokens.accent || "#4fc3f7"
-                ctx.lineWidth = 1.5
-                ctx.beginPath()
-                for (let i = 0; i < pts.length; ++i) {
-                    const x = (i / (pts.length - 1)) * w
-                    const y = h - ((pts[i] - min) / range) * (h - 6) - 3
-                    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-                }
-                ctx.stroke()
-            }
-
-            // Repaint when sparkline data changes
-            Connections {
-                target: root
-                function onTileSparklineChanged() { sparklineCanvas.requestPaint() }
-            }
+            mini: true
+            values: root.tileSparkline
+            accentColor: app.tokens.accent
+            visible: root.sparklinesEnabled
+                     && root.tileKind !== "table"
+                     && root.tileKind !== "state"
+                     && root.__sparklineVaries
         }
 
         Item { Layout.fillHeight: true; Layout.fillWidth: true }

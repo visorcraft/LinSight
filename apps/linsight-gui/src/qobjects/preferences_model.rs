@@ -247,6 +247,10 @@ pub(crate) struct PreferencesFile {
     /// `linsight_protocol::PUMP_INTERVAL_{MIN,MAX}_MS`.
     #[serde(default = "default_sample_interval_ms")]
     pub sample_interval_ms: u32,
+    /// Show mini sparkline charts inside scalar sensor tiles.
+    /// Defaults to false so the tile layout is unchanged on first run.
+    #[serde(default)]
+    pub sparklines: bool,
 }
 fn default_schema_version() -> u32 {
     1
@@ -268,6 +272,7 @@ impl Default for PreferencesFile {
             active_dashboard: None,
             start_page: default_start_page(),
             sample_interval_ms: default_sample_interval_ms(),
+            sparklines: false,
         }
     }
 }
@@ -328,6 +333,8 @@ pub mod ffi {
         // Settings page's dropdown writes here; the GUI client sends
         // a SetPumpIntervalMs request at handshake + on every change.
         #[qproperty(i32, sample_interval_ms)]
+        // Whether mini sparkline charts are rendered inside scalar tiles.
+        #[qproperty(bool, sparklines)]
         type PreferencesModel = super::PreferencesModelRust;
 
         #[qinvokable]
@@ -353,6 +360,10 @@ pub mod ffi {
         #[qinvokable]
         fn apply_sample_interval_ms(self: Pin<&mut PreferencesModel>, ms: i32);
 
+        /// Persist the tile-sparklines toggle.
+        #[qinvokable]
+        fn apply_sparklines(self: Pin<&mut PreferencesModel>, enabled: bool);
+
         #[qinvokable]
         fn color(self: &PreferencesModel, role: &QString) -> QString;
 
@@ -372,6 +383,7 @@ pub struct PreferencesModelRust {
     active_dashboard: QString,
     start_page: QString,
     sample_interval_ms: i32,
+    sparklines: bool,
 }
 
 impl Default for PreferencesModelRust {
@@ -382,6 +394,7 @@ impl Default for PreferencesModelRust {
             active_dashboard: QString::from(p.active_dashboard.as_deref().unwrap_or("")),
             start_page: QString::from(p.start_page.as_str()),
             sample_interval_ms: p.sample_interval_ms as i32,
+            sparklines: p.sparklines,
         }
     }
 }
@@ -460,6 +473,11 @@ impl ffi::PreferencesModel {
         QString::from(v)
     }
 
+    pub fn apply_sparklines(mut self: Pin<&mut Self>, enabled: bool) {
+        self.as_mut().set_sparklines(enabled);
+        let _ = save_prefs(&self.snapshot());
+    }
+
     pub fn reload(mut self: Pin<&mut Self>) {
         let p = load_prefs();
         self.as_mut().set_theme(QString::from(p.theme.as_str()));
@@ -467,6 +485,7 @@ impl ffi::PreferencesModel {
             .set_active_dashboard(QString::from(p.active_dashboard.as_deref().unwrap_or("")));
         self.as_mut().set_start_page(QString::from(p.start_page.as_str()));
         self.as_mut().set_sample_interval_ms(p.sample_interval_ms as i32);
+        self.as_mut().set_sparklines(p.sparklines);
     }
 
     pub fn themes_json(&self) -> QString {
@@ -491,6 +510,7 @@ impl ffi::PreferencesModel {
             active_dashboard: if slug.is_empty() { None } else { Some(slug) },
             start_page: self.start_page().to_string(),
             sample_interval_ms: (*self.sample_interval_ms()).max(0) as u32,
+            sparklines: *self.sparklines(),
         }
     }
 }
@@ -555,10 +575,23 @@ pub(crate) mod tests {
             active_dashboard: Some("production".into()),
             start_page: "dashboard:production".into(),
             sample_interval_ms: 200,
+            sparklines: true,
         };
         save_prefs(&original).unwrap();
         let loaded = load_prefs();
         assert_eq!(loaded, original);
+    }
+
+    #[test]
+    fn sparklines_defaults_to_false() {
+        let _g = TempXdgConfig::new();
+        let path = prefs_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // An older preferences.json without the sparklines field — serde default must kick in.
+        std::fs::write(&path, r#"{"schema_version":1,"theme":"dark","sample_interval_ms":150}"#)
+            .unwrap();
+        let loaded = load_prefs();
+        assert!(!loaded.sparklines);
     }
 
     #[test]

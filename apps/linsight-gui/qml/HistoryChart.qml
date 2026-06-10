@@ -4,9 +4,11 @@
 // Canvas line chart for a single sensor's history.
 //
 // Props:
-//   samples   — array of {t: micros, v: number} points (parsed by parent)
+//   samples     — array of {t: micros, v: number} points (parsed by parent)
 //   accentColor — stroke colour; falls back to app.tokens.accent
 //   unitLabel   — short suffix displayed in stat pills (e.g. "°C", "%", "MHz")
+//   mini        — when true: no stat pills, no labels, thinner stroke (1.5 px),
+//                 no fill, zero internal padding — sparkline-strip mode.
 
 import QtQuick
 import QtQuick.Layouts
@@ -14,17 +16,39 @@ import QtQuick.Layouts
 Item {
     id: root
 
+    // Full-form input: array of {t: micros, v: number} points.
     property var samples: []
+    // Fast-path input: plain f64 array (e.g. from tilesJson sparkline).
+    // When non-empty this takes precedence over `samples`; each value is
+    // mapped to {t: index, v: value} internally. Only one of the two
+    // inputs should be set at a time.
+    property var values: []
     property color accentColor: app.tokens.accent
     property string unitLabel: ""
+    // Compact sparkline-strip rendering mode. Hides stat pills and fill;
+    // uses a thinner stroke and zero internal padding.
+    property bool mini: false
 
-    // ---- derived stats (recomputed in one pass when samples change) ----------
+    // Internal: resolved point array (either samples or values-mapped).
+    readonly property var resolvedPts: {
+        if (Array.isArray(root.values) && root.values.length > 0) {
+            const v = root.values
+            const out = new Array(v.length)
+            for (let i = 0; i < v.length; ++i) out[i] = { t: i, v: v[i] }
+            return out
+        }
+        return root.samples
+    }
+
+    // ---- derived stats (recomputed in one pass when the resolved series changes) ---
     property real statMin: 0
     property real statMax: 0
     property real statAvg: 0
     property bool hasData: false
 
-    onSamplesChanged: root._computeStats()
+    // resolvedPts re-evaluates whenever samples or values changes, so a
+    // single handler here covers both inputs.
+    onResolvedPtsChanged: root._computeStats()
     onAccentColorChanged: chart.requestPaint()
 
     // Format a raw value with the appropriate scaled unit suffix.
@@ -50,7 +74,7 @@ Item {
     }
 
     function _computeStats() {
-        const pts = root.samples
+        const pts = root.resolvedPts
         if (!Array.isArray(pts) || pts.length === 0) {
             root.hasData = false
             root.statMin = 0; root.statMax = 0; root.statAvg = 0
@@ -73,7 +97,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: app.tokens.spaceS
+        spacing: root.mini ? 0 : app.tokens.spaceS
 
         // ---- chart canvas ---------------------------------------------------
         Canvas {
@@ -90,7 +114,7 @@ Item {
                 const h = height
                 ctx.clearRect(0, 0, w, h)
 
-                const pts = root.samples
+                const pts = root.resolvedPts
                 if (!pts || pts.length < 2) {
                     // Single point or empty — draw a horizontal centre line.
                     if (pts && pts.length === 1) {
@@ -117,21 +141,23 @@ Item {
                     return h - ((v - yMin) / yRange) * (h - 1)
                 }
 
-                // Subtle fill under the line.
-                const fillColor = Qt.rgba(root.accentColor.r,
-                                          root.accentColor.g,
-                                          root.accentColor.b, 0.12)
-                ctx.fillStyle = fillColor
-                ctx.beginPath()
-                for (let i = 0; i < pts.length; ++i) {
-                    const x = (i / (pts.length - 1)) * w
-                    const y = mapY(pts[i].v)
-                    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+                if (!root.mini) {
+                    // Subtle fill under the line (full chart only).
+                    const fillColor = Qt.rgba(root.accentColor.r,
+                                              root.accentColor.g,
+                                              root.accentColor.b, 0.12)
+                    ctx.fillStyle = fillColor
+                    ctx.beginPath()
+                    for (let i = 0; i < pts.length; ++i) {
+                        const x = (i / (pts.length - 1)) * w
+                        const y = mapY(pts[i].v)
+                        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+                    }
+                    ctx.lineTo(w, h)
+                    ctx.lineTo(0, h)
+                    ctx.closePath()
+                    ctx.fill()
                 }
-                ctx.lineTo(w, h)
-                ctx.lineTo(0, h)
-                ctx.closePath()
-                ctx.fill()
 
                 // Stroke.
                 ctx.strokeStyle = root.accentColor
@@ -147,11 +173,11 @@ Item {
             }
         }
 
-        // ---- stat pills -------------------------------------------------------
+        // ---- stat pills (hidden in mini/sparkline mode) ----------------------
         Row {
             Layout.alignment: Qt.AlignHCenter
             spacing: app.tokens.spaceL
-            visible: root.hasData
+            visible: root.hasData && !root.mini
 
             Repeater {
                 model: [

@@ -498,62 +498,28 @@ Kirigami.Page {
                                 }
                                 property string _sid: parent.parent.sid
                             }
-                            // C1 — Sparkline mini chart
-                            Canvas {
+                            // C1 — Mini sparkline chart (gated by preference)
+                            HistoryChart {
                                 Layout.fillWidth: true
                                 height: 34
-                                property var samples: {
+                                mini: true
+                                accentColor: app.tokens.accent
+                                values: {
                                     const meta = parent.parent && parent.parent.sid ? page.sensorMetaById[parent.parent.sid] : null
                                     return meta && Array.isArray(meta.sparkline) ? meta.sparkline : []
                                 }
-                                // Only chart a series that actually varies. A
-                                // constant value (e.g. GPU memory total) gets
-                                // no chart — it carries no trend, and a flat
-                                // line otherwise stole the value's layout space.
-                                readonly property bool hasVariation: {
-                                    if (samples.length < 2) return false
-                                    let mn = samples[0], mx = samples[0]
-                                    for (let k = 1; k < samples.length; ++k) {
-                                        if (samples[k] < mn) mn = samples[k]
-                                        if (samples[k] > mx) mx = samples[k]
+                                visible: {
+                                    if (!(app.preferences ? app.preferences.sparklines : false)) return false
+                                    const kind = page.kindById[parent.parent.sid] || "scalar"
+                                    if (kind === "table" || kind === "state") return false
+                                    const pts = values
+                                    if (!Array.isArray(pts) || pts.length < 2) return false
+                                    let mn = pts[0], mx = pts[0]
+                                    for (let k = 1; k < pts.length; ++k) {
+                                        if (pts[k] < mn) mn = pts[k]
+                                        if (pts[k] > mx) mx = pts[k]
                                     }
                                     return mx > mn
-                                }
-                                visible: hasVariation
-
-                                onPaint: {
-                                    const ctx = getContext("2d")
-                                    const w = width
-                                    const h = height
-                                    ctx.clearRect(0, 0, w, h)
-                                    const pts = samples
-                                    if (pts.length < 2) return
-                                    let min = pts[0], max = pts[0]
-                                    for (let k = 1; k < pts.length; ++k) {
-                                        if (pts[k] < min) min = pts[k]
-                                        if (pts[k] > max) max = pts[k]
-                                    }
-                                    const range = Math.max(max - min, 1e-10)
-                                    ctx.strokeStyle = app.tokens.accent || "#4fc3f7"
-                                    ctx.lineWidth = 1.5
-                                    ctx.beginPath()
-                                    for (let i = 0; i < pts.length; ++i) {
-                                        const x = (i / (pts.length - 1)) * w
-                                        const y = h - ((pts[i] - min) / range) * (h - 6) - 3
-                                        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-                                    }
-                                    ctx.stroke()
-                                }
-
-                                // Repaint each time the tile's value updates
-                                property int _tick: 0
-                                onSamplesChanged: { _tick++; requestPaint() }
-
-                                Timer {
-                                    interval: 2000
-                                    running: parent.visible
-                                    repeat: true
-                                    onTriggered: parent.requestPaint()
                                 }
                             }
                             Item { Layout.fillHeight: true }

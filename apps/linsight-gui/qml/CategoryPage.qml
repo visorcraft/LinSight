@@ -344,6 +344,8 @@ Kirigami.Page {
                                 item.tileRows = modelData.rows || []
                                 item.tileSensorId = (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
                                 item.tileUnit = modelData.unit || ""
+                                item.tileSparkline = modelData.sparkline || []
+                                item.sparklinesEnabled = app.preferences ? app.preferences.sparklines : false
                             }
                         }
                     }
