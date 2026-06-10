@@ -81,17 +81,25 @@ Item {
             chart.requestPaint()
             return
         }
-        root.hasData = true
-        let mn = pts[0].v, mx = pts[0].v, sum = 0
+        let mn = Infinity, mx = -Infinity, sum = 0, n = 0
         for (let i = 0; i < pts.length; ++i) {
             const v = pts[i].v
+            if (!isFinite(v)) continue
             if (v < mn) mn = v
             if (v > mx) mx = v
             sum += v
+            n++
         }
+        if (n === 0) {
+            root.hasData = false
+            root.statMin = 0; root.statMax = 0; root.statAvg = 0
+            chart.requestPaint()
+            return
+        }
+        root.hasData = true
         root.statMin = mn
         root.statMax = mx
-        root.statAvg = sum / pts.length
+        root.statAvg = sum / n
         chart.requestPaint()
     }
 
@@ -114,7 +122,9 @@ Item {
                 const h = height
                 ctx.clearRect(0, 0, w, h)
 
-                const pts = root.resolvedPts
+                // Non-finite samples (NaN/Inf from a misbehaving plugin) would
+                // poison the polyline geometry — drop them up front.
+                const pts = (root.resolvedPts || []).filter(p => isFinite(p.v))
                 if (!pts || pts.length < 2) {
                     // Single point or empty — draw a horizontal centre line.
                     if (pts && pts.length === 1) {
