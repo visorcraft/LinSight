@@ -364,7 +364,7 @@ Kirigami.Page {
                                     }
 
                                     Controls.Label {
-                                        text: page.relativeTime(modelData.ts_micros || 0)
+                                        text: modelData.ts_micros ? page.relativeTime(modelData.ts_micros) : ""
                                         font.pixelSize: app.tokens.textCaption
                                         opacity: 0.6
                                         color: app.tokens.textPrimary
@@ -393,6 +393,8 @@ Kirigami.Page {
             nameField.text = ""
             exprField.text = ""
             notifyField.text = ""
+            cooldownField.text = ""
+            desktopNotifyCheck.checked = false
             sensorPicker.currentIndex = -1
             title = qsTr("Add Alert Rule")
             open()
@@ -404,6 +406,9 @@ Kirigami.Page {
             nameField.text = name
             exprField.text = expr
             notifyField.text = notify
+            cooldownField.text = cooldown
+            var parts = notify.split(",").map(function(s) { return s.trim() })
+            desktopNotifyCheck.checked = parts.indexOf("desktop") >= 0
             sensorPicker.currentIndex = -1
             title = qsTr("Edit Rule: %1").arg(name)
             open()
