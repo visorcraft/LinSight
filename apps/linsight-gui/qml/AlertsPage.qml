@@ -171,7 +171,8 @@ Kirigami.Page {
                                         modelData.name,
                                         modelData.expr,
                                         (modelData.notify || []).join(", "),
-                                        checked ? 1 : -1
+                                        checked ? 1 : -1,
+                                        ""
                                     )
                                 }
                                 Layout.alignment: Qt.AlignVCenter
@@ -294,7 +295,7 @@ Kirigami.Page {
             if (page.alertModel) {
                 // 0 = preserve current enabled flag; the edit dialog
                 // doesn't surface enable/disable, so we shouldn't touch it.
-                page.alertModel.upsert(name, expr, notifyStr, 0)
+                page.alertModel.upsert(name, expr, notifyStr, 0, "")
             }
             app.showPassiveNotification(qsTr("Saving rule '%1'...").arg(name), 2000)
         }

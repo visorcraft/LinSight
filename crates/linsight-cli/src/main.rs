@@ -90,6 +90,9 @@ enum AlertCmd {
         /// Debounce: time condition must hold before firing (e.g. "30s")
         #[arg(long)]
         for_duration: Option<String>,
+        /// Cooldown: minimum time between re-notifications (e.g. "5m")
+        #[arg(long)]
+        cooldown: Option<String>,
         /// Notify target (can be specified multiple times: "desktop", "exec:...", "webhook:...")
         #[arg(long)]
         notify: Vec<String>,
@@ -168,8 +171,15 @@ fn main() -> anyhow::Result<()> {
         }
         Cmd::Alert { action } => match action {
             AlertCmd::List => commands::alert::list(&socket),
-            AlertCmd::Add { name, expr, for_duration, notify } => {
-                commands::alert::add(&socket, &name, &expr, for_duration.as_deref(), &notify)
+            AlertCmd::Add { name, expr, for_duration, cooldown, notify } => {
+                commands::alert::add(
+                    &socket,
+                    &name,
+                    &expr,
+                    for_duration.as_deref(),
+                    cooldown.as_deref(),
+                    &notify,
+                )
             }
             AlertCmd::Remove { name } => commands::alert::remove(&socket, &name),
         },

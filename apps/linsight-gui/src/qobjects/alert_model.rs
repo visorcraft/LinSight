@@ -18,7 +18,7 @@ use crate::qobjects::workspace_handle::with_workspace;
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
 enum AlertMutation {
-    Upsert { name: String, expr: String, notify: Vec<String>, enabled: Option<bool> },
+    Upsert { name: String, expr: String, notify: Vec<String>, enabled: Option<bool>, cooldown: Option<String> },
     Delete { name: String },
 }
 
@@ -57,6 +57,7 @@ pub mod ffi {
             expr: &QString,
             notify: &QString,
             enabled_state: i32,
+            cooldown: &QString,
         );
 
         /// Delete a rule by name. Named `delete_rule` because `delete`
@@ -117,8 +118,8 @@ fn apply_alert_mutation_and_reload(
     mutation: AlertMutation,
 ) -> Result<String, String> {
     match mutation {
-        AlertMutation::Upsert { name, expr, notify, enabled } => {
-            client.upsert_alert(&name, &expr, None, notify, enabled, RPC_TIMEOUT).map(|_| ())
+        AlertMutation::Upsert { name, expr, notify, enabled, cooldown } => {
+            client.upsert_alert(&name, &expr, None, cooldown, notify, enabled, RPC_TIMEOUT).map(|_| ())
         }
         AlertMutation::Delete { name } => client.delete_alert(&name, RPC_TIMEOUT).map(|_| ()),
     }
@@ -153,6 +154,7 @@ impl ffi::AlertModel {
         expr: &QString,
         notify: &QString,
         enabled_state: i32,
+        cooldown: &QString,
     ) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
@@ -169,6 +171,10 @@ impl ffi::AlertModel {
             -1 => Some(false),
             _ => None,
         };
+        let cd = {
+            let s = cooldown.to_string();
+            if s.trim().is_empty() { None } else { Some(s) }
+        };
         let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
@@ -178,7 +184,7 @@ impl ffi::AlertModel {
             move || {
                 apply_alert_mutation_and_reload(
                     &client,
-                    AlertMutation::Upsert { name: n, expr: e, notify: not, enabled },
+                    AlertMutation::Upsert { name: n, expr: e, notify: not, enabled, cooldown: cd },
                 )
             },
             |mut pin, result| {
@@ -249,6 +255,7 @@ mod tests {
             name: "high-temp".into(),
             expr: "cpu.temp_c > 85".into(),
             for_duration: Some("30s".into()),
+            cooldown: Some("5m".into()),
             notify: vec!["desktop".into(), "exec:notify-send alert".into()],
             enabled: false,
         }];

@@ -147,6 +147,8 @@ struct RuleConfig {
     #[serde(rename = "for")]
     for_duration: Option<String>,
     #[serde(default)]
+    cooldown: Option<String>,
+    #[serde(default)]
     notify: Vec<String>,
     // `enabled` is tri-stated at the config layer: `None` means "not
     // specified" (downstream defaults to true), `Some(false)` means
@@ -161,10 +163,12 @@ struct CompiledRule {
     name: String,
     expr: String,
     for_duration: Duration,
+    cooldown: Duration,
     notify: Vec<String>,
     enabled: bool,
     triggered_at: Option<Instant>,
     fired: bool,
+    last_fired_at: Option<Instant>,
     referenced_sensors: Vec<String>,
 }
 
@@ -210,6 +214,11 @@ impl AlertEngineHandle {
                 } else {
                     Some(format_duration(r.for_duration))
                 },
+                cooldown: if r.cooldown == Duration::ZERO {
+                    None
+                } else {
+                    Some(format_duration(r.cooldown))
+                },
                 notify: r.notify.clone(),
                 enabled: r.enabled,
             })
@@ -222,10 +231,15 @@ impl AlertEngineHandle {
         name: &str,
         expr: &str,
         for_duration: Option<&str>,
+        cooldown: Option<&str>,
         notify: Vec<String>,
         enabled: Option<bool>,
     ) -> Result<(), String> {
         let for_duration = match for_duration {
+            Some(s) if !s.is_empty() => parse_duration(s).map_err(|e| e.to_string())?,
+            _ => Duration::ZERO,
+        };
+        let cooldown = match cooldown {
             Some(s) if !s.is_empty() => parse_duration(s).map_err(|e| e.to_string())?,
             _ => Duration::ZERO,
         };
@@ -236,20 +250,24 @@ impl AlertEngineHandle {
             existing.notify = notify;
             existing.referenced_sensors = referenced_sensors;
             existing.for_duration = for_duration;
+            existing.cooldown = cooldown;
             if let Some(e) = enabled {
                 existing.enabled = e;
             }
             existing.triggered_at = None;
             existing.fired = false;
+            existing.last_fired_at = None;
         } else {
             eng.rules.push(CompiledRule {
                 name: name.to_string(),
                 expr: expr.to_string(),
                 for_duration,
+                cooldown,
                 notify,
                 enabled: enabled.unwrap_or(true),
                 triggered_at: None,
                 fired: false,
+                last_fired_at: None,
                 referenced_sensors,
             });
         }
@@ -279,6 +297,11 @@ impl AlertEngineHandle {
                             None
                         } else {
                             Some(format_duration(r.for_duration))
+                        },
+                        cooldown: if r.cooldown == Duration::ZERO {
+                            None
+                        } else {
+                            Some(format_duration(r.cooldown))
                         },
                         notify: r.notify.clone(),
                         enabled: if r.enabled { None } else { Some(false) },
@@ -320,15 +343,22 @@ impl AlertEngine {
                 Some(s) => parse_duration(s)
                     .with_context(|| format!("rule {}: bad `for` = {s:?}", r.name))?,
             };
+            let cooldown = match r.cooldown.as_deref() {
+                None | Some("") => Duration::ZERO,
+                Some(s) => parse_duration(s)
+                    .with_context(|| format!("rule {}: bad `cooldown` = {s:?}", r.name))?,
+            };
             let referenced_sensors = extract_sensor_refs(&r.expr);
             compiled.push(CompiledRule {
                 name: r.name,
                 expr: r.expr,
                 for_duration,
+                cooldown,
                 notify: r.notify,
                 enabled: r.enabled.unwrap_or(true),
                 triggered_at: None,
                 fired: false,
+                last_fired_at: None,
                 referenced_sensors,
             });
         }
@@ -367,15 +397,17 @@ impl AlertEngine {
     fn evaluate_rule(&mut self, idx: usize, now: Instant) {
         // Read rule metadata without holding a mutable borrow on self.rules,
         // so we can also write to self.events after evaluation.
-        let (name, expr, for_duration, notify, prev_fired, triggered_at) = {
+        let (name, expr, for_duration, cooldown, notify, prev_fired, triggered_at, last_fired_at) = {
             let rule = &self.rules[idx];
             (
                 rule.name.clone(),
                 rule.expr.clone(),
                 rule.for_duration,
+                rule.cooldown,
                 rule.notify.clone(),
                 rule.fired,
                 rule.triggered_at,
+                rule.last_fired_at,
             )
         };
         let mut ctx = HashMapContext::new();
@@ -408,14 +440,19 @@ impl AlertEngine {
             let new_triggered_at = triggered_at.unwrap_or(now);
             self.rules[idx].triggered_at = Some(new_triggered_at);
             if !prev_fired && now.duration_since(new_triggered_at) >= for_duration {
-                self.rules[idx].fired = true;
-                fire(&name, &expr, &notify);
-                self.push_event(AlertEvent {
-                    rule: name,
-                    ts_micros: wall_micros(),
-                    kind: AlertEventKind::Fired,
-                    value: None,
-                });
+                let within_cooldown = last_fired_at
+                    .map_or(false, |last| now.duration_since(last) < cooldown);
+                if !within_cooldown {
+                    self.rules[idx].fired = true;
+                    self.rules[idx].last_fired_at = Some(now);
+                    fire(&name, &expr, &notify);
+                    self.push_event(AlertEvent {
+                        rule: name,
+                        ts_micros: wall_micros(),
+                        kind: AlertEventKind::Fired,
+                        value: None,
+                    });
+                }
             }
         } else {
             self.rules[idx].triggered_at = None;
@@ -770,10 +807,12 @@ impl AlertEngine {
                 name: name.to_string(),
                 expr: expr.to_string(),
                 for_duration: Duration::ZERO,
+                cooldown: Duration::ZERO,
                 notify: vec![],
                 enabled: true,
                 triggered_at: None,
                 fired: false,
+                last_fired_at: None,
                 referenced_sensors,
             }],
             values: HashMap::new(),
@@ -1022,5 +1061,50 @@ mod tests {
         let json_over = handle.list_events_json(Some(100));
         let arr: serde_json::Value = serde_json::from_str(&json_over).unwrap();
         assert_eq!(arr.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn cooldown_suppresses_refire_within_window() {
+        let mut eng = AlertEngine::new_test("high-cpu", "cpu.util > 50");
+        eng.rules[0].cooldown = Duration::from_millis(50);
+
+        // Fire
+        eng.push_scalar("cpu.util", 90.0);
+        assert_eq!(eng.events.len(), 1);
+        assert_eq!(eng.events[0].kind, AlertEventKind::Fired);
+
+        // Clear
+        eng.push_scalar("cpu.util", 10.0);
+        assert_eq!(eng.events.len(), 2);
+        assert_eq!(eng.events[0].kind, AlertEventKind::Cleared);
+
+        // Refire immediately — suppressed by cooldown
+        eng.push_scalar("cpu.util", 90.0);
+        assert_eq!(eng.events.len(), 2); // no new event
+
+        // Wait out cooldown
+        std::thread::sleep(Duration::from_millis(60));
+
+        // Refire — allowed now
+        eng.push_scalar("cpu.util", 90.0);
+        assert_eq!(eng.events.len(), 3);
+        assert_eq!(eng.events[0].kind, AlertEventKind::Fired);
+    }
+
+    #[test]
+    fn toml_round_trips_cooldown() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("alerts.toml");
+
+        let handle = AlertEngine::new_test("x", "cpu.util > 1").into_handle();
+        handle
+            .upsert_rule("x", "cpu.util > 1", None, Some("5m"), vec![], None)
+            .unwrap();
+        handle.save_config(&path).unwrap();
+
+        let loaded = AlertEngine::load(&path).unwrap();
+        assert_eq!(loaded.rules.len(), 1);
+        assert_eq!(loaded.rules[0].cooldown, Duration::from_secs(300));
     }
 }

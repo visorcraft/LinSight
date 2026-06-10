@@ -65,6 +65,7 @@ pub enum RequestOp {
         name: String,
         expr: String,
         for_duration: Option<String>,
+        cooldown: Option<String>,
         notify: Vec<String>,
         enabled: Option<bool>,
     },
@@ -175,6 +176,7 @@ pub struct AlertRuleJson {
     pub name: String,
     pub expr: String,
     pub for_duration: Option<String>,
+    pub cooldown: Option<String>,
     pub notify: Vec<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -429,6 +431,7 @@ mod tests {
             name: "high-temp".into(),
             expr: "cpu.temp_c > 85".into(),
             for_duration: Some("30s".into()),
+            cooldown: Some("5m".into()),
             notify: vec!["desktop".into(), "exec:notify-send alert".into()],
             enabled: true,
         });
@@ -436,6 +439,7 @@ mod tests {
             name: "minimal".into(),
             expr: "mem.used > 80".into(),
             for_duration: None,
+            cooldown: None,
             notify: vec![],
             enabled: true,
         });
@@ -443,6 +447,7 @@ mod tests {
             name: "disabled".into(),
             expr: "cpu.util > 50".into(),
             for_duration: None,
+            cooldown: Some("1h".into()),
             notify: vec![],
             enabled: false,
         });
@@ -502,6 +507,7 @@ mod tests {
                 name: "my-rule".into(),
                 expr: "cpu.util > 90".into(),
                 for_duration: Some("5m".into()),
+                cooldown: Some("10m".into()),
                 notify: vec!["desktop".into()],
                 enabled: None,
             },

@@ -313,6 +313,7 @@ impl Client {
         name: &str,
         expr: &str,
         for_duration: Option<String>,
+        cooldown: Option<String>,
         notify: Vec<String>,
         enabled: Option<bool>,
         timeout: Duration,
@@ -321,6 +322,7 @@ impl Client {
             name: name.to_owned(),
             expr: expr.to_owned(),
             for_duration,
+            cooldown,
             notify,
             enabled,
         };

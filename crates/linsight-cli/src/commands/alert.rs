@@ -17,17 +17,18 @@ pub fn list(socket: &Path) -> Result<()> {
                 println!("No alert rules configured.");
             } else {
                 println!(
-                    "{:<24} {:<40} {:<12} {:<8} Notify",
-                    "Name", "Expression", "Debounce", "Enabled"
+                    "{:<24} {:<40} {:<12} {:<12} {:<8} Notify",
+                    "Name", "Expression", "Debounce", "Cooldown", "Enabled"
                 );
-                println!("{}", "-".repeat(110));
+                println!("{}", "-".repeat(120));
                 for rule in &rules {
                     let debounce = rule.for_duration.as_deref().unwrap_or("0s");
+                    let cooldown = rule.cooldown.as_deref().unwrap_or("0s");
                     let enabled_str = if rule.enabled { "yes" } else { "no" };
                     let notify = rule.notify.join(", ");
                     println!(
-                        "{:<24} {:<40} {:<12} {:<8} {}",
-                        rule.name, rule.expr, debounce, enabled_str, notify
+                        "{:<24} {:<40} {:<12} {:<12} {:<8} {}",
+                        rule.name, rule.expr, debounce, cooldown, enabled_str, notify
                     );
                 }
             }
@@ -42,16 +43,19 @@ pub fn add(
     name: &str,
     expr: &str,
     for_duration: Option<&str>,
+    cooldown: Option<&str>,
     notify: &[String],
 ) -> Result<()> {
     let mut session = connect_and_hello(socket)?;
     let for_d = for_duration.map(|s| s.to_owned());
+    let cd = cooldown.map(|s| s.to_owned());
     let payload = request_rpc(
         &mut session,
         RequestOp::UpsertAlert {
             name: name.to_owned(),
             expr: expr.to_owned(),
             for_duration: for_d,
+            cooldown: cd,
             notify: notify.to_vec(),
             enabled: None,
         },

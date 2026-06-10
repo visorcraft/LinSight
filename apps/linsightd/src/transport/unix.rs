@@ -754,11 +754,11 @@ fn handle_request(
                 result: Ok(ResponsePayload::AlertList { rules }),
             })
         }
-        RequestOp::UpsertAlert { name, expr, for_duration, notify, enabled } => {
+        RequestOp::UpsertAlert { name, expr, for_duration, cooldown, notify, enabled } => {
             let sched_guard = sched.lock().unwrap();
             if let Some(handle) = sched_guard.alert_engine_handle() {
                 if let Some(cfg_path) = sched_guard.alerts_config_path().map(|p| p.to_path_buf()) {
-                    match handle.upsert_rule(&name, &expr, for_duration.as_deref(), notify, enabled)
+                    match handle.upsert_rule(&name, &expr, for_duration.as_deref(), cooldown.as_deref(), notify, enabled)
                     {
                         Ok(()) => {
                             if let Err(e) = handle.save_config(&cfg_path) {
