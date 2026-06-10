@@ -508,6 +508,12 @@ Kirigami.Page {
                                     const meta = parent.parent && parent.parent.sid ? page.sensorMetaById[parent.parent.sid] : null
                                     return meta && Array.isArray(meta.sparkline) ? meta.sparkline : []
                                 }
+                                // NOTE: the "varies" min/max loop below mirrors
+                                // SensorTile.__sparklineVaries. Both sites must be
+                                // kept in sync. A shared JS helper would need
+                                // qmldir "javascript resource" support in
+                                // qt-build-utils (currently TODO) — until then
+                                // the logic lives in both places.
                                 visible: {
                                     if (!(app.preferences ? app.preferences.sparklines : true)) return false
                                     const kind = page.kindById[parent.parent.sid] || "scalar"

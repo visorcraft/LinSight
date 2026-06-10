@@ -181,7 +181,7 @@ Kirigami.ScrollablePage {
                     spacing: app.tokens.spaceM
                     Controls.Switch {
                         id: sparklinesSwitch
-                        checked: app.preferences ? app.preferences.sparklines : false
+                        checked: app.preferences ? app.preferences.sparklines : true
                         onToggled: {
                             if (app.preferences)
                                 app.preferences.applySparklines(checked)

@@ -599,6 +599,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sparklines_explicit_false_survives_round_trip() {
+        let _g = TempXdgConfig::new();
+        let path = prefs_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Verify that an explicit `false` is not clobbered by the serde
+        // default (which is `true`). A missing field should default to true;
+        // a present `false` must remain false after serialise → deserialise.
+        std::fs::write(&path, r#"{"schema_version":1,"theme":"dark","sparklines":false}"#).unwrap();
+        let loaded = load_prefs();
+        assert!(!loaded.sparklines, "serde default must not clobber explicit false");
+    }
+
+    #[test]
     fn start_page_validator_accepts_workspaces_and_dashboards() {
         assert!(is_valid_start_page("overview"));
         assert!(is_valid_start_page("gpus"));

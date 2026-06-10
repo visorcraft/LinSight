@@ -7,7 +7,7 @@
 //   samples     — array of {t: micros, v: number} points (parsed by parent)
 //   accentColor — stroke colour; falls back to app.tokens.accent
 //   unitLabel   — short suffix displayed in stat pills (e.g. "°C", "%", "MHz")
-//   mini        — when true: no stat pills, no labels, thinner stroke (1.5 px),
+//   mini        — when true: no stat pills, no labels, thinner stroke (1.0 px),
 //                 no fill, zero internal padding — sparkline-strip mode.
 
 import QtQuick
@@ -159,9 +159,9 @@ Item {
                     ctx.fill()
                 }
 
-                // Stroke.
+                // Stroke. mini mode uses a thinner 1.0 px line.
                 ctx.strokeStyle = root.accentColor
-                ctx.lineWidth = 1.5
+                ctx.lineWidth = root.mini ? 1.0 : 1.5
                 ctx.lineJoin = "round"
                 ctx.beginPath()
                 for (let i = 0; i < pts.length; ++i) {
