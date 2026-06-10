@@ -7,8 +7,10 @@
 //! `lastError`. Call `reload()` to fetch; when the history subsystem
 //! is disabled the daemon error lands verbatim in `lastError`.
 //!
-//! **Stale points on error:** `pointsJson` is never cleared on failure so the
-//! last successful fetch remains visible while an error banner is shown.
+//! **Reload clears the chart first:** `pointsJson` is reset to `"[]"` at the
+//! start of every `reload()` call (after the empty-sensorId guard). On error
+//! `pointsJson` is left as `"[]"` — the error banner has precedence in the
+//! dialog's visibility logic so no stale data is shown.
 //!
 //! **Property writes do not auto-fetch:** changing `sensorId` or
 //! `rangeMinutes` does *not* trigger a network call. Call `reload()` explicitly
@@ -128,8 +130,15 @@ impl ffi::HistoryModel {
             return;
         }
         let range_minutes = self.as_mut().rust().range_minutes;
+        // Set isLoading before clearing points so QML's loading guard fires
+        // before parsedSamples empties — prevents a transient "No data" flash.
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
+        // Clear any previous data so QML never shows stale points while the
+        // new request is in-flight. Also fixes the identical-JSON-no-signal
+        // edge case: clearing to "[]" guarantees a value change even when
+        // the next fetch returns the same JSON as the previous one.
+        self.as_mut().set_points_json(QString::from("[]"));
         let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());

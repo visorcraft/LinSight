@@ -25,6 +25,29 @@ Item {
     property bool hasData: false
 
     onSamplesChanged: root._computeStats()
+    onAccentColorChanged: chart.requestPaint()
+
+    // Format a raw value with the appropriate scaled unit suffix.
+    // Bytes → KiB/MiB/GiB/TiB; Hz → kHz/MHz/GHz; % and others → toFixed(1)+unit.
+    function formatValue(v, unit) {
+        if (unit === "B" || unit === "B/s") {
+            const suffix = unit === "B/s" ? "/s" : ""
+            const abs = Math.abs(v)
+            if (abs >= 1099511627776) return (v / 1099511627776).toFixed(2) + " TiB" + suffix
+            if (abs >= 1073741824)    return (v / 1073741824).toFixed(2)    + " GiB" + suffix
+            if (abs >= 1048576)       return (v / 1048576).toFixed(2)       + " MiB" + suffix
+            if (abs >= 1024)          return (v / 1024).toFixed(2)          + " KiB" + suffix
+            return v.toFixed(0) + " B" + suffix
+        }
+        if (unit === "Hz") {
+            const abs = Math.abs(v)
+            if (abs >= 1e9) return (v / 1e9).toFixed(2) + " GHz"
+            if (abs >= 1e6) return (v / 1e6).toFixed(0) + " MHz"
+            if (abs >= 1e3) return (v / 1e3).toFixed(0) + " kHz"
+            return v.toFixed(0) + " Hz"
+        }
+        return Number(v).toFixed(1) + (unit ? " " + unit : "")
+    }
 
     function _computeStats() {
         const pts = root.samples
@@ -84,7 +107,7 @@ Item {
                 // Y-axis: pad by 8% of range so the line isn't glued to the edge.
                 const mn = root.statMin
                 const mx = root.statMax
-                const range = Math.max(mx - mn, 1e-10)
+                const range = Math.max(mx - mn, Math.abs(mx) * 1e-9, 1e-10)
                 const pad = range * 0.08
                 const yMin = mn - pad
                 const yMax = mx + pad
@@ -149,7 +172,7 @@ Item {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: Number(modelData.value).toFixed(1) + (root.unitLabel ? " " + root.unitLabel : "")
+                        text: root.formatValue(modelData.value, root.unitLabel)
                         font.pixelSize: app.tokens.textBody
                         font.family: app.tokens.monoFamily
                         color: app.tokens.textPrimary

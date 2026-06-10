@@ -272,7 +272,6 @@ Rectangle {
         radius: root.radius
         color: Qt.rgba(app.tokens.accent.r, app.tokens.accent.g, app.tokens.accent.b, 0.07)
         visible: tileHover.hovered && root.tileSensorId.length > 0
-        opacity: 1
         z: 2
     }
 
@@ -281,7 +280,6 @@ Rectangle {
     TapHandler {
         id: tapHandler
         enabled: root.tileSensorId.length > 0
-        cursorShape: root.tileSensorId.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
         onTapped: {
             const label = (root.tileOptions && root.tileOptions.labelOverride)
                 ? root.tileOptions.labelOverride
@@ -293,5 +291,6 @@ Rectangle {
     HoverHandler {
         id: tileHover
         enabled: root.tileSensorId.length > 0
+        cursorShape: root.tileSensorId.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
 }

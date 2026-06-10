@@ -273,7 +273,7 @@ impl ffi::OverviewModel {
                     parent_device: parent_device_for(info),
                     value: "…".into(),
                     kind,
-                    unit: "".into(),
+                    unit: unit_suffix(&info.unit).to_string(),
                     sparkline: vec![],
                     rows: vec![],
                 },
@@ -788,6 +788,25 @@ fn layout_path_buf() -> Result<std::path::PathBuf, String> {
     Ok(base.join("linsight").join("dashboard.json"))
 }
 
+/// Map a `Unit` variant to the short suffix forwarded to QML's `tileUnit`.
+/// QML components (HistoryChart, HistoryDialog) use this to format chart
+/// stat-pill values with the right scaled suffix (e.g. "GHz" for Hz values).
+/// Table/State sensors carry unit "" — the chart is not shown for them anyway.
+fn unit_suffix(unit: &Unit) -> &str {
+    match unit {
+        Unit::Percent => "%",
+        Unit::Celsius => "°C",
+        Unit::Bytes => "B",
+        Unit::BytesPerSec => "B/s",
+        Unit::Hertz => "Hz",
+        Unit::Watts => "W",
+        Unit::Volts => "V",
+        Unit::Rpm => "rpm",
+        Unit::Count => "",
+        Unit::Custom(s) => s.as_str(),
+    }
+}
+
 fn serialize_kind(k: linsight_core::SensorKind) -> String {
     match k {
         linsight_core::SensorKind::Scalar => "scalar".into(),
@@ -802,6 +821,20 @@ mod tests {
     use super::*;
     use linsight_core::{Category, SensorKind};
     use std::sync::mpsc;
+
+    #[test]
+    fn unit_suffix_maps_all_variants() {
+        assert_eq!(unit_suffix(&Unit::Percent), "%");
+        assert_eq!(unit_suffix(&Unit::Celsius), "°C");
+        assert_eq!(unit_suffix(&Unit::Bytes), "B");
+        assert_eq!(unit_suffix(&Unit::BytesPerSec), "B/s");
+        assert_eq!(unit_suffix(&Unit::Hertz), "Hz");
+        assert_eq!(unit_suffix(&Unit::Watts), "W");
+        assert_eq!(unit_suffix(&Unit::Volts), "V");
+        assert_eq!(unit_suffix(&Unit::Rpm), "rpm");
+        assert_eq!(unit_suffix(&Unit::Count), "");
+        assert_eq!(unit_suffix(&Unit::Custom("req/s".into())), "req/s");
+    }
 
     fn empty_state_with_tiles(ids: &[&str]) -> SampleState {
         let tiles: HashMap<String, TileJson> = ids
