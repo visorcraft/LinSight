@@ -13,7 +13,6 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::thread;
 use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
@@ -21,6 +20,7 @@ use cxx_qt_lib::QString;
 use linsight_core::HardwareDevice;
 use serde::Serialize;
 
+use crate::qobjects::rpc_worker::spawn_rpc;
 use crate::qobjects::workspace_handle::with_workspace;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -104,13 +104,17 @@ impl ffi::HardwareModel {
         };
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = client
-                .get_hardware(RPC_TIMEOUT)
-                .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
-                .map_err(|e| format!("{e}"));
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || {
+                client
+                    .get_hardware(RPC_TIMEOUT)
+                    .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
+                    .map_err(|e| format!("{e}"))
+            },
+            |mut pin, req_gen, result| {
+                if pin.as_mut().rust().request_generation != req_gen {
                     return;
                 }
                 match result {
@@ -118,8 +122,8 @@ impl ffi::HardwareModel {
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 
     pub fn apply_nickname(mut self: Pin<&mut Self>, key: &QString, value: &QString) {
@@ -135,14 +139,18 @@ impl ffi::HardwareModel {
         };
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = client
-                .set_nickname(&key_s, value_opt, RPC_TIMEOUT)
-                .and_then(|()| client.get_hardware(RPC_TIMEOUT))
-                .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
-                .map_err(|e| format!("{e}"));
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || {
+                client
+                    .set_nickname(&key_s, value_opt, RPC_TIMEOUT)
+                    .and_then(|()| client.get_hardware(RPC_TIMEOUT))
+                    .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
+                    .map_err(|e| format!("{e}"))
+            },
+            |mut pin, req_gen, result| {
+                if pin.as_mut().rust().request_generation != req_gen {
                     return;
                 }
                 match result {
@@ -150,8 +158,8 @@ impl ffi::HardwareModel {
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 }
 
