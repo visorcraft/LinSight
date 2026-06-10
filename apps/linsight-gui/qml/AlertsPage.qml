@@ -172,7 +172,7 @@ Kirigami.Page {
                                         modelData.expr,
                                         (modelData.notify || []).join(", "),
                                         checked ? 1 : -1,
-                                        ""
+                                        modelData.cooldown || ""
                                     )
                                 }
                                 Layout.alignment: Qt.AlignVCenter
@@ -239,7 +239,8 @@ Kirigami.Page {
                                 onClicked: editDialog.openEdit(
                                     modelData.name,
                                     modelData.expr,
-                                    (modelData.notify || []).join(", ")
+                                    (modelData.notify || []).join(", "),
+                                    modelData.cooldown || ""
                                 )
                             }
 
@@ -263,9 +264,11 @@ Kirigami.Page {
         standardButtons: Kirigami.Dialog.Save | Kirigami.Dialog.Cancel
 
         property string editingName: ""
+        property string editingCooldown: ""
 
         function openNew() {
             editingName = ""
+            editingCooldown = ""
             nameField.text = ""
             exprField.text = ""
             notifyField.text = ""
@@ -274,8 +277,9 @@ Kirigami.Page {
             open()
         }
 
-        function openEdit(name, expr, notify) {
+        function openEdit(name, expr, notify, cooldown) {
             editingName = name
+            editingCooldown = cooldown
             nameField.text = name
             exprField.text = expr
             notifyField.text = notify
@@ -295,7 +299,7 @@ Kirigami.Page {
             if (page.alertModel) {
                 // 0 = preserve current enabled flag; the edit dialog
                 // doesn't surface enable/disable, so we shouldn't touch it.
-                page.alertModel.upsert(name, expr, notifyStr, 0, "")
+                page.alertModel.upsert(name, expr, notifyStr, 0, editDialog.editingCooldown)
             }
             app.showPassiveNotification(qsTr("Saving rule '%1'...").arg(name), 2000)
         }

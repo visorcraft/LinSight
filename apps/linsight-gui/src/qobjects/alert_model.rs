@@ -266,6 +266,7 @@ mod tests {
         assert_eq!(parsed[0]["name"], "high-temp");
         assert_eq!(parsed[0]["expr"], "cpu.temp_c > 85");
         assert_eq!(parsed[0]["for_duration"], "30s");
+        assert_eq!(parsed[0]["cooldown"], "5m");
         assert_eq!(parsed[0]["notify"][1], "exec:notify-send alert");
         assert!(!parsed[0]["enabled"].as_bool().unwrap());
     }
