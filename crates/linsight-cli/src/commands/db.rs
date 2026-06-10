@@ -14,10 +14,12 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 
-// NOTE: `parse_duration` duplicates the grammar from `apps/linsightd/src/history.rs`
-// `parse_retention` (d/h/m integer suffixes, checked_mul overflow-safe). It is
-// intentionally local to the CLI crate; whether to lift this into `linsight-core`
-// is a Phase-1 gate checkpoint decision, not something we do here.
+// NOTE: `parse_duration` duplicates the grammar from two other parsers in the codebase:
+// `apps/linsightd/src/history.rs` `parse_retention` (d/h/m integer suffixes,
+// checked_mul overflow-safe) and `crates/linsight-cli/src/commands/history.rs`
+// `parse_duration_to_micros` (float-tolerant, s/ms/m/h/d grammar). All three are
+// intentionally local to their respective sites; whether to lift a unified parser into
+// `linsight-core` is a Phase-1 gate checkpoint decision, not something we do here.
 
 /// Parse a duration string with a `d`, `h`, or `m` suffix into a `Duration`.
 /// Returns an error on unknown suffixes, zero values, or integer overflow.
@@ -54,7 +56,8 @@ fn open_db(path: &std::path::Path, flags: OpenFlags) -> Result<Connection> {
     if !path.exists() {
         anyhow::bail!(
             "history database not found: {}\n\
-             Enable history with LINSIGHT_HISTORY=1 or --history, or pass --db <path>.",
+             Enable history with LINSIGHT_HISTORY=1 (or via the systemd user unit at \
+             packaging/systemd/linsight.service for always-on mode), or pass --db <path>.",
             path.display()
         );
     }

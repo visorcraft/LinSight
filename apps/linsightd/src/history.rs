@@ -3,7 +3,8 @@
 
 //! SQLite-backed history store (Phase 7).
 //!
-//! Opt-in: set `LINSIGHT_HISTORY=1` (or pass `--history`) to enable. The
+//! Opt-in: set `LINSIGHT_HISTORY=1` to enable (or use the systemd user unit at
+//! `packaging/systemd/linsight.service` for always-on mode). The
 //! daemon then writes every sample to `$XDG_DATA_HOME/linsight/history.db`
 //! via a background thread that batches writes on a 1-second window so the
 //! sample loop never blocks on disk I/O.
