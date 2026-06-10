@@ -37,6 +37,15 @@ All notable changes to LinSight. Format roughly follows
   into `linsight-core` and is used by all four plugins (the CPU and memory
   plugins already had their own caches). Observable under
   `LINSIGHT_LOG=debug` via the `linsight_sensors::reads` target.
+- **SMART disk health.** A new built-in sensor plugin reads ATA and NVMe
+  SMART data via udisks2's D-Bus interface (no root required). Sensors
+  include temperature, health (`ok`/`failing`), power-on hours, wear
+  percentage (NVMe), and reallocated sectors (ATA). The plugin caches
+  property snapshots for 30 s and silently registers zero sensors when
+  udisks2 is absent. SMART tiles appear inside each disk's section on the
+  Storage page, and state-kind tiles now color-code `ok` as green and
+  `failing` as red alongside the existing `up`/`down`/`active`/`dead`
+  palette.
 
 ## [1.9.0] — 2026-06-04
 

@@ -39,7 +39,7 @@ pub fn sensors_from_drive(
             Unit::Celsius,
             SensorKind::Scalar,
             Reading::Scalar(temp_c),
-        ));
+        )?);
     }
 
     // ATA-specific fields
@@ -51,7 +51,7 @@ pub fn sensors_from_drive(
             Unit::Custom(String::new()),
             SensorKind::State,
             Reading::State(if failing { "failing".into() } else { "ok".into() }),
-        ));
+        )?);
     }
 
     if let Some(secs) = props.get("SmartPowerOnSeconds").and_then(|v| v.downcast_ref::<u64>().ok())
@@ -63,7 +63,7 @@ pub fn sensors_from_drive(
             Unit::Custom("h".into()),
             SensorKind::Scalar,
             Reading::Scalar((secs as f64) / 3600.0),
-        ));
+        )?);
     }
 
     if let Some(attrs) = props.get("SmartNumAttributes").and_then(|v| v.downcast_ref::<u64>().ok())
@@ -75,7 +75,7 @@ pub fn sensors_from_drive(
             Unit::Count,
             SensorKind::Scalar,
             Reading::Scalar(attrs as f64),
-        ));
+        )?);
     }
 
     // NVMe-specific fields (udisks ≥ 2.10)
@@ -87,7 +87,7 @@ pub fn sensors_from_drive(
             Unit::Custom("h".into()),
             SensorKind::Scalar,
             Reading::Scalar(hours as f64),
-        ));
+        )?);
     }
 
     if let Some(used) = props.get("SmartPercentUsed").and_then(|v| v.downcast_ref::<f64>().ok()) {
@@ -98,7 +98,7 @@ pub fn sensors_from_drive(
             Unit::Percent,
             SensorKind::Scalar,
             Reading::Scalar(used),
-        ));
+        )?);
     }
 
     Ok(out)
@@ -111,8 +111,10 @@ fn make_sensor(
     unit: Unit,
     kind: SensorKind,
     reading: Reading,
-) -> (SensorId, SensorDescriptor, Reading) {
+) -> Result<(SensorId, SensorDescriptor, Reading), PluginError> {
     let id = SensorId::new(format!("disk.{disk_name}.{metric}"));
+    let key = linsight_core::HardwareDeviceKey::try_new(format!("block:{disk_name}"))
+        .map_err(|e| PluginError::Io(format!("block {disk_name} bad key: {e}")))?;
     let desc = SensorDescriptor {
         id: id.clone(),
         display_name: display_name.into(),
@@ -123,12 +125,10 @@ fn make_sensor(
         min: Some(0.0),
         max: None,
         device_id: Some(disk_name.into()),
-        device_key: Some(
-            linsight_core::HardwareDeviceKey::try_new(format!("block:{disk_name}")).unwrap(),
-        ),
+        device_key: Some(key),
         tags: vec![],
     };
-    (id, desc, reading)
+    Ok((id, desc, reading))
 }
 
 /// Fetch all drives/controllers that expose SMART data.
@@ -167,13 +167,13 @@ pub fn fetch_smart_drives()
         };
         let disk_name = if let Ok(arr) = zbus::zvariant::Array::try_from(&**device_val) {
             let bytes: Vec<u8> = arr.iter().filter_map(|v| v.downcast_ref::<u8>().ok()).collect();
-            String::from_utf8_lossy(&bytes).trim_end_matches('\0').to_string()
+            String::from_utf8_lossy(&bytes)
+                .trim_end_matches('\0')
+                .trim_start_matches("/dev/")
+                .to_string()
         } else {
             String::new()
         };
-        if disk_name.is_empty() {
-            continue;
-        }
         if disk_name.is_empty() {
             continue;
         }

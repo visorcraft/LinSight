@@ -1,0 +1,367 @@
+Cargo.lock                                  |  12 ++
+ Cargo.toml                                  |   2 +
+ apps/linsight-gui/qml/SensorTile.qml        |   4 +-
+ apps/linsightd/Cargo.toml                   |   1 +
+ apps/linsightd/src/plugin_host.rs           |   6 +
+ crates/linsight-sensors/smart/Cargo.toml    |  18 ++
+ crates/linsight-sensors/smart/src/lib.rs    |   7 +
+ crates/linsight-sensors/smart/src/plugin.rs | 172 ++++++++++++++++++
+ crates/linsight-sensors/smart/src/udisks.rs | 264 ++++++++++++++++++++++++++++
+ docs/alerts.md                              |  31 ++++
+ 10 files changed, 515 insertions(+), 2 deletions(-)
+
+--- Changes ---
+
+Cargo.lock
+  @@ -1456,6 +1456,17 @@ dependencies = [
+  +[[package]]
+  +name = "linsight-sensors-smart"
+  +version = "1.9.0"
+  +dependencies = [
+  + "linsight-core",
+  + "linsight-plugin-sdk",
+  + "tempfile",
+  + "tracing",
+  + "zbus",
+  +]
+  +
+   [[package]]
+   name = "linsight-sensors-sock"
+   version = "1.9.0"
+  @@ -1547,6 +1558,7 @@ dependencies = [
+  + "linsight-sensors-smart",
+    "linsight-sensors-sock",
+    "linsight-sensors-system",
+    "linsight-sensors-systemd",
+  +12 -0
+
+Cargo.toml
+  @@ -26,6 +26,7 @@ members = [
+  +    "crates/linsight-sensors/smart",
+       "examples/echo-plugin",
+       "examples/init-count-plugin",
+       "examples/legacy-init-count-plugin",
+  @@ -64,6 +65,7 @@ predicates = "3.1"
+  +zbus = { version = "5.5", features = ["blocking"] }
+   
+   # Tunnel + future async surfaces. Versioned here so the workspace can
+   # share one tokio / rustls revision across crates as the async surface
+  +2 -0
+
+apps/linsight-gui/qml/SensorTile.qml
+  @@ -162,8 +162,8 @@ Rectangle {
+  -                if (s === "up" || s === "running" || s === "active") return app.tokens.positive;
+  -                if (s === "down" || s === "error" || s === "dead") return app.tokens.negative;
+  +                if (s === "up" || s === "running" || s === "active" || s === "ok") return app.tokens.positive;
+  +                if (s === "down" || s === "error" || s === "dead" || s === "failing") return app.tokens.negative;
+                   return app.tokens.neutral;
+               }
+   
+  +2 -2
+
+apps/linsightd/Cargo.toml
+  @@ -35,6 +35,7 @@ linsight-sensors-i915 = { path = "../../crates/linsight-sensors/i915", version =
+  +linsight-sensors-smart = { path = "../../crates/linsight-sensors/smart", version = "1.4.0" }
+   ureq = { workspace = true }
+   evalexpr = { workspace = true }
+   notify-rust = { workspace = true }
+  +1 -0
+
+apps/linsightd/src/plugin_host.rs
+  @@ -23,6 +23,7 @@ use linsight_sensors_net::NetPlugin;
+  +use linsight_sensors_smart::SmartPlugin;
+   use linsight_sensors_sock::SockPlugin;
+   use linsight_sensors_system::SystemPlugin;
+   use linsight_sensors_systemd::SystemdPlugin;
+  @@ -171,6 +172,11 @@ impl PluginHost {
+  +        host.register_with_config(
+  +            Arc::new(SmartPlugin::default()),
+  +            None,
+  +            cfg("linsight-sensors-smart"),
+  +        );
+           host
+       }
+   
+  +6 -0
+
+crates/linsight-sensors/smart/Cargo.toml
+  @@ -0,0 +1,18 @@
+  +[package]
+  +publish = false  # internal workspace crate; not published to crates.io
+  +name = "linsight-sensors-smart"
+  +version.workspace = true
+  +edition.workspace = true
+  +license.workspace = true
+  +authors.workspace = true
+  +rust-version.workspace = true
+  +description = "SMART disk health sensor backend for LinSight via udisks2 D-Bus."
+  +
+  +[dependencies]
+  +linsight-core = { path = "../../linsight-core", version = "1.4.0" }
+  +linsight-plugin-sdk = { path = "../../linsight-plugin-sdk", version = "1.4.0" }
+  +zbus = { workspace = true }
+  +tracing = { workspace = true }
+  +
+  +[dev-dependencies]
+  +tempfile = { workspace = true }
+  +18 -0
+
+crates/linsight-sensors/smart/src/lib.rs
+  @@ -0,0 +1,7 @@
+  +// SPDX-FileCopyrightText: 2026 VisorCraft LLC
+  +// SPDX-License-Identifier: GPL-3.0-only
+  +
+  +pub mod plugin;
+  +pub mod udisks;
+  +
+  +pub use plugin::SmartPlugin;
+  +7 -0
+
+crates/linsight-sensors/smart/src/plugin.rs
+  @@ -0,0 +1,172 @@
+  +// SPDX-FileCopyrightText: 2026 VisorCraft LLC
+  +// SPDX-License-Identifier: GPL-3.0-only
+  +
+  +//! SMART disk health sensor plugin.
+  +//!
+  +//! Reads ATA and NVMe SMART data via udisks2's D-Bus interface.
+  +//! If udisks2 is not on the session bus, the plugin logs once and
+  +//! registers zero sensors — never an error loop.
+  +
+  +use std::collections::HashMap;
+  +use std::sync::Mutex;
+  +use std::time::{Duration, Instant};
+  +
+  +use linsight_core::{HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId};
+  +use linsight_plugin_sdk::stabby::result::Result as SResult;
+  +use linsight_plugin_sdk::{
+  +    LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
+  +    RPluginManifest, RReading, RSampleResult, RSensorId,
+  +};
+  +use tracing::{info, warn};
+  +
+  +use crate::udisks;
+  +
+  +const CACHE_TTL: Duration = Duration::from_secs(30);
+  +
+  +#[derive(Default)]
+  +pub struct SmartPlugin {
+  +    inner: Mutex<Inner>,
+  +}
+  +
+  +#[derive(Default)]
+  +struct Inner {
+  +    sysroot: Option<std::path::PathBuf>,
+  +    /// Disk name → cached sensor readings.
+  +    cache: HashMap<String, (Instant, Vec<(SensorId, Reading)>)>,
+  +    /// Whether we already warned about missing udisks2.
+  +    warned: bool,
+  +}
+  +
+  +impl SmartPlugin {
+  +    fn init_inner(
+  +        &self,
+  +        ctx: &PluginCtx,
+  +    ) -> Result<(PluginManifest, Vec<HardwareDevice>), PluginError> {
+  +        let mut inner = self.inner.lock().expect("SmartPlugin poisoned");
+  +        inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
+  +        inner.cache.clear();
+  +        inner.warned = false;
+  +
+  +        let drives = match crate::udisks::fetch_smart_drives() {
+  +            Ok(d) => d,
+  +            Err(e) => {
+  +                if !inner.warned {
+  +                    warn!("udisks2 not available: {e}; SMART sensors disabled");
+  +                    inner.warned = true;
+  +                }
+  +                return Ok((
+  +                    PluginManifest {
+  +                        plugin_id: "com.visorcraft.linsight.smart".into(),
+  +                        display_name: "SMART".into(),
+  +                        version: env!("CARGO_PKG_VERSION").into(),
+  +                        sensors: vec![],
+  +                        devices: vec![],
+  +                    },
+  +                    vec![],
+  +                ));
+  +            }
+  +        };
+  +
+  +        let mut sensors = Vec::new();
+  +        let mut devices = Vec::new();
+  +        for (disk_name, props) in &drives {
+  +            let sensor_list = udisks::sensors_from_drive(disk_name, props)?;
+  +            if sensor_list.is_empty() {
+  +                continue;
+  +            }
+  +
+  +            let key = HardwareDeviceKey::try_new(format!("block:{disk_name}"))
+  +                .map_err(|e| PluginError::Io(format!("block {disk_name} bad key: {e}")))?;
+  +            devices.push(HardwareDevice {
+  +                key: key.clone(),
+  +                category: HardwareCategory::Storage,
+  +                model: disk_name.clone(),
+  +                vendor: None,
+  +                location: None,
+  +                plugin_id: String::new(),
+  +                plugin_device_id: disk_name.clone(),
+  +                sensor_ids: sensor_list.iter().map(|(id, _, _)| id.clone()).collect(),
+  +            });
+  +
+  +            for (_id, desc, _) in &sensor_list {
+  +                sensors.push(desc.clone());
+  +            }
+  +
+  +            let readings: Vec<(SensorId, Reading)> =
+  +                sensor_list.into_iter().map(|(id, _, reading)| (id, reading)).collect();
+  +            inner.cache.insert(disk_name.clone(), (Instant::now(), readings));
+  +        }
+  +
+  +        info!(count = sensors.len(), "SMART sensors registered");
+  ... (72 lines truncated)
+  +172 -0
+
+crates/linsight-sensors/smart/src/udisks.rs
+  @@ -0,0 +1,264 @@
+  +// SPDX-FileCopyrightText: 2026 VisorCraft LLC
+  +// SPDX-License-Identifier: GPL-3.0-only
+  +
+  +//! udisks2 D-Bus interface for SMART data.
+  +//!
+  +//! ATA drives expose `org.freedesktop.UDisks2.Drive.Ata`:
+  +//! - SmartTemperature (Kelvin → °C)
+  +//! - SmartFailing (bool → State)
+  +//! - SmartPowerOnSeconds (seconds → hours)
+  +//! - SmartNumAttributes (reallocated sectors as scalar)
+  +//!
+  +//! NVMe (udisks ≥ 2.10) exposes `org.freedesktop.UDisks2.NVMe.Controller`:
+  +//! - SmartTemperature (Kelvin → °C)
+  +//! - SmartPowerOnHours
+  +//! - SmartPercentUsed (wear percentage)
+  +
+  +use std::collections::HashMap;
+  +
+  +use linsight_core::{Reading, SensorId, SensorKind, Unit};
+  +use linsight_plugin_sdk::{PluginError, SensorDescriptor};
+  +
+  +/// Extract SMART sensors from a udisks2 drive property map.
+  +///
+  +/// `props` is the interface property dictionary for either
+  +/// `org.freedesktop.UDisks2.Drive.Ata` or `org.freedesktop.UDisks2.NVMe.Controller`.
+  +pub fn sensors_from_drive(
+  +    disk_name: &str,
+  +    props: &HashMap<String, zbus::zvariant::OwnedValue>,
+  +) -> Result<Vec<(SensorId, SensorDescriptor, Reading)>, PluginError> {
+  +    let mut out = Vec::new();
+  +
+  +    // Temperature (both ATA and NVMe)
+  +    if let Some(temp_k) = props.get("SmartTemperature").and_then(|v| v.downcast_ref::<f64>().ok()) {
+  +        let temp_c = temp_k - 273.15;
+  +        out.push(make_sensor(
+  +            disk_name,
+  +            "smart_temp_c",
+  +            "SMART temperature",
+  +            Unit::Celsius,
+  +            SensorKind::Scalar,
+  +            Reading::Scalar(temp_c),
+  +        ));
+  +    }
+  +
+  +    // ATA-specific fields
+  +    if let Some(failing) = props.get("SmartFailing").and_then(|v| v.downcast_ref::<bool>().ok()) {
+  +        out.push(make_sensor(
+  +            disk_name,
+  +            "smart_health",
+  +            "SMART health",
+  +            Unit::Custom(String::new()),
+  +            SensorKind::State,
+  +            Reading::State(if failing { "failing".into() } else { "ok".into() }),
+  +        ));
+  +    }
+  +
+  +    if let Some(secs) = props.get("SmartPowerOnSeconds").and_then(|v| v.downcast_ref::<u64>().ok())
+  +    {
+  +        out.push(make_sensor(
+  +            disk_name,
+  +            "smart_power_on_hours",
+  +            "SMART power-on hours",
+  +            Unit::Custom("h".into()),
+  +            SensorKind::Scalar,
+  +            Reading::Scalar((secs as f64) / 3600.0),
+  +        ));
+  +    }
+  +
+  +    if let Some(attrs) = props.get("SmartNumAttributes").and_then(|v| v.downcast_ref::<u64>().ok())
+  +    {
+  +        out.push(make_sensor(
+  +            disk_name,
+  +            "smart_realloc_sectors",
+  +            "SMART reallocated sectors",
+  +            Unit::Count,
+  +            SensorKind::Scalar,
+  +            Reading::Scalar(attrs as f64),
+  +        ));
+  +    }
+  +
+  +    // NVMe-specific fields (udisks ≥ 2.10)
+  +    if let Some(hours) = props.get("SmartPowerOnHours").and_then(|v| v.downcast_ref::<u64>().ok()) {
+  +        out.push(make_sensor(
+  +            disk_name,
+  +            "smart_power_on_hours",
+  +            "SMART power-on hours",
+  +            Unit::Custom("h".into()),
+  +            SensorKind::Scalar,
+  +            Reading::Scalar(hours as f64),
+  +        ));
+  +    }
+  +
+  +    if let Some(used) = props.get("SmartPercentUsed").and_then(|v| v.downcast_ref::<f64>().ok()) {
+  +        out.push(make_sensor(
+  +            disk_name,
+  +            "smart_wear_pct",
+  +            "SMART wear",
+  +            Unit::Percent,
+  +            SensorKind::Scalar,
+  +            Reading::Scalar(used),
+  ... (164 lines truncated)
+  +264 -0
+
+docs/alerts.md
+  @@ -79,6 +79,37 @@ enabled = true
+  +## Disk health alerts
+  +
+  +SMART sensors are available for ATA and NVMe drives when udisks2 is on the
+  +system bus (NVMe SMART requires udisks2 ≥ 2.10). The sensor IDs follow the
+  +`disk.<name>.<metric>` pattern:
+  +
+  +- `disk.nvme0n1.smart_temp_c` — temperature in °C
+  +- `disk.nvme0n1.smart_health` — `ok` or `failing` (state sensor)
+  +- `disk.nvme0n1.smart_power_on_hours` — power-on hours
+  +- `disk.nvme0n1.smart_wear_pct` — wear percentage (NVMe only)
+  +- `disk.nvme0n1.smart_realloc_sectors` — reallocated sector count (ATA only)
+  +
+  +Example rules:
+  +
+  +```toml
+  +[[rule]]
+  +name = "NVMe temperature"
+  +expr = "disk.nvme0n1.smart_temp_c > 70"
+  +for = "1m"
+  +cooldown = "15m"
+  +notify = ["desktop"]
+  +enabled = true
+  +
+  +[[rule]]
+  +name = "NVMe health"
+  +expr = "disk.nvme0n1.smart_health == \"failing\""
+  +for = "30s"
+  +notify = ["desktop"]
+  +enabled = true
+  +```
+  +
+   ## Event log
+   
+   Every fire and clear is recorded in an in-memory ring buffer (capacity 512
+  +31 -0
+[full diff: rtk git diff --no-compact]

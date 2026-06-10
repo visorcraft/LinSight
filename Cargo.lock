@@ -1462,7 +1462,6 @@ version = "1.9.0"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
- "tempfile",
  "tracing",
  "zbus",
 ]
