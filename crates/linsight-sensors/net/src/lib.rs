@@ -21,9 +21,11 @@
 //! has never been useful in a system monitor — `enumerate()` skips it
 //! so it doesn't pollute the Hardware page or the sensor catalogue.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -36,6 +38,8 @@ use linsight_plugin_sdk::{
     RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
 };
 use tracing::{debug, warn};
+
+const CACHE_TTL: Duration = Duration::from_millis(50);
 
 /// Read the PCI vendor/device pair for a network interface, if it has a
 /// PCI parent. Returns `None` for purely logical interfaces (bonds, veth,
@@ -60,6 +64,26 @@ pub struct NetPlugin {
 struct Inner {
     sysroot: Option<PathBuf>,
     interfaces: Vec<String>,
+    cache: Option<NetCache>,
+}
+
+#[derive(Clone)]
+struct NetIfaceStats {
+    rx_bytes: u64,
+    tx_bytes: u64,
+    rx_packets: u64,
+    tx_packets: u64,
+    rx_errors: u64,
+    tx_errors: u64,
+    rx_dropped: u64,
+    tx_dropped: u64,
+    operstate: String,
+    speed: i64,
+}
+
+struct NetCache {
+    captured_at: Instant,
+    stats: HashMap<String, NetIfaceStats>,
 }
 
 /// Statistics file names and their corresponding sensor metric suffix.
@@ -204,7 +228,7 @@ impl NetPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("NetPlugin poisoned");
+        let mut inner = self.inner.lock().expect("NetPlugin poisoned");
         let id = sensor.as_str();
         let rest = id.strip_prefix("net.").ok_or_else(|| PluginError::Unsupported(id.into()))?;
         let (iface, metric) =
@@ -212,35 +236,74 @@ impl NetPlugin {
         if !inner.interfaces.iter().any(|i| i == iface) {
             return Err(PluginError::Unsupported(id.into()));
         }
-        let base = match &inner.sysroot {
-            Some(r) => r.join("sys/class/net").join(iface),
-            None => Path::new("/sys/class/net").join(iface),
-        };
+
+        let stats = Self::snapshot(&mut inner)?;
+        let s = stats
+            .get(iface)
+            .ok_or_else(|| PluginError::Unsupported(format!("net.{iface} not in snapshot")))?;
+
         match metric {
-            "rx_bytes" => Ok(Reading::Counter(read_u64(&base.join("statistics/rx_bytes"))?)),
-            "tx_bytes" => Ok(Reading::Counter(read_u64(&base.join("statistics/tx_bytes"))?)),
-            "rx_packets" => Ok(Reading::Counter(read_u64(&base.join("statistics/rx_packets"))?)),
-            "tx_packets" => Ok(Reading::Counter(read_u64(&base.join("statistics/tx_packets"))?)),
-            "rx_errors" => Ok(Reading::Counter(read_u64(&base.join("statistics/rx_errors"))?)),
-            "tx_errors" => Ok(Reading::Counter(read_u64(&base.join("statistics/tx_errors"))?)),
-            "rx_dropped" => Ok(Reading::Counter(read_u64(&base.join("statistics/rx_dropped"))?)),
-            "tx_dropped" => Ok(Reading::Counter(read_u64(&base.join("statistics/tx_dropped"))?)),
-            "link_state" => Ok(Reading::State(read_string(&base.join("operstate"))?)),
-            "speed_mbps" => match read_i64(&base.join("speed")) {
-                Ok(v) => Ok(Reading::Scalar(v as f64)),
-                // Many virtual interfaces (lo, virbr) return EINVAL on read,
-                // and the kernel itself writes -1 when negotiation hasn't
-                // happened yet. Returning -1.0 for those cases is the
-                // documented sentinel. Log at debug level so a genuine
-                // permission / FS error doesn't get conflated with
-                // "unknown speed" in production diagnostics.
-                Err(e) => {
-                    debug!(iface, error = %e, "speed sysfs read failed; reporting unknown");
-                    Ok(Reading::Scalar(-1.0))
-                }
-            },
+            "rx_bytes" => Ok(Reading::Counter(s.rx_bytes)),
+            "tx_bytes" => Ok(Reading::Counter(s.tx_bytes)),
+            "rx_packets" => Ok(Reading::Counter(s.rx_packets)),
+            "tx_packets" => Ok(Reading::Counter(s.tx_packets)),
+            "rx_errors" => Ok(Reading::Counter(s.rx_errors)),
+            "tx_errors" => Ok(Reading::Counter(s.tx_errors)),
+            "rx_dropped" => Ok(Reading::Counter(s.rx_dropped)),
+            "tx_dropped" => Ok(Reading::Counter(s.tx_dropped)),
+            "link_state" => Ok(Reading::State(s.operstate.clone())),
+            "speed_mbps" => Ok(Reading::Scalar(s.speed as f64)),
             _ => Err(PluginError::Unsupported(id.into())),
         }
+    }
+
+    fn snapshot(inner: &mut Inner) -> Result<HashMap<String, NetIfaceStats>, PluginError> {
+        if let Some(cache) = &inner.cache
+            && cache.captured_at.elapsed() <= CACHE_TTL
+        {
+            return Ok(cache.stats.clone());
+        }
+
+        let mut stats = HashMap::with_capacity(inner.interfaces.len());
+        let mut files_read = 0usize;
+        for iface in &inner.interfaces {
+            let base = match &inner.sysroot {
+                Some(r) => r.join("sys/class/net").join(iface),
+                None => Path::new("/sys/class/net").join(iface),
+            };
+            let Ok(rx_bytes) = read_u64(&base.join("statistics/rx_bytes")) else { continue; };
+            let Ok(tx_bytes) = read_u64(&base.join("statistics/tx_bytes")) else { continue; };
+            let Ok(rx_packets) = read_u64(&base.join("statistics/rx_packets")) else { continue; };
+            let Ok(tx_packets) = read_u64(&base.join("statistics/tx_packets")) else { continue; };
+            let Ok(rx_errors) = read_u64(&base.join("statistics/rx_errors")) else { continue; };
+            let Ok(tx_errors) = read_u64(&base.join("statistics/tx_errors")) else { continue; };
+            let Ok(rx_dropped) = read_u64(&base.join("statistics/rx_dropped")) else { continue; };
+            let Ok(tx_dropped) = read_u64(&base.join("statistics/tx_dropped")) else { continue; };
+            let operstate = read_string(&base.join("operstate")).unwrap_or_else(|_| "unknown".into());
+            let speed = read_i64(&base.join("speed")).unwrap_or(-1);
+            files_read += 10;
+            stats.insert(
+                iface.clone(),
+                NetIfaceStats {
+                    rx_bytes,
+                    tx_bytes,
+                    rx_packets,
+                    tx_packets,
+                    rx_errors,
+                    tx_errors,
+                    rx_dropped,
+                    tx_dropped,
+                    operstate,
+                    speed,
+                },
+            );
+        }
+        tracing::debug!(target: "linsight_sensors::reads", plugin = "net", files_read);
+        inner.cache = Some(NetCache {
+            captured_at: Instant::now(),
+            stats: stats.clone(),
+        });
+        Ok(stats)
     }
 }
 
@@ -571,5 +634,50 @@ mod tests {
         assert!(matches_exclude("docker0", &patterns));
         assert!(matches_exclude("br-abcd", &patterns));
         assert!(!matches_exclude("eth0", &patterns));
+    }
+
+    #[test]
+    fn cache_reuses_snapshot_within_ttl() {
+        let dir = fake_net_sysroot(&[(
+            "eth0", "100", "200", "42", "99", "0", "0", "0", "0", "up", "1000",
+        )]);
+        let p = NetPlugin::default();
+        host_init(&p, &ctx_for(&dir)).unwrap();
+
+        // First sample populates cache
+        let r1 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        assert!(matches!(r1, Reading::Counter(100)));
+
+        // Mutate the sysfs files
+        let stat_path = dir.path().join("sys/class/net/eth0/statistics/rx_bytes");
+        fs::write(&stat_path, "999\n").unwrap();
+
+        // Second sample immediately should still see cached value
+        let r2 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        assert!(matches!(r2, Reading::Counter(100)), "cache should serve stale value");
+    }
+
+    #[test]
+    fn cache_expires_after_ttl() {
+        let dir = fake_net_sysroot(&[(
+            "eth0", "100", "200", "42", "99", "0", "0", "0", "0", "up", "1000",
+        )]);
+        let p = NetPlugin::default();
+        host_init(&p, &ctx_for(&dir)).unwrap();
+
+        // First sample
+        let r1 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        assert!(matches!(r1, Reading::Counter(100)));
+
+        // Mutate the sysfs files
+        let stat_path = dir.path().join("sys/class/net/eth0/statistics/rx_bytes");
+        fs::write(&stat_path, "999\n").unwrap();
+
+        // Wait for cache expiry
+        std::thread::sleep(std::time::Duration::from_millis(60));
+
+        // Second sample should see new value
+        let r2 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        assert!(matches!(r2, Reading::Counter(999)), "cache should reflect new value after expiry");
     }
 }
