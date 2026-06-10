@@ -3,7 +3,8 @@
 
 //! SQLite-backed history store (Phase 7).
 //!
-//! Opt-in: set `LINSIGHT_HISTORY=1` (or pass `--history`) to enable. The
+//! Opt-in: set `LINSIGHT_HISTORY=1` to enable (or use the systemd user unit at
+//! `packaging/systemd/linsight.service` for always-on mode). The
 //! daemon then writes every sample to `$XDG_DATA_HOME/linsight/history.db`
 //! via a background thread that batches writes on a 1-second window so the
 //! sample loop never blocks on disk I/O.
@@ -30,7 +31,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use linsight_core::{Reading, Sample, SensorId};
+use linsight_core::{Reading, Sample, SensorId, parse_duration_dhm};
 use rusqlite::{Connection, OpenFlags, params};
 use tracing::{error, info, warn};
 
@@ -64,12 +65,27 @@ impl HistoryWriter {
     }
 }
 
+/// Delete all rows with `ts < cutoff_micros`. Returns the number of rows removed.
+pub(crate) fn prune_older_than(conn: &Connection, cutoff_micros: u64) -> Result<usize> {
+    let removed =
+        conn.execute("DELETE FROM samples WHERE ts < ?1", params![cutoff_micros as i64])?;
+    Ok(removed)
+}
+
 /// Open the history database (creating it if needed) and spawn the writer
 /// thread. Returns a producer handle for the scheduler plus a join handle
 /// the runtime should keep so it can detect a thread crash on shutdown.
 /// The writer exits cleanly when every clone of the producer handle is
 /// dropped.
-pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)> {
+///
+/// `retention` controls automatic pruning inside the writer thread.
+/// `None` means keep rows forever; `Some(d)` prunes rows older than `d`
+/// at most once per hour (with a short initial delay so the first prune
+/// happens shortly after startup rather than waiting a full hour).
+pub fn spawn(
+    db_path: PathBuf,
+    retention: Option<Duration>,
+) -> Result<(HistoryWriter, thread::JoinHandle<()>)> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
         // Make the data dir owner-only: this closes the brief window in which
@@ -114,7 +130,7 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
     let writer_dropped = Arc::clone(&dropped);
     let (tx, rx) = sync_channel::<Sample>(QUEUE_CAPACITY);
     let handle = thread::spawn(move || {
-        if let Err(e) = run_writer(conn, rx, writer_dropped) {
+        if let Err(e) = run_writer(conn, rx, writer_dropped, retention) {
             error!(error = ?e, "history writer thread crashed");
         }
     });
@@ -122,9 +138,59 @@ pub fn spawn(db_path: PathBuf) -> Result<(HistoryWriter, thread::JoinHandle<()>)
     Ok((HistoryWriter { tx, dropped }, handle))
 }
 
-fn run_writer(mut conn: Connection, rx: Receiver<Sample>, dropped: Arc<AtomicU64>) -> Result<()> {
+pub(crate) const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+// Prime last_prune so the first prune fires after this delay rather than
+// waiting a full hour.
+pub(crate) const PRUNE_INITIAL_DELAY: Duration = Duration::from_secs(300);
+
+/// Check whether a prune is due and, if so, delete stale rows.
+///
+/// `now` is passed in so tests can drive the gate with synthetic instants
+/// without sleeping. `last_prune` is updated unconditionally after an attempt
+/// so a failed prune backs off for a full interval rather than hammering the
+/// disk on a persistent error.
+///
+/// Split time domains by design: `now`/`last_prune` are monotonic `Instant`s
+/// (testable, never go backward) that gate the hourly interval; the prune
+/// cutoff uses `SystemTime::now()` (wall clock) because sample timestamps are
+/// microseconds since the Unix epoch and cannot be derived from a monotonic
+/// origin. Do not replace the wall-clock call with `now` — it would always
+/// yield an epoch-relative value near zero and delete every row.
+pub(crate) fn maybe_prune(
+    conn: &Connection,
+    retention: Option<Duration>,
+    last_prune: &mut Instant,
+    now: Instant,
+) {
+    let Some(retention) = retention else { return };
+    if now.duration_since(*last_prune) < PRUNE_INTERVAL {
+        return;
+    }
+    let now_micros = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    let cutoff = now_micros.saturating_sub(retention.as_micros() as u64);
+    match prune_older_than(conn, cutoff) {
+        Ok(n) if n > 0 => info!(removed = n, "pruned history rows past retention window"),
+        Ok(_) => {}
+        Err(e) => warn!(error = ?e, "history prune failed"),
+    }
+    // Update unconditionally so a transient error backs off rather than retrying every tick.
+    *last_prune = now;
+}
+
+fn run_writer(
+    mut conn: Connection,
+    rx: Receiver<Sample>,
+    dropped: Arc<AtomicU64>,
+    retention: Option<Duration>,
+) -> Result<()> {
     let mut pending: Vec<Sample> = Vec::with_capacity(MAX_BATCH);
     let mut last_flush = Instant::now();
+    let mut last_prune = Instant::now()
+        .checked_sub(PRUNE_INTERVAL - PRUNE_INITIAL_DELAY)
+        .unwrap_or_else(Instant::now);
     loop {
         match rx.recv_timeout(FLUSH_INTERVAL) {
             Ok(s) => pending.push(s),
@@ -152,6 +218,9 @@ fn run_writer(mut conn: Connection, rx: Receiver<Sample>, dropped: Arc<AtomicU64
             pending.clear();
             last_flush = Instant::now();
         }
+        // Evaluate the prune gate on every iteration so an idle daemon (no
+        // samples → no flushes) still rotates stale rows on schedule.
+        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
     }
 }
 
@@ -263,6 +332,26 @@ pub fn query(
     Ok(samples)
 }
 
+/// Read `LINSIGHT_HISTORY_RETENTION` and return the parsed retention window
+/// (unset → 30d default; `"0"` → `None` keep-forever; unparseable → warn + 30d default).
+pub(crate) fn retention_from_env(raw: Option<&str>) -> Option<Duration> {
+    const DEFAULT: Duration = Duration::from_secs(30 * 86_400);
+    let Some(s) = raw else { return Some(DEFAULT) };
+    // Check the keep-forever sentinel before the parser so "0" is handled
+    // exactly once. `parse_duration_dhm` rejects bare "0" (zero value), so
+    // without this guard it would fall through to the warn+default branch.
+    if s.trim() == "0" {
+        return None;
+    }
+    match parse_duration_dhm(s.trim()) {
+        Some(d) => Some(d),
+        None => {
+            warn!(value = %s, "LINSIGHT_HISTORY_RETENTION unparseable; using default 30d");
+            Some(DEFAULT)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -275,10 +364,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retention_zero_sentinel_is_none() {
+        assert_eq!(retention_from_env(Some("0")), None);
+    }
+
+    #[test]
+    fn retention_env_default_is_30_days() {
+        assert_eq!(retention_from_env(None), Some(Duration::from_secs(30 * 86_400)));
+    }
+
+    #[test]
+    fn retention_env_zero_is_keep_forever() {
+        assert_eq!(retention_from_env(Some("0")), None);
+    }
+
+    #[test]
+    fn retention_env_garbage_falls_back_to_default() {
+        assert_eq!(retention_from_env(Some("garbage")), Some(Duration::from_secs(30 * 86_400)));
+    }
+
+    #[test]
     fn write_and_query() {
         let dir = tempfile::TempDir::new().unwrap();
         let db = dir.path().join("h.db");
-        let (writer, handle) = spawn(db.clone()).unwrap();
+        let (writer, handle) = spawn(db.clone(), None).unwrap();
         for ts in 0..10 {
             writer.record(Sample {
                 sensor: SensorId::new("cpu.util"),
@@ -326,10 +435,164 @@ mod tests {
     }
 
     #[test]
+    fn prune_removes_rows_older_than_cutoff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = dir.path().join("h.db");
+        let (writer, handle) = spawn(db.clone(), None).unwrap();
+        writer.record(Sample {
+            sensor: SensorId::new("cpu.util"),
+            ts_micros: 1_000,
+            reading: Reading::Scalar(1.0),
+        });
+        writer.record(Sample {
+            sensor: SensorId::new("cpu.util"),
+            ts_micros: 2_000_000,
+            reading: Reading::Scalar(2.0),
+        });
+        drop(writer);
+        handle.join().expect("writer thread panicked");
+
+        let conn = Connection::open(&db).unwrap();
+        let removed = prune_older_than(&conn, 1_500_000).unwrap();
+        assert_eq!(removed, 1);
+
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+        let ts: i64 = conn.query_row("SELECT ts FROM samples", [], |r| r.get(0)).unwrap();
+        assert_eq!(ts, 2_000_000);
+    }
+
+    // ---------------------------------------------------------------------------
+    // maybe_prune gate tests — driven with synthetic Instants, no sleeping.
+    // ---------------------------------------------------------------------------
+
+    fn open_test_db(dir: &tempfile::TempDir) -> (Connection, std::path::PathBuf) {
+        let db = dir.path().join("h.db");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS samples (
+                sensor_id TEXT NOT NULL,
+                ts        INTEGER NOT NULL,
+                scalar    REAL,
+                counter   INTEGER,
+                state     TEXT,
+                PRIMARY KEY (sensor_id, ts)
+             ) WITHOUT ROWID;
+             CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);",
+        )
+        .unwrap();
+        (conn, db)
+    }
+
+    fn row_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap()
+    }
+
+    /// Insert a row at `ts_micros` directly so tests can control age without
+    /// going through the writer thread.
+    fn insert_row(conn: &Connection, ts_micros: i64) {
+        conn.execute(
+            "INSERT INTO samples (sensor_id, ts, scalar) VALUES ('cpu.util', ?1, 1.0)",
+            rusqlite::params![ts_micros],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn maybe_prune_skips_when_retention_is_none() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+        insert_row(&conn, 1_000);
+
+        // Way past PRUNE_INTERVAL — but retention=None means prune never fires.
+        // Use forward-addition so this works even on fresh CI runners with low uptime.
+        let last_prune = Instant::now();
+        let now = last_prune + PRUNE_INTERVAL * 2;
+        let mut last_prune_mut = last_prune;
+        maybe_prune(&conn, None, &mut last_prune_mut, now);
+
+        // last_prune must NOT advance (gate never ran).
+        assert!(last_prune_mut.duration_since(last_prune) < Duration::from_millis(1));
+        assert_eq!(row_count(&conn), 1);
+    }
+
+    #[test]
+    fn maybe_prune_skips_when_interval_not_elapsed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+        insert_row(&conn, 1_000);
+
+        // last_prune is "just now" — interval hasn't elapsed.
+        let mut last_prune = Instant::now();
+        let retention = Some(Duration::from_secs(1));
+        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
+
+        assert_eq!(row_count(&conn), 1, "should not prune before interval elapses");
+    }
+
+    /// Core regression test: an old row is pruned on an idle daemon (no samples
+    /// flowing, pending always empty) when the interval has elapsed.
+    ///
+    /// We bypass the writer loop entirely and drive `maybe_prune` directly with
+    /// a synthetic `now` that is `PRUNE_INTERVAL` past `last_prune`, which
+    /// exercises the full gate logic (retention check, interval check, SQL
+    /// delete, last_prune update) without any wall-clock sleeping.
+    #[test]
+    fn maybe_prune_fires_on_idle_daemon_after_interval() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+
+        // Insert one very old row (ts=1 µs since epoch — always before any
+        // real retention window).
+        insert_row(&conn, 1);
+        // Insert one fresh row at "now" (a large epoch value so it survives).
+        let now_micros = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as i64;
+        insert_row(&conn, now_micros);
+        assert_eq!(row_count(&conn), 2);
+
+        // Simulate: last_prune is PRUNE_INTERVAL in the past by setting a fixed
+        // base and advancing now forward. Forward-addition avoids checked_sub,
+        // which panics on CI runners with uptime shorter than PRUNE_INTERVAL.
+        let last_prune_base = Instant::now();
+        let mut last_prune = last_prune_base;
+        let now = last_prune_base + PRUNE_INTERVAL + Duration::from_millis(1);
+
+        // Short retention — 1 second is more than enough to catch the row at ts=1.
+        let retention = Some(Duration::from_secs(1));
+
+        // `now` is PRUNE_INTERVAL + 1ms past `last_prune` → gate opens.
+        maybe_prune(&conn, retention, &mut last_prune, now);
+
+        // Old row deleted, fresh row kept.
+        assert_eq!(row_count(&conn), 1, "old row should have been pruned");
+
+        // last_prune advanced (so the next call in < PRUNE_INTERVAL is blocked).
+        assert!(last_prune > last_prune_base, "last_prune must advance after a prune attempt");
+    }
+
+    #[test]
+    fn maybe_prune_last_prune_advances_even_on_empty_result() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+        // No rows — prune will delete 0 rows but gate still fires.
+        // Forward-addition avoids checked_sub panics on low-uptime CI runners.
+        let last_prune_base = Instant::now();
+        let mut last_prune = last_prune_base;
+        let now = last_prune_base + PRUNE_INTERVAL + Duration::from_millis(1);
+        let retention = Some(Duration::from_secs(1));
+        maybe_prune(&conn, retention, &mut last_prune, now);
+        assert!(last_prune > last_prune_base, "last_prune must advance even when 0 rows deleted");
+    }
+
+    #[test]
     fn query_downsamples_with_bounded_even_spread() {
         let dir = tempfile::TempDir::new().unwrap();
         let db = dir.path().join("h.db");
-        let (writer, handle) = spawn(db.clone()).unwrap();
+        let (writer, handle) = spawn(db.clone(), None).unwrap();
 
         for ts in 0..103_u64 {
             writer.record(Sample {

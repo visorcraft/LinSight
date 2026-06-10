@@ -10,6 +10,7 @@ use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Context;
+use linsight_core::history_db_path;
 use tracing::{info, warn};
 
 use crate::alerts::AlertEngine;
@@ -86,7 +87,14 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     let mut _history_join: Option<std::thread::JoinHandle<()>> = None;
     if std::env::var_os("LINSIGHT_HISTORY").is_some() {
         let db_path = history_db_path();
-        match history::spawn(db_path.clone()) {
+        let retention = history::retention_from_env(
+            std::env::var("LINSIGHT_HISTORY_RETENTION").ok().as_deref(),
+        );
+        match retention {
+            Some(d) => info!(retention_secs = d.as_secs(), "history retention window"),
+            None => info!("history retention: keep forever"),
+        }
+        match history::spawn(db_path.clone(), retention) {
             Ok((writer, join)) => {
                 scheduler.set_history_writer(Some(writer));
                 scheduler.set_history_db_path(Some(db_path));
@@ -136,16 +144,6 @@ pub fn nickname_store_path() -> PathBuf {
         PathBuf::from(h).join(".config/linsight/hardware.json")
     } else {
         PathBuf::from("/tmp/linsight-hardware.json")
-    }
-}
-
-fn history_db_path() -> PathBuf {
-    if let Some(d) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(d).join("linsight/history.db")
-    } else if let Some(h) = std::env::var_os("HOME") {
-        PathBuf::from(h).join(".local/share/linsight/history.db")
-    } else {
-        PathBuf::from("/tmp/linsight-history.db")
     }
 }
 

@@ -5,7 +5,6 @@
 //! Holds the rule list as a JSON string so QML can `JSON.parse` it.
 
 use std::pin::Pin;
-use std::thread;
 use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
@@ -13,6 +12,7 @@ use cxx_qt_lib::QString;
 use linsight_protocol::AlertRuleJson;
 
 use crate::client::ClientHandle;
+use crate::qobjects::rpc_worker::{RequestGenerated, spawn_rpc};
 use crate::qobjects::workspace_handle::with_workspace;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -83,6 +83,16 @@ pub struct AlertModelRust {
     request_generation: u64,
 }
 
+impl RequestGenerated for AlertModelRust {
+    fn request_generation(&self) -> u64 {
+        self.request_generation
+    }
+    fn bump_request_generation(&mut self) -> u64 {
+        self.request_generation += 1;
+        self.request_generation
+    }
+}
+
 fn alert_rules_json(rules: &[AlertRuleJson]) -> String {
     serde_json::to_string(rules).unwrap_or_else(|_| "[]".into())
 }
@@ -120,26 +130,21 @@ impl ffi::AlertModel {
     pub fn reload(mut self: Pin<&mut Self>) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = load_alert_rules_json(&client);
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
-                    return;
-                }
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || load_alert_rules_json(&client),
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_rules_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 
     pub fn upsert(
@@ -164,56 +169,47 @@ impl ffi::AlertModel {
             -1 => Some(false),
             _ => None,
         };
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = apply_alert_mutation_and_reload(
-                &client,
-                AlertMutation::Upsert { name: n, expr: e, notify: not, enabled },
-            );
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
-                    return;
-                }
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || {
+                apply_alert_mutation_and_reload(
+                    &client,
+                    AlertMutation::Upsert { name: n, expr: e, notify: not, enabled },
+                )
+            },
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_rules_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 
     pub fn delete_rule(mut self: Pin<&mut Self>, name: &QString) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
         let n = name.to_string();
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result =
-                apply_alert_mutation_and_reload(&client, AlertMutation::Delete { name: n });
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
-                    return;
-                }
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || apply_alert_mutation_and_reload(&client, AlertMutation::Delete { name: n }),
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_rules_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 
     pub fn test_expr(mut self: Pin<&mut Self>, expr: &QString) {
@@ -221,26 +217,23 @@ impl ffi::AlertModel {
         self.as_mut().set_last_error(QString::from(""));
         self.as_mut().set_test_result(QString::from("testing..."));
         let e = expr.to_string();
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = client
-                .test_alert_expr(&e, RPC_TIMEOUT)
-                .map(|(is_true, error)| alert_test_status(is_true, error))
-                .unwrap_or_else(|e| format!("RPC error: {e}"));
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
-                    return;
-                }
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || {
+                client
+                    .test_alert_expr(&e, RPC_TIMEOUT)
+                    .map(|(is_true, error)| alert_test_status(is_true, error))
+                    .unwrap_or_else(|e| format!("RPC error: {e}"))
+            },
+            |mut pin, result| {
                 pin.as_mut().set_test_result(QString::from(result.as_str()));
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 }
 

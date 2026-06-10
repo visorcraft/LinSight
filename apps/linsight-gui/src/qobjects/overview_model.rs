@@ -273,7 +273,7 @@ impl ffi::OverviewModel {
                     parent_device: parent_device_for(info),
                     value: "…".into(),
                     kind,
-                    unit: "".into(),
+                    unit: info.unit.symbol().to_string(),
                     sparkline: vec![],
                     rows: vec![],
                 },

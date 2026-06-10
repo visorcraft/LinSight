@@ -18,6 +18,14 @@ Rectangle {
     property var tileRows: []
     property var tileOptions: ({})
     property var tileSparkline: []
+    // When true and the tile has a varying scalar sparkline, renders a mini
+    // HistoryChart strip under the value. Wired from app.preferences.sparklines.
+    property bool sparklinesEnabled: false
+    // Sensor id passed through to the history dialog. When empty no click
+    // handler is active (e.g. static/table tiles without a scalar history).
+    property string tileSensorId: ""
+    // Short unit suffix forwarded to HistoryDialog (e.g. "°C", "%").
+    property string tileUnit: ""
 
     property real thresholdOk: 50.0
     property real thresholdWarn: 80.0
@@ -115,44 +123,19 @@ Rectangle {
             }
         }
 
-        // C1 — Sparkline mini chart (scalar sensors only). Only drawn when
-        // the series actually varies — a constant value (e.g. GPU memory
-        // total) carries no trend and shouldn't get a chart.
-        Canvas {
-            id: sparklineCanvas
+        // C1 — Mini sparkline chart (scalar/counter sensors only).
+        // Visible only when sparklinesEnabled is true and the series varies.
+        HistoryChart {
+            id: miniSparkline
             Layout.fillWidth: true
             height: 36
-            visible: root.tileKind !== "table" && root.__sparklineVaries
-
-            onPaint: {
-                const ctx = getContext("2d")
-                const w = width
-                const h = height
-                ctx.clearRect(0, 0, w, h)
-                const pts = root.tileSparkline
-                if (!pts || pts.length < 2) return
-                let min = pts[0], max = pts[0]
-                for (let k = 1; k < pts.length; ++k) {
-                    if (pts[k] < min) min = pts[k]
-                    if (pts[k] > max) max = pts[k]
-                }
-                const range = Math.max(max - min, 1e-10)
-                ctx.strokeStyle = app.tokens.accent || "#4fc3f7"
-                ctx.lineWidth = 1.5
-                ctx.beginPath()
-                for (let i = 0; i < pts.length; ++i) {
-                    const x = (i / (pts.length - 1)) * w
-                    const y = h - ((pts[i] - min) / range) * (h - 6) - 3
-                    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-                }
-                ctx.stroke()
-            }
-
-            // Repaint when sparkline data changes
-            Connections {
-                target: root
-                function onTileSparklineChanged() { sparklineCanvas.requestPaint() }
-            }
+            mini: true
+            values: root.tileSparkline
+            accentColor: app.tokens.accent
+            visible: root.sparklinesEnabled
+                     && root.tileKind !== "table"
+                     && root.tileKind !== "state"
+                     && root.__sparklineVaries
         }
 
         Item { Layout.fillHeight: true; Layout.fillWidth: true }
@@ -258,5 +241,34 @@ Rectangle {
         if (b >= 1048576) return (b / 1048576).toFixed(2) + " MiB";
         if (b >= 1024) return (b / 1024).toFixed(2) + " KiB";
         return b + " B";
+    }
+
+    // Hover highlight: a subtle overlay that appears when the tile has a
+    // sensor id wired and the user can click to open the history dialog.
+    Rectangle {
+        anchors.fill: parent
+        radius: root.radius
+        color: Qt.rgba(app.tokens.accent.r, app.tokens.accent.g, app.tokens.accent.b, 0.07)
+        visible: tileHover.hovered && root.tileSensorId.length > 0
+        z: 2
+    }
+
+    // TapHandler opens the history dialog for this sensor. Only active when
+    // tileSensorId is set — static or table-only tiles leave it empty.
+    TapHandler {
+        id: tapHandler
+        enabled: root.tileSensorId.length > 0
+        onTapped: {
+            const label = (root.tileOptions && root.tileOptions.labelOverride)
+                ? root.tileOptions.labelOverride
+                : root.tileName
+            app.openHistory(root.tileSensorId, label, root.tileUnit)
+        }
+    }
+
+    HoverHandler {
+        id: tileHover
+        enabled: root.tileSensorId.length > 0
+        cursorShape: root.tileSensorId.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
 }

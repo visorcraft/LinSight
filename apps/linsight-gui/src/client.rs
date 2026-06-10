@@ -279,7 +279,6 @@ impl Client {
     /// v2 RPC: query historical samples for a sensor within the given
     /// time window (microseconds since epoch). Returns up to `max_points`
     /// samples, evenly spaced via server-side downsampling.
-    #[allow(dead_code)]
     pub fn get_history(
         &self,
         sensor: &str,

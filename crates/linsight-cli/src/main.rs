@@ -65,6 +65,11 @@ enum Cmd {
         #[arg(long)]
         max_points: Option<u32>,
     },
+    /// Offline history-database maintenance (no daemon required).
+    Db {
+        #[command(subcommand)]
+        action: DbCmd,
+    },
     /// Manage runtime plugins (.so files in `~/.local/share/linsight/plugins/`).
     Plugin {
         #[command(subcommand)]
@@ -97,6 +102,28 @@ enum AlertCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum DbCmd {
+    /// Print row count, distinct sensor count, timestamp span, and file size.
+    Stats {
+        /// Override the database path (default: $XDG_DATA_HOME/linsight/history.db).
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+    },
+    /// Delete rows older than a given duration.
+    Prune {
+        /// Delete rows older than this duration (e.g. "7d", "24h", "90m").
+        #[arg(long)]
+        older_than: String,
+        /// Run VACUUM after deleting to reclaim disk space.
+        #[arg(long)]
+        vacuum: bool,
+        /// Override the database path (default: $XDG_DATA_HOME/linsight/history.db).
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum PluginCmd {
     /// Scaffold a new plugin crate at `<name>/`. Produces a `cdylib` Cargo
     /// project that depends on `linsight-plugin-sdk` and exposes a
@@ -118,6 +145,17 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
     let cli = Cli::parse();
+
+    // `db` subcommands are offline-only and never connect to the daemon.
+    // Resolve the socket lazily so `linsight-cli db stats` works even when
+    // $XDG_RUNTIME_DIR is unset.
+    if let Cmd::Db { action } = cli.command {
+        return match action {
+            DbCmd::Stats { db } => commands::db::stats(db),
+            DbCmd::Prune { older_than, vacuum, db } => commands::db::prune(db, &older_than, vacuum),
+        };
+    }
+
     let socket = match cli.socket {
         Some(socket) => socket,
         None => default_socket_path()?,
@@ -138,6 +176,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::History { sensor, last, format, max_points } => {
             commands::history::run(&socket, &sensor, &last, &format, max_points)
         }
+        Cmd::Db { .. } => unreachable!("handled above"),
         Cmd::Plugin { action } => match action {
             PluginCmd::New { name } => commands::plugin::new(&name),
             PluginCmd::Install { path } => commands::plugin::install(&path),

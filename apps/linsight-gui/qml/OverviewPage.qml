@@ -98,6 +98,9 @@ Kirigami.Page {
             tileName: qsTr("CPU")
             tileValue: page.dashModel ? page.dashModel.cpuText : "…"
             tileSparkline: page._sparklines["cpu.util"] || []
+            tileSensorId: "cpu.util"
+            tileUnit: "%"
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
         SensorTile {
             Layout.fillWidth: true
@@ -105,6 +108,9 @@ Kirigami.Page {
             tileName: qsTr("Memory")
             tileValue: page.dashModel ? page.dashModel.memText : "…"
             tileSparkline: page._sparklines["mem.used_bytes"] || []
+            tileSensorId: "mem.used_bytes"
+            tileUnit: "B"
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
 
         SensorTile {
@@ -113,6 +119,9 @@ Kirigami.Page {
             tileName: qsTr("CPU temperature")
             tileValue: page.dashModel ? page.dashModel.cpuTempText : "…"
             tileSparkline: page._sparklines["cpu.temp_c"] || []
+            tileSensorId: "cpu.temp_c"
+            tileUnit: "°C"
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
         SensorTile {
             Layout.fillWidth: true
@@ -120,6 +129,9 @@ Kirigami.Page {
             tileName: qsTr("CPU frequency")
             tileValue: page.dashModel ? page.dashModel.cpuFreqText : "…"
             tileSparkline: page._sparklines["cpu.freq_hz"] || []
+            tileSensorId: "cpu.freq_hz"
+            tileUnit: "Hz"
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
     }
 

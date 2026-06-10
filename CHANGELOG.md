@@ -9,6 +9,20 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+- **History charts in the GUI.** Click any scalar or counter tile to open a
+  per-sensor history chart (15m / 1h / 24h / 7d ranges) backed by the
+  daemon's SQLite history; the dialog explains how to enable history when
+  the daemon has it off. Tile sparklines — previously always on — are now a
+  Settings toggle (default on) and render through the same chart component.
+- **History retention.** The SQLite history no longer grows forever: with
+  `LINSIGHT_HISTORY=1`, rows older than `LINSIGHT_HISTORY_RETENTION`
+  (default `30d`; `0` keeps everything; `d`/`h`/`m` suffixes) are pruned
+  hourly — including on idle daemons. The daemon never VACUUMs, so the file
+  doesn't shrink in place; the new `linsight-cli db stats` and
+  `linsight-cli db prune --older-than <dur> [--vacuum]` commands cover
+  offline inspection and space reclamation, and work without (or safely
+  alongside) a running daemon.
+
 ## [1.9.0] — 2026-06-04
 
 - **Daemon correctness and resource hardening.** Per-client subscriptions are

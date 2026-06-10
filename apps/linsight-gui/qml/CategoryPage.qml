@@ -342,7 +342,23 @@ Kirigami.Page {
                                 item.tileValue = modelData.value
                                 item.tileKind = modelData.kind || "scalar"
                                 item.tileRows = modelData.rows || []
+                                item.tileSensorId = (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
+                                item.tileUnit = modelData.unit || ""
+                                item.tileSparkline = modelData.sparkline || []
+                                // sparklinesEnabled is kept in sync reactively by the Binding
+                                // below; no imperative assignment needed here.
                             }
+                        }
+                        // Reactively propagate the preference to the tile so that
+                        // toggling Settings → Tile sparklines takes effect immediately
+                        // without waiting for the next tilesJson tick.
+                        Binding {
+                            when: cellLoader.status === Loader.Ready
+                                  && cellLoader.item !== null
+                                  && modelData.type !== "header"
+                            target: cellLoader.item
+                            property: "sparklinesEnabled"
+                            value: app.preferences ? app.preferences.sparklines : true
                         }
                     }
                 }

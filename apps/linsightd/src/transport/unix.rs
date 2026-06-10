@@ -892,6 +892,18 @@ fn handle_request(
                 }),
             }
         }
+        RequestOp::ListAlertEvents { limit } => {
+            let events_json = sched
+                .lock()
+                .unwrap()
+                .alert_engine_handle()
+                .map(|h| h.list_events_json(limit))
+                .unwrap_or_else(|| "[]".to_owned());
+            writer.lock().unwrap().write_server(&ServerMsg::Response {
+                req_id,
+                result: Ok(ResponsePayload::AlertEventList { events_json }),
+            })
+        }
     }
 }
 

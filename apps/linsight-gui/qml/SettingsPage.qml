@@ -174,6 +174,33 @@ Kirigami.ScrollablePage {
                 }
             }
 
+            SettingsCard {
+                title: qsTr("Tile sparklines")
+                subtitle: qsTr("Show a mini trend chart inside each scalar sensor tile.")
+                content: RowLayout {
+                    spacing: app.tokens.spaceM
+                    Controls.Switch {
+                        id: sparklinesSwitch
+                        checked: app.preferences ? app.preferences.sparklines : true
+                        onToggled: {
+                            if (app.preferences)
+                                app.preferences.applySparklines(checked)
+                        }
+                        Connections {
+                            target: app.preferences
+                            function onSparklinesChanged() {
+                                sparklinesSwitch.checked = app.preferences.sparklines
+                            }
+                        }
+                    }
+                    Controls.Label {
+                        text: sparklinesSwitch.checked ? qsTr("Enabled") : qsTr("Disabled")
+                        opacity: 0.7
+                        font.pixelSize: app.tokens.textCaption + 1
+                    }
+                }
+            }
+
             // Always-on section
             SettingsCard {
                 title: qsTr("Always-on mode")

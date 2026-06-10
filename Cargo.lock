@@ -1269,6 +1269,7 @@ dependencies = [
  "linsight-core",
  "linsight-protocol",
  "predicates",
+ "rusqlite",
  "serde",
  "serde_json",
  "signal-hook",

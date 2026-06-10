@@ -13,7 +13,6 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::thread;
 use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
@@ -21,6 +20,7 @@ use cxx_qt_lib::QString;
 use linsight_core::HardwareDevice;
 use serde::Serialize;
 
+use crate::qobjects::rpc_worker::{RequestGenerated, spawn_rpc};
 use crate::qobjects::workspace_handle::with_workspace;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -81,6 +81,16 @@ pub struct HardwareModelRust {
     request_generation: u64,
 }
 
+impl RequestGenerated for HardwareModelRust {
+    fn request_generation(&self) -> u64 {
+        self.request_generation
+    }
+    fn bump_request_generation(&mut self) -> u64 {
+        self.request_generation += 1;
+        self.request_generation
+    }
+}
+
 fn devices_json(devices: &[HardwareDevice], nicknames: &HashMap<String, String>) -> String {
     let payload: Vec<DeviceWithNickname<'_>> = devices
         .iter()
@@ -97,29 +107,26 @@ impl ffi::HardwareModel {
     pub fn reload(mut self: Pin<&mut Self>) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = client
-                .get_hardware(RPC_TIMEOUT)
-                .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
-                .map_err(|e| format!("{e}"));
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
-                    return;
-                }
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || {
+                client
+                    .get_hardware(RPC_TIMEOUT)
+                    .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
+                    .map_err(|e| format!("{e}"))
+            },
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_devices_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 
     pub fn apply_nickname(mut self: Pin<&mut Self>, key: &QString, value: &QString) {
@@ -128,30 +135,27 @@ impl ffi::HardwareModel {
         let value_opt = if value_s.trim().is_empty() { None } else { Some(value_s) };
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
-        thread::spawn(move || {
-            let result = client
-                .set_nickname(&key_s, value_opt, RPC_TIMEOUT)
-                .and_then(|()| client.get_hardware(RPC_TIMEOUT))
-                .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
-                .map_err(|e| format!("{e}"));
-            let _ = qt_thread.queue(move |mut pin| {
-                if pin.as_mut().rust().request_generation != generation {
-                    return;
-                }
+        spawn_rpc(
+            qt_thread,
+            generation,
+            move || {
+                client
+                    .set_nickname(&key_s, value_opt, RPC_TIMEOUT)
+                    .and_then(|()| client.get_hardware(RPC_TIMEOUT))
+                    .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
+                    .map_err(|e| format!("{e}"))
+            },
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_devices_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
                 }
                 pin.as_mut().set_is_loading(false);
-            });
-        });
+            },
+        );
     }
 }
 
