@@ -248,8 +248,9 @@ pub(crate) struct PreferencesFile {
     #[serde(default = "default_sample_interval_ms")]
     pub sample_interval_ms: u32,
     /// Show mini sparkline charts inside scalar sensor tiles.
-    /// Defaults to false so the tile layout is unchanged on first run.
-    #[serde(default)]
+    /// Defaults to true to preserve the behaviour from before the preference
+    /// existed (sparklines were unconditionally rendered).
+    #[serde(default = "default_sparklines")]
     pub sparklines: bool,
 }
 fn default_schema_version() -> u32 {
@@ -264,6 +265,9 @@ fn default_start_page() -> String {
 fn default_sample_interval_ms() -> u32 {
     linsight_protocol::PUMP_INTERVAL_DEFAULT_MS
 }
+fn default_sparklines() -> bool {
+    true
+}
 impl Default for PreferencesFile {
     fn default() -> Self {
         Self {
@@ -272,7 +276,7 @@ impl Default for PreferencesFile {
             active_dashboard: None,
             start_page: default_start_page(),
             sample_interval_ms: default_sample_interval_ms(),
-            sparklines: false,
+            sparklines: default_sparklines(),
         }
     }
 }
@@ -583,7 +587,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sparklines_defaults_to_false() {
+    fn sparklines_defaults_to_true() {
         let _g = TempXdgConfig::new();
         let path = prefs_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -591,7 +595,7 @@ pub(crate) mod tests {
         std::fs::write(&path, r#"{"schema_version":1,"theme":"dark","sample_interval_ms":150}"#)
             .unwrap();
         let loaded = load_prefs();
-        assert!(!loaded.sparklines);
+        assert!(loaded.sparklines);
     }
 
     #[test]

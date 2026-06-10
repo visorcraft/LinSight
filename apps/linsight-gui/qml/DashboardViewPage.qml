@@ -509,7 +509,7 @@ Kirigami.Page {
                                     return meta && Array.isArray(meta.sparkline) ? meta.sparkline : []
                                 }
                                 visible: {
-                                    if (!(app.preferences ? app.preferences.sparklines : false)) return false
+                                    if (!(app.preferences ? app.preferences.sparklines : true)) return false
                                     const kind = page.kindById[parent.parent.sid] || "scalar"
                                     if (kind === "table" || kind === "state") return false
                                     const pts = values

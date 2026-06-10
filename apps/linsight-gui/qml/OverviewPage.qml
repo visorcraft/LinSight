@@ -100,7 +100,7 @@ Kirigami.Page {
             tileSparkline: page._sparklines["cpu.util"] || []
             tileSensorId: "cpu.util"
             tileUnit: "%"
-            sparklinesEnabled: app.preferences ? app.preferences.sparklines : false
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
         SensorTile {
             Layout.fillWidth: true
@@ -110,7 +110,7 @@ Kirigami.Page {
             tileSparkline: page._sparklines["mem.used_bytes"] || []
             tileSensorId: "mem.used_bytes"
             tileUnit: "B"
-            sparklinesEnabled: app.preferences ? app.preferences.sparklines : false
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
 
         SensorTile {
@@ -121,7 +121,7 @@ Kirigami.Page {
             tileSparkline: page._sparklines["cpu.temp_c"] || []
             tileSensorId: "cpu.temp_c"
             tileUnit: "°C"
-            sparklinesEnabled: app.preferences ? app.preferences.sparklines : false
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
         SensorTile {
             Layout.fillWidth: true
@@ -131,7 +131,7 @@ Kirigami.Page {
             tileSparkline: page._sparklines["cpu.freq_hz"] || []
             tileSensorId: "cpu.freq_hz"
             tileUnit: "Hz"
-            sparklinesEnabled: app.preferences ? app.preferences.sparklines : false
+            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
         }
     }
 

@@ -80,7 +80,7 @@ Controls.ScrollView {
                                 tileSensorId: (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
                                 tileUnit: modelData.unit || ""
                                 tileSparkline: modelData.sparkline || []
-                                sparklinesEnabled: app.preferences ? app.preferences.sparklines : false
+                                sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
                             }
                         }
                     }
@@ -153,7 +153,7 @@ Controls.ScrollView {
                                             tileSensorId: (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
                                             tileUnit: modelData.unit || ""
                                             tileSparkline: modelData.sparkline || []
-                                            sparklinesEnabled: app.preferences ? app.preferences.sparklines : false
+                                            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
                                         }
                                     }
                                 }
