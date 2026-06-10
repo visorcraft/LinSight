@@ -30,6 +30,13 @@ All notable changes to LinSight. Format roughly follows
   Desktop notification toggle is now a first-class checkbox in the GUI
   instead of requiring manual TOML editing. See [`docs/alerts.md`](docs/alerts.md)
   for the full reference.
+- **Sensor snapshot caches.** The disk, network, filesystem, and system
+  plugins now cache kernel-file reads for 50 ms per sample window, so a
+  single tick with multiple subscribed sensors per device only reads each
+  underlying file once. A generic `SnapshotCache<T>` helper was extracted
+  into `linsight-core` and is used by all four plugins (the CPU and memory
+  plugins already had their own caches). Observable under
+  `LINSIGHT_LOG=debug` via the `linsight_sensors::reads` target.
 
 ## [1.9.0] — 2026-06-04
 
