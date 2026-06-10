@@ -22,6 +22,14 @@ All notable changes to LinSight. Format roughly follows
   `linsight-cli db prune --older-than <dur> [--vacuum]` commands cover
   offline inspection and space reclamation, and work without (or safely
   alongside) a running daemon.
+- **Alert event log and cooldown.** Every alert fire and clear is recorded
+  in a ring buffer (512 events) visible on the Alerts page and via
+  `linsight-cli alert events`. Per-rule cooldown suppresses re-notification
+  for a configurable window after a fire, preventing flapping alerts from
+  spamming notify targets. Cooldown is editable in the GUI rule editor and
+  via the CLI `--cooldown` flag. Desktop notification toggle is now a
+  first-class checkbox in the GUI instead of requiring manual TOML editing.
+  See [`docs/alerts.md`](docs/alerts.md) for the full reference.
 
 ## [1.9.0] — 2026-06-04
 
