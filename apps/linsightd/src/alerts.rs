@@ -442,7 +442,13 @@ impl AlertEngine {
 }
 
 fn wall_micros() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_micros() as u64).unwrap_or(0)
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_micros() as u64,
+        Err(e) => {
+            warn!(error = ?e, "system clock before UNIX_EPOCH; emitting sentinel timestamp");
+            u64::MAX
+        }
+    }
 }
 
 fn fire(name: &str, expr: &str, notify: &[String]) {
@@ -989,5 +995,32 @@ mod tests {
         let arr: serde_json::Value = serde_json::from_str(&json_limited).unwrap();
         assert_eq!(arr.as_array().unwrap().len(), 1);
         assert_eq!(arr[0]["kind"], "fired");
+    }
+
+    #[test]
+    fn list_events_json_limit_edges() {
+        let handle = AlertEngine::new_test("x", "cpu.util > 1").into_handle();
+        handle.on_sample(&linsight_core::Sample {
+            sensor: linsight_core::SensorId::new("cpu.util"),
+            ts_micros: 0,
+            reading: linsight_core::Reading::Scalar(99.0),
+        });
+        handle.on_sample(&linsight_core::Sample {
+            sensor: linsight_core::SensorId::new("cpu.util"),
+            ts_micros: 0,
+            reading: linsight_core::Reading::Scalar(0.0),
+        });
+
+        let json_all = handle.list_events_json(None);
+        let arr: serde_json::Value = serde_json::from_str(&json_all).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 2);
+
+        let json_zero = handle.list_events_json(Some(0));
+        let arr: serde_json::Value = serde_json::from_str(&json_zero).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 0);
+
+        let json_over = handle.list_events_json(Some(100));
+        let arr: serde_json::Value = serde_json::from_str(&json_over).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 2);
     }
 }

@@ -892,22 +892,18 @@ fn handle_request(
                 }),
             }
         }
-        RequestOp::ListAlertEvents { limit } => match sched.lock().unwrap().alert_engine_handle() {
-            Some(handle) => {
-                let events_json = handle.list_events_json(limit);
-                writer.lock().unwrap().write_server(&ServerMsg::Response {
-                    req_id,
-                    result: Ok(ResponsePayload::AlertEventList { events_json }),
-                })
-            }
-            None => writer.lock().unwrap().write_server(&ServerMsg::Response {
+        RequestOp::ListAlertEvents { limit } => {
+            let events_json = sched
+                .lock()
+                .unwrap()
+                .alert_engine_handle()
+                .map(|h| h.list_events_json(limit))
+                .unwrap_or_else(|| "[]".to_owned());
+            writer.lock().unwrap().write_server(&ServerMsg::Response {
                 req_id,
-                result: Err(ProtoError {
-                    code: ProtoErrorCode::Internal,
-                    message: "alert engine not loaded".into(),
-                }),
-            }),
-        },
+                result: Ok(ResponsePayload::AlertEventList { events_json }),
+            })
+        }
     }
 }
 
