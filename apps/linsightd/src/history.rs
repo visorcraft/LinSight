@@ -137,10 +137,40 @@ pub fn spawn(
     Ok((HistoryWriter { tx, dropped }, handle))
 }
 
-const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+pub(crate) const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
 // Prime last_prune so the first prune fires after this delay rather than
 // waiting a full hour.
-const PRUNE_INITIAL_DELAY: Duration = Duration::from_secs(300);
+pub(crate) const PRUNE_INITIAL_DELAY: Duration = Duration::from_secs(300);
+
+/// Check whether a prune is due and, if so, delete stale rows.
+///
+/// `now` is passed in so tests can drive the gate with synthetic instants
+/// without sleeping. `last_prune` is updated unconditionally after an attempt
+/// so a failed prune backs off for a full interval rather than hammering the
+/// disk on a persistent error.
+pub(crate) fn maybe_prune(
+    conn: &Connection,
+    retention: Option<Duration>,
+    last_prune: &mut Instant,
+    now: Instant,
+) {
+    let Some(retention) = retention else { return };
+    if now.duration_since(*last_prune) < PRUNE_INTERVAL {
+        return;
+    }
+    let now_micros = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    let cutoff = now_micros.saturating_sub(retention.as_micros() as u64);
+    match prune_older_than(conn, cutoff) {
+        Ok(n) if n > 0 => info!(removed = n, "pruned history rows past retention window"),
+        Ok(_) => {}
+        Err(e) => warn!(error = ?e, "history prune failed"),
+    }
+    // Update unconditionally so a transient error backs off rather than retrying every tick.
+    *last_prune = now;
+}
 
 fn run_writer(
     mut conn: Connection,
@@ -179,25 +209,10 @@ fn run_writer(
             }
             pending.clear();
             last_flush = Instant::now();
-
-            if let Some(retention) = retention
-                && last_prune.elapsed() >= PRUNE_INTERVAL
-            {
-                let now_micros = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_micros() as u64;
-                let cutoff = now_micros.saturating_sub(retention.as_micros() as u64);
-                match prune_older_than(&conn, cutoff) {
-                    Ok(n) if n > 0 => {
-                        info!(removed = n, "pruned history rows past retention window")
-                    }
-                    Ok(_) => {}
-                    Err(e) => warn!(error = ?e, "history prune failed"),
-                }
-                last_prune = Instant::now();
-            }
         }
+        // Evaluate the prune gate on every iteration so an idle daemon (no
+        // samples → no flushes) still rotates stale rows on schedule.
+        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
     }
 }
 
@@ -464,6 +479,125 @@ mod tests {
         assert_eq!(count, 1);
         let ts: i64 = conn.query_row("SELECT ts FROM samples", [], |r| r.get(0)).unwrap();
         assert_eq!(ts, 2_000_000);
+    }
+
+    // ---------------------------------------------------------------------------
+    // maybe_prune gate tests — driven with synthetic Instants, no sleeping.
+    // ---------------------------------------------------------------------------
+
+    fn open_test_db(dir: &tempfile::TempDir) -> (Connection, std::path::PathBuf) {
+        let db = dir.path().join("h.db");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS samples (
+                sensor_id TEXT NOT NULL,
+                ts        INTEGER NOT NULL,
+                scalar    REAL,
+                counter   INTEGER,
+                state     TEXT,
+                PRIMARY KEY (sensor_id, ts)
+             ) WITHOUT ROWID;
+             CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);",
+        )
+        .unwrap();
+        (conn, db)
+    }
+
+    fn row_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap()
+    }
+
+    /// Insert a row at `ts_micros` directly so tests can control age without
+    /// going through the writer thread.
+    fn insert_row(conn: &Connection, ts_micros: i64) {
+        conn.execute(
+            "INSERT INTO samples (sensor_id, ts, scalar) VALUES ('cpu.util', ?1, 1.0)",
+            rusqlite::params![ts_micros],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn maybe_prune_skips_when_retention_is_none() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+        insert_row(&conn, 1_000);
+
+        // Way past PRUNE_INTERVAL — but retention=None means prune never fires.
+        let long_ago = Instant::now().checked_sub(PRUNE_INTERVAL * 2).unwrap();
+        let mut last_prune = long_ago;
+        maybe_prune(&conn, None, &mut last_prune, Instant::now());
+
+        // last_prune must NOT advance (gate never ran).
+        assert!(last_prune.duration_since(long_ago) < Duration::from_millis(1));
+        assert_eq!(row_count(&conn), 1);
+    }
+
+    #[test]
+    fn maybe_prune_skips_when_interval_not_elapsed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+        insert_row(&conn, 1_000);
+
+        // last_prune is "just now" — interval hasn't elapsed.
+        let mut last_prune = Instant::now();
+        let retention = Some(Duration::from_secs(1));
+        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
+
+        assert_eq!(row_count(&conn), 1, "should not prune before interval elapses");
+    }
+
+    /// Core regression test: an old row is pruned on an idle daemon (no samples
+    /// flowing, pending always empty) when the interval has elapsed.
+    ///
+    /// We bypass the writer loop entirely and drive `maybe_prune` directly with
+    /// a synthetic `now` that is `PRUNE_INTERVAL` past `last_prune`, which
+    /// exercises the full gate logic (retention check, interval check, SQL
+    /// delete, last_prune update) without any wall-clock sleeping.
+    #[test]
+    fn maybe_prune_fires_on_idle_daemon_after_interval() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+
+        // Insert one very old row (ts=1 µs since epoch — always before any
+        // real retention window).
+        insert_row(&conn, 1);
+        // Insert one fresh row at "now" (a large epoch value so it survives).
+        let now_micros = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as i64;
+        insert_row(&conn, now_micros);
+        assert_eq!(row_count(&conn), 2);
+
+        // Simulate: last_prune is PRUNE_INTERVAL in the past.
+        let last_prune_base = Instant::now().checked_sub(PRUNE_INTERVAL).unwrap();
+        let mut last_prune = last_prune_base;
+
+        // Short retention — 1 second is more than enough to catch the row at ts=1.
+        let retention = Some(Duration::from_secs(1));
+
+        // `now` is the current instant (> last_prune by PRUNE_INTERVAL → gate opens).
+        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
+
+        // Old row deleted, fresh row kept.
+        assert_eq!(row_count(&conn), 1, "old row should have been pruned");
+
+        // last_prune advanced (so the next call in < PRUNE_INTERVAL is blocked).
+        assert!(last_prune > last_prune_base, "last_prune must advance after a prune attempt");
+    }
+
+    #[test]
+    fn maybe_prune_last_prune_advances_even_on_empty_result() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (conn, _) = open_test_db(&dir);
+        // No rows — prune will delete 0 rows but gate still fires.
+        let last_prune_base = Instant::now().checked_sub(PRUNE_INTERVAL).unwrap();
+        let mut last_prune = last_prune_base;
+        let retention = Some(Duration::from_secs(1));
+        maybe_prune(&conn, retention, &mut last_prune, Instant::now());
+        assert!(last_prune > last_prune_base, "last_prune must advance even when 0 rows deleted");
     }
 
     #[test]
