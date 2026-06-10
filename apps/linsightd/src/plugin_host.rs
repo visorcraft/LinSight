@@ -23,6 +23,7 @@ use linsight_sensors_net::NetPlugin;
 use linsight_sensors_nvme::NvmePlugin;
 use linsight_sensors_nvml::NvmlPlugin;
 use linsight_sensors_proc::ProcPlugin;
+use linsight_sensors_smart::SmartPlugin;
 use linsight_sensors_sock::SockPlugin;
 use linsight_sensors_system::SystemPlugin;
 use linsight_sensors_systemd::SystemdPlugin;
@@ -170,6 +171,11 @@ impl PluginHost {
             Arc::new(ContainersPlugin::default()),
             None,
             cfg("linsight-sensors-containers"),
+        );
+        host.register_with_config(
+            Arc::new(SmartPlugin::default()),
+            None,
+            cfg("linsight-sensors-smart"),
         );
         host
     }

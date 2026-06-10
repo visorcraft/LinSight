@@ -3,3 +3,5 @@
 
 pub mod plugin;
 pub mod udisks;
+
+pub use plugin::SmartPlugin;

@@ -54,7 +54,8 @@ pub fn sensors_from_drive(
         ));
     }
 
-    if let Some(secs) = props.get("SmartPowerOnSeconds").and_then(|v| v.downcast_ref::<u64>().ok()) {
+    if let Some(secs) = props.get("SmartPowerOnSeconds").and_then(|v| v.downcast_ref::<u64>().ok())
+    {
         out.push(make_sensor(
             disk_name,
             "smart_power_on_hours",
@@ -65,7 +66,8 @@ pub fn sensors_from_drive(
         ));
     }
 
-    if let Some(attrs) = props.get("SmartNumAttributes").and_then(|v| v.downcast_ref::<u64>().ok()) {
+    if let Some(attrs) = props.get("SmartNumAttributes").and_then(|v| v.downcast_ref::<u64>().ok())
+    {
         out.push(make_sensor(
             disk_name,
             "smart_realloc_sectors",
@@ -133,8 +135,10 @@ fn make_sensor(
 ///
 /// Returns a map of kernel disk name → property dictionary for the
 /// SMART-bearing interface (`Drive.Ata` or `NVMe.Controller`).
-pub fn fetch_smart_drives() -> Result<HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>, String> {
-    let conn = zbus::blocking::Connection::system().map_err(|e| format!("D-Bus connection: {e}"))?;
+pub fn fetch_smart_drives()
+-> Result<HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>, String> {
+    let conn =
+        zbus::blocking::Connection::system().map_err(|e| format!("D-Bus connection: {e}"))?;
 
     let proxy = zbus::blocking::Proxy::new(
         &conn,
@@ -153,7 +157,7 @@ pub fn fetch_smart_drives() -> Result<HashMap<String, HashMap<String, zbus::zvar
         .map_err(|e| format!("GetManagedObjects: {e}"))?;
 
     let mut out = HashMap::new();
-    for (path, ifaces) in managed_objects {
+    for (_path, ifaces) in managed_objects {
         // Find the block device interface to get the kernel name
         let Some(block) = ifaces.get("org.freedesktop.UDisks2.Block") else {
             continue;
@@ -175,19 +179,19 @@ pub fn fetch_smart_drives() -> Result<HashMap<String, HashMap<String, zbus::zvar
         }
 
         // Check for ATA SMART interface
-        if let Some(ata) = ifaces.get("org.freedesktop.UDisks2.Drive.Ata") {
-            if ata.contains_key("SmartTemperature") || ata.contains_key("SmartFailing") {
-                out.insert(disk_name, ata.clone());
-                continue;
-            }
+        if let Some(ata) = ifaces.get("org.freedesktop.UDisks2.Drive.Ata")
+            && (ata.contains_key("SmartTemperature") || ata.contains_key("SmartFailing"))
+        {
+            out.insert(disk_name, ata.clone());
+            continue;
         }
 
         // Check for NVMe SMART interface
-        if let Some(nvme) = ifaces.get("org.freedesktop.UDisks2.NVMe.Controller") {
-            if nvme.contains_key("SmartTemperature") || nvme.contains_key("SmartPercentUsed") {
-                out.insert(disk_name, nvme.clone());
-                continue;
-            }
+        if let Some(nvme) = ifaces.get("org.freedesktop.UDisks2.NVMe.Controller")
+            && (nvme.contains_key("SmartTemperature") || nvme.contains_key("SmartPercentUsed"))
+        {
+            out.insert(disk_name, nvme.clone());
+            continue;
         }
     }
 

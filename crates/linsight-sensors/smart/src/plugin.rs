@@ -11,9 +11,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use linsight_core::{
-    HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId,
-};
+use linsight_core::{HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId};
 use linsight_plugin_sdk::stabby::result::Result as SResult;
 use linsight_plugin_sdk::{
     LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
@@ -40,7 +38,8 @@ struct Inner {
 }
 
 impl SmartPlugin {
-    fn init_inner(&self,
+    fn init_inner(
+        &self,
         ctx: &PluginCtx,
     ) -> Result<(PluginManifest, Vec<HardwareDevice>), PluginError> {
         let mut inner = self.inner.lock().expect("SmartPlugin poisoned");
@@ -89,7 +88,7 @@ impl SmartPlugin {
                 sensor_ids: sensor_list.iter().map(|(id, _, _)| id.clone()).collect(),
             });
 
-            for (id, desc, _) in &sensor_list {
+            for (_id, desc, _) in &sensor_list {
                 sensors.push(desc.clone());
             }
 
@@ -119,12 +118,11 @@ impl SmartPlugin {
             rest.rsplit_once('.').ok_or_else(|| PluginError::Unsupported(id.into()))?;
 
         // Check cache first
-        if let Some((cached_at, readings)) = inner.cache.get(name) {
-            if cached_at.elapsed() <= CACHE_TTL {
-                if let Some((_, reading)) = readings.iter().find(|(sid, _)| sid == &sensor) {
-                    return Ok(reading.clone());
-                }
-            }
+        if let Some((cached_at, readings)) = inner.cache.get(name)
+            && cached_at.elapsed() <= CACHE_TTL
+            && let Some((_, reading)) = readings.iter().find(|(sid, _)| sid == &sensor)
+        {
+            return Ok(reading.clone());
         }
 
         // Cache miss or expiry — refresh all SMART data
@@ -143,10 +141,10 @@ impl SmartPlugin {
         }
 
         // Try again after refresh
-        if let Some((_, readings)) = inner.cache.get(name) {
-            if let Some((_, reading)) = readings.iter().find(|(sid, _)| sid == &sensor) {
-                return Ok(reading.clone());
-            }
+        if let Some((_, readings)) = inner.cache.get(name)
+            && let Some((_, reading)) = readings.iter().find(|(sid, _)| sid == &sensor)
+        {
+            return Ok(reading.clone());
         }
 
         Err(PluginError::Unsupported(id.into()))

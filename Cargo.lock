@@ -1558,6 +1558,7 @@ dependencies = [
  "linsight-sensors-nvme",
  "linsight-sensors-nvml",
  "linsight-sensors-proc",
+ "linsight-sensors-smart",
  "linsight-sensors-sock",
  "linsight-sensors-system",
  "linsight-sensors-systemd",
