@@ -440,8 +440,8 @@ impl AlertEngine {
             let new_triggered_at = triggered_at.unwrap_or(now);
             self.rules[idx].triggered_at = Some(new_triggered_at);
             if !prev_fired && now.duration_since(new_triggered_at) >= for_duration {
-                let within_cooldown = last_fired_at
-                    .map_or(false, |last| now.duration_since(last) < cooldown);
+                let within_cooldown =
+                    last_fired_at.is_some_and(|last| now.duration_since(last) < cooldown);
                 if !within_cooldown {
                     self.rules[idx].fired = true;
                     self.rules[idx].last_fired_at = Some(now);
@@ -1093,14 +1093,11 @@ mod tests {
 
     #[test]
     fn toml_round_trips_cooldown() {
-        use std::io::Write;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("alerts.toml");
 
         let handle = AlertEngine::new_test("x", "cpu.util > 1").into_handle();
-        handle
-            .upsert_rule("x", "cpu.util > 1", None, Some("5m"), vec![], None)
-            .unwrap();
+        handle.upsert_rule("x", "cpu.util > 1", None, Some("5m"), vec![], None).unwrap();
         handle.save_config(&path).unwrap();
 
         let loaded = AlertEngine::load(&path).unwrap();

@@ -171,16 +171,14 @@ fn main() -> anyhow::Result<()> {
         }
         Cmd::Alert { action } => match action {
             AlertCmd::List => commands::alert::list(&socket),
-            AlertCmd::Add { name, expr, for_duration, cooldown, notify } => {
-                commands::alert::add(
-                    &socket,
-                    &name,
-                    &expr,
-                    for_duration.as_deref(),
-                    cooldown.as_deref(),
-                    &notify,
-                )
-            }
+            AlertCmd::Add { name, expr, for_duration, cooldown, notify } => commands::alert::add(
+                &socket,
+                &name,
+                &expr,
+                for_duration.as_deref(),
+                cooldown.as_deref(),
+                &notify,
+            ),
             AlertCmd::Remove { name } => commands::alert::remove(&socket, &name),
         },
         Cmd::History { sensor, last, format, max_points } => {

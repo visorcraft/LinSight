@@ -758,8 +758,14 @@ fn handle_request(
             let sched_guard = sched.lock().unwrap();
             if let Some(handle) = sched_guard.alert_engine_handle() {
                 if let Some(cfg_path) = sched_guard.alerts_config_path().map(|p| p.to_path_buf()) {
-                    match handle.upsert_rule(&name, &expr, for_duration.as_deref(), cooldown.as_deref(), notify, enabled)
-                    {
+                    match handle.upsert_rule(
+                        &name,
+                        &expr,
+                        for_duration.as_deref(),
+                        cooldown.as_deref(),
+                        notify,
+                        enabled,
+                    ) {
                         Ok(()) => {
                             if let Err(e) = handle.save_config(&cfg_path) {
                                 tracing::warn!(error = ?e, "alert config save failed");

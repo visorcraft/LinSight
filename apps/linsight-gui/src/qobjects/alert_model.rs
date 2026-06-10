@@ -18,8 +18,16 @@ use crate::qobjects::workspace_handle::with_workspace;
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
 enum AlertMutation {
-    Upsert { name: String, expr: String, notify: Vec<String>, enabled: Option<bool>, cooldown: Option<String> },
-    Delete { name: String },
+    Upsert {
+        name: String,
+        expr: String,
+        notify: Vec<String>,
+        enabled: Option<bool>,
+        cooldown: Option<String>,
+    },
+    Delete {
+        name: String,
+    },
 }
 
 #[cxx_qt::bridge]
@@ -124,9 +132,9 @@ fn apply_alert_mutation_and_reload(
     mutation: AlertMutation,
 ) -> Result<String, String> {
     match mutation {
-        AlertMutation::Upsert { name, expr, notify, enabled, cooldown } => {
-            client.upsert_alert(&name, &expr, None, cooldown, notify, enabled, RPC_TIMEOUT).map(|_| ())
-        }
+        AlertMutation::Upsert { name, expr, notify, enabled, cooldown } => client
+            .upsert_alert(&name, &expr, None, cooldown, notify, enabled, RPC_TIMEOUT)
+            .map(|_| ()),
         AlertMutation::Delete { name } => client.delete_alert(&name, RPC_TIMEOUT).map(|_| ()),
     }
     .map_err(|e| format!("{e}"))?;
@@ -257,9 +265,7 @@ impl ffi::AlertModel {
         spawn_rpc(
             qt_thread,
             generation,
-            move || client
-                .list_alert_events(Some(50), RPC_TIMEOUT)
-                .map_err(|e| format!("{e}")),
+            move || client.list_alert_events(Some(50), RPC_TIMEOUT).map_err(|e| format!("{e}")),
             |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_events_json(QString::from(json.as_str())),

@@ -308,7 +308,11 @@ impl Client {
     }
 
     /// v2 RPC: list recent alert fire/clear events.
-    pub fn list_alert_events(&self, limit: Option<u32>, timeout: Duration) -> Result<String, RpcError> {
+    pub fn list_alert_events(
+        &self,
+        limit: Option<u32>,
+        timeout: Duration,
+    ) -> Result<String, RpcError> {
         self.request_rpc(RequestOp::ListAlertEvents { limit }, timeout, |payload| match payload {
             ResponsePayload::AlertEventList { events_json } => Ok(events_json),
             other => Err(other),
@@ -316,6 +320,7 @@ impl Client {
     }
 
     /// v2 RPC: upsert (add or update) an alert rule.
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_alert(
         &self,
         name: &str,
