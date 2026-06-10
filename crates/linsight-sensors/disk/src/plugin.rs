@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -42,12 +42,7 @@ pub struct DiskPlugin {
 struct Inner {
     sysroot: Option<PathBuf>,
     devices: Vec<DiskDevice>,
-    cache: Option<DiskCache>,
-}
-
-struct DiskCache {
-    captured_at: Instant,
-    stats: HashMap<String, BlockStat>,
+    cache: Option<linsight_core::SnapshotCache<HashMap<String, BlockStat>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -201,9 +196,9 @@ impl DiskPlugin {
 
     fn snapshot(inner: &mut Inner) -> Result<HashMap<String, BlockStat>, PluginError> {
         if let Some(cache) = &inner.cache
-            && cache.captured_at.elapsed() <= CACHE_TTL
+            && let Some(stats) = cache.get(CACHE_TTL)
         {
-            return Ok(cache.stats.clone());
+            return Ok(stats);
         }
 
         let mut stats = HashMap::with_capacity(inner.devices.len());
@@ -215,7 +210,7 @@ impl DiskPlugin {
             }
         }
         tracing::debug!(target: "linsight_sensors::reads", plugin = "disk", files_read);
-        inner.cache = Some(DiskCache { captured_at: Instant::now(), stats: stats.clone() });
+        inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
         Ok(stats)
     }
 }

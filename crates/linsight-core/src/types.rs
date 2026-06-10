@@ -250,3 +250,28 @@ mod tests {
         assert!(matches!(s.reading, Reading::Scalar(v) if v == 33.3));
     }
 }
+
+use std::time::{Duration, Instant};
+
+/// Generic time-bounded cache for sensor snapshot data.
+///
+/// Used by sensor plugins to avoid re-reading kernel files multiple
+/// times per sample window.  Create with [`SnapshotCache::new`] and
+/// call [`SnapshotCache::get`] to retrieve the data while it is fresh.
+#[derive(Clone, Debug)]
+pub struct SnapshotCache<T> {
+    captured_at: Instant,
+    data: T,
+}
+
+impl<T: Clone> SnapshotCache<T> {
+    /// Store `data` with the current timestamp.
+    pub fn new(data: T) -> Self {
+        Self { captured_at: Instant::now(), data }
+    }
+
+    /// Return a clone of the data if it was captured within `ttl`.
+    pub fn get(&self, ttl: Duration) -> Option<T> {
+        if self.captured_at.elapsed() <= ttl { Some(self.data.clone()) } else { None }
+    }
+}

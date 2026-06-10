@@ -20,6 +20,7 @@ pub use hardware::{
 };
 pub use paths::history_db_path;
 pub use time::parse_duration_dhm;
+pub use types::SnapshotCache;
 pub use types::*;
 
 /// Sensor tag marking a value as effectively constant for the process

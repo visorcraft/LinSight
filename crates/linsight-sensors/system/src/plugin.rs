@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -269,7 +269,7 @@ struct Inner {
     /// share the same file, so reading once per tick is cheaper.
     prev_ctxt: Option<u64>,
     prev_processes: Option<u64>,
-    cache: Option<SystemCache>,
+    cache: Option<linsight_core::SnapshotCache<SystemSnapshot>>,
 }
 
 #[derive(Clone)]
@@ -285,11 +285,6 @@ struct SystemSnapshot {
     psi_io_some: (f64, f64, f64),
     psi_io_full: (f64, f64, f64),
     thermal: HashMap<String, f64>,
-}
-
-struct SystemCache {
-    captured_at: Instant,
-    snapshot: SystemSnapshot,
 }
 
 impl SystemPlugin {
@@ -555,9 +550,9 @@ impl SystemPlugin {
 
     fn snapshot(inner: &mut Inner) -> Result<SystemSnapshot, PluginError> {
         if let Some(cache) = &inner.cache
-            && cache.captured_at.elapsed() <= CACHE_TTL
+            && let Some(snap) = cache.get(CACHE_TTL)
         {
-            return Ok(cache.snapshot.clone());
+            return Ok(snap);
         }
 
         let sysroot = inner.sysroot.as_deref();
@@ -603,10 +598,7 @@ impl SystemPlugin {
             thermal,
         };
         tracing::debug!(target: "linsight_sensors::reads", plugin = "system", files_read);
-        inner.cache = Some(SystemCache {
-            captured_at: Instant::now(),
-            snapshot: snapshot.clone(),
-        });
+        inner.cache = Some(linsight_core::SnapshotCache::new(snapshot.clone()));
         Ok(snapshot)
     }
 }
@@ -917,7 +909,10 @@ mod tests {
 
         // Second sample immediately should still see cached value
         let r2 = host_sample(&p, SensorId::new("system.load_5m")).unwrap();
-        assert!(matches!(r2, Reading::Scalar(v) if (v - 0.89).abs() < 1e-6), "cache should serve stale value");
+        assert!(
+            matches!(r2, Reading::Scalar(v) if (v - 0.89).abs() < 1e-6),
+            "cache should serve stale value"
+        );
     }
 
     #[test]
@@ -939,6 +934,9 @@ mod tests {
 
         // Second sample should see new value
         let r2 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
-        assert!(matches!(r2, Reading::Scalar(v) if (v - 9.99).abs() < 1e-6), "cache should reflect new value after expiry");
+        assert!(
+            matches!(r2, Reading::Scalar(v) if (v - 9.99).abs() < 1e-6),
+            "cache should reflect new value after expiry"
+        );
     }
 }

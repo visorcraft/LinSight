@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -37,7 +37,7 @@ use linsight_plugin_sdk::{
     LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
     RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
 };
-use tracing::{debug, warn};
+use tracing::warn;
 
 const CACHE_TTL: Duration = Duration::from_millis(50);
 
@@ -64,7 +64,7 @@ pub struct NetPlugin {
 struct Inner {
     sysroot: Option<PathBuf>,
     interfaces: Vec<String>,
-    cache: Option<NetCache>,
+    cache: Option<linsight_core::SnapshotCache<HashMap<String, NetIfaceStats>>>,
 }
 
 #[derive(Clone)]
@@ -79,11 +79,6 @@ struct NetIfaceStats {
     tx_dropped: u64,
     operstate: String,
     speed: i64,
-}
-
-struct NetCache {
-    captured_at: Instant,
-    stats: HashMap<String, NetIfaceStats>,
 }
 
 /// Statistics file names and their corresponding sensor metric suffix.
@@ -259,9 +254,9 @@ impl NetPlugin {
 
     fn snapshot(inner: &mut Inner) -> Result<HashMap<String, NetIfaceStats>, PluginError> {
         if let Some(cache) = &inner.cache
-            && cache.captured_at.elapsed() <= CACHE_TTL
+            && let Some(stats) = cache.get(CACHE_TTL)
         {
-            return Ok(cache.stats.clone());
+            return Ok(stats);
         }
 
         let mut stats = HashMap::with_capacity(inner.interfaces.len());
@@ -271,15 +266,32 @@ impl NetPlugin {
                 Some(r) => r.join("sys/class/net").join(iface),
                 None => Path::new("/sys/class/net").join(iface),
             };
-            let Ok(rx_bytes) = read_u64(&base.join("statistics/rx_bytes")) else { continue; };
-            let Ok(tx_bytes) = read_u64(&base.join("statistics/tx_bytes")) else { continue; };
-            let Ok(rx_packets) = read_u64(&base.join("statistics/rx_packets")) else { continue; };
-            let Ok(tx_packets) = read_u64(&base.join("statistics/tx_packets")) else { continue; };
-            let Ok(rx_errors) = read_u64(&base.join("statistics/rx_errors")) else { continue; };
-            let Ok(tx_errors) = read_u64(&base.join("statistics/tx_errors")) else { continue; };
-            let Ok(rx_dropped) = read_u64(&base.join("statistics/rx_dropped")) else { continue; };
-            let Ok(tx_dropped) = read_u64(&base.join("statistics/tx_dropped")) else { continue; };
-            let operstate = read_string(&base.join("operstate")).unwrap_or_else(|_| "unknown".into());
+            let Ok(rx_bytes) = read_u64(&base.join("statistics/rx_bytes")) else {
+                continue;
+            };
+            let Ok(tx_bytes) = read_u64(&base.join("statistics/tx_bytes")) else {
+                continue;
+            };
+            let Ok(rx_packets) = read_u64(&base.join("statistics/rx_packets")) else {
+                continue;
+            };
+            let Ok(tx_packets) = read_u64(&base.join("statistics/tx_packets")) else {
+                continue;
+            };
+            let Ok(rx_errors) = read_u64(&base.join("statistics/rx_errors")) else {
+                continue;
+            };
+            let Ok(tx_errors) = read_u64(&base.join("statistics/tx_errors")) else {
+                continue;
+            };
+            let Ok(rx_dropped) = read_u64(&base.join("statistics/rx_dropped")) else {
+                continue;
+            };
+            let Ok(tx_dropped) = read_u64(&base.join("statistics/tx_dropped")) else {
+                continue;
+            };
+            let operstate =
+                read_string(&base.join("operstate")).unwrap_or_else(|_| "unknown".into());
             let speed = read_i64(&base.join("speed")).unwrap_or(-1);
             files_read += 10;
             stats.insert(
@@ -299,10 +311,7 @@ impl NetPlugin {
             );
         }
         tracing::debug!(target: "linsight_sensors::reads", plugin = "net", files_read);
-        inner.cache = Some(NetCache {
-            captured_at: Instant::now(),
-            stats: stats.clone(),
-        });
+        inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
         Ok(stats)
     }
 }

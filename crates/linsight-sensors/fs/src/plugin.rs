@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -51,6 +51,8 @@ pub struct FsPlugin {
     inner: Mutex<Inner>,
 }
 
+type FsStats = HashMap<String, (u64, u64, u64, u64)>;
+
 #[derive(Default)]
 struct Inner {
     sysroot: Option<PathBuf>,
@@ -59,12 +61,7 @@ struct Inner {
     /// must be the post-disambiguation value, not the bare result of
     /// [`mount_safekey`].
     mounts: Vec<(String, String)>,
-    cache: Option<FsCache>,
-}
-
-struct FsCache {
-    captured_at: Instant,
-    stats: HashMap<String, (u64, u64, u64, u64)>,
+    cache: Option<linsight_core::SnapshotCache<FsStats>>,
 }
 
 fn mount_safekey(mountpoint: &str) -> String {
@@ -320,11 +317,11 @@ impl FsPlugin {
         Ok(Reading::Scalar(value))
     }
 
-    fn snapshot(inner: &mut Inner) -> Result<HashMap<String, (u64, u64, u64, u64)>, PluginError> {
+    fn snapshot(inner: &mut Inner) -> Result<FsStats, PluginError> {
         if let Some(cache) = &inner.cache
-            && cache.captured_at.elapsed() <= CACHE_TTL
+            && let Some(stats) = cache.get(CACHE_TTL)
         {
-            return Ok(cache.stats.clone());
+            return Ok(stats);
         }
 
         let mut stats = HashMap::with_capacity(inner.mounts.len());
@@ -336,10 +333,7 @@ impl FsPlugin {
             }
         }
         tracing::debug!(target: "linsight_sensors::reads", plugin = "fs", statvfs_calls = calls);
-        inner.cache = Some(FsCache {
-            captured_at: Instant::now(),
-            stats: stats.clone(),
-        });
+        inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
         Ok(stats)
     }
 }
