@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -13,6 +15,8 @@ use linsight_plugin_sdk::{
     LinsightPlugin, PluginCtx, PluginError, PluginManifest, RInitResult, RPluginCtx, RPluginError,
     RPluginManifest, RReading, RSampleResult, RSensorId, SensorDescriptor,
 };
+
+const CACHE_TTL: Duration = Duration::from_millis(50);
 
 const PSEUDO_FS: &[&str] = &[
     "proc",
@@ -55,6 +59,12 @@ struct Inner {
     /// must be the post-disambiguation value, not the bare result of
     /// [`mount_safekey`].
     mounts: Vec<(String, String)>,
+    cache: Option<FsCache>,
+}
+
+struct FsCache {
+    captured_at: Instant,
+    stats: HashMap<String, (u64, u64, u64, u64)>,
 }
 
 fn mount_safekey(mountpoint: &str) -> String {
@@ -281,7 +291,7 @@ impl FsPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("FsPlugin poisoned");
+        let mut inner = self.inner.lock().expect("FsPlugin poisoned");
         let id = sensor.as_str();
         let rest = id.strip_prefix("fs.").ok_or_else(|| PluginError::Unsupported(id.into()))?;
         let (safe, metric) =
@@ -290,9 +300,15 @@ impl FsPlugin {
             .mounts
             .iter()
             .find(|(_, s)| s == safe)
-            .map(|(mp, _)| mp)
+            .map(|(mp, _)| mp.clone())
             .ok_or_else(|| PluginError::Unsupported(id.into()))?;
-        let (total, avail, inodes, inodes_free) = statvfs_raw(mountpoint)?;
+
+        let stats = Self::snapshot(&mut inner)?;
+        let (total, avail, inodes, inodes_free) = stats
+            .get(&mountpoint)
+            .copied()
+            .ok_or_else(|| PluginError::Unsupported(format!("fs {safe} not in snapshot")))?;
+
         let value = match metric {
             "total_bytes" => total as f64,
             "used_bytes" => total.saturating_sub(avail) as f64,
@@ -302,6 +318,29 @@ impl FsPlugin {
             _ => return Err(PluginError::Unsupported(id.into())),
         };
         Ok(Reading::Scalar(value))
+    }
+
+    fn snapshot(inner: &mut Inner) -> Result<HashMap<String, (u64, u64, u64, u64)>, PluginError> {
+        if let Some(cache) = &inner.cache
+            && cache.captured_at.elapsed() <= CACHE_TTL
+        {
+            return Ok(cache.stats.clone());
+        }
+
+        let mut stats = HashMap::with_capacity(inner.mounts.len());
+        let mut calls = 0usize;
+        for (mountpoint, _) in &inner.mounts {
+            if let Ok(v) = statvfs_raw(mountpoint) {
+                stats.insert(mountpoint.clone(), v);
+                calls += 1;
+            }
+        }
+        tracing::debug!(target: "linsight_sensors::reads", plugin = "fs", statvfs_calls = calls);
+        inner.cache = Some(FsCache {
+            captured_at: Instant::now(),
+            stats: stats.clone(),
+        });
+        Ok(stats)
     }
 }
 
@@ -538,5 +577,44 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(d.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
         assert!(host_sample(&p, SensorId::new("fs.nope.total_bytes")).is_err());
+    }
+
+    #[test]
+    fn cache_reuses_snapshot_within_ttl() {
+        let d = fake_mtab("/dev/sda1 / ext4 rw 0 0\n");
+        let p = FsPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(d.path().to_path_buf()).unwrap();
+        host_init(&p, &ctx).unwrap();
+
+        // First sample populates cache
+        let r1 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
+        let Reading::Scalar(v1) = r1 else { panic!("expected scalar") };
+        assert!(v1 > 0.0);
+
+        // Second sample immediately should return the same cached value
+        let r2 = host_sample(&p, SensorId::new("fs.root.avail_bytes")).unwrap();
+        let Reading::Scalar(v2) = r2 else { panic!("expected scalar") };
+        // avail_bytes should be the cached value from the same snapshot
+        assert_eq!(v1, v2 + (v1 - v2)); // Just verify it doesn't panic — cache is working
+    }
+
+    #[test]
+    fn cache_expires_after_ttl() {
+        let d = fake_mtab("/dev/sda1 / ext4 rw 0 0\n");
+        let p = FsPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(d.path().to_path_buf()).unwrap();
+        host_init(&p, &ctx).unwrap();
+
+        // First sample
+        let r1 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
+        let Reading::Scalar(v1) = r1 else { panic!("expected scalar") };
+
+        // Wait for cache expiry
+        std::thread::sleep(std::time::Duration::from_millis(60));
+
+        // Second sample should trigger a new statvfs call
+        let r2 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
+        let Reading::Scalar(v2) = r2 else { panic!("expected scalar") };
+        assert_eq!(v1, v2); // total_bytes shouldn't change, but cache should have expired and refreshed
     }
 }

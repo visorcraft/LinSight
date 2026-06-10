@@ -1384,6 +1384,7 @@ dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ description = "Filesystem usage sensor backend for LinSight."
 linsight-core = { path = "../../linsight-core", version = "1.4.0" }
 linsight-plugin-sdk = { path = "../../linsight-plugin-sdk", version = "1.4.0" }
 libc = "0.2"
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
