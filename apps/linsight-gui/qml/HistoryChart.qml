@@ -138,7 +138,7 @@ Item {
                 ]
                 delegate: Column {
                     required property var modelData
-                    spacing: 1
+                    spacing: 0
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: modelData.label

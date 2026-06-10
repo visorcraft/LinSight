@@ -53,6 +53,7 @@ Controls.Dialog {
         root.sensorName = name || sensorId
         root.unitLabel  = unit || ""
         root.parsedSamples = []
+        root.selectedRange = 60
         if (root.historyModel) {
             root.historyModel.sensorId = sensorId
             root.historyModel.rangeMinutes = 60
