@@ -1373,6 +1373,7 @@ dependencies = [
  "linsight-plugin-sdk",
  "serde_json",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]

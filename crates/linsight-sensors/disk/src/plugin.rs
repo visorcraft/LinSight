@@ -13,9 +13,11 @@
 //! Skips virtual devices: loop, dm-, md, zram, nvme (covered by nvme plugin),
 //! and ram.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -29,6 +31,7 @@ use linsight_plugin_sdk::{
 
 /// Virtual/software device prefixes to skip.
 const VIRTUAL_PREFIXES: &[&str] = &["loop", "dm-", "md", "zram", "ram"];
+const CACHE_TTL: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 pub struct DiskPlugin {
@@ -39,6 +42,12 @@ pub struct DiskPlugin {
 struct Inner {
     sysroot: Option<PathBuf>,
     devices: Vec<DiskDevice>,
+    cache: Option<DiskCache>,
+}
+
+struct DiskCache {
+    captured_at: Instant,
+    stats: HashMap<String, BlockStat>,
 }
 
 #[derive(Clone, Debug)]
@@ -160,7 +169,7 @@ impl DiskPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("DiskPlugin poisoned");
+        let mut inner = self.inner.lock().expect("DiskPlugin poisoned");
         let id = sensor.as_str();
         let rest = id.strip_prefix("disk.").ok_or_else(|| PluginError::Unsupported(id.into()))?;
         let (name, metric) =
@@ -170,9 +179,16 @@ impl DiskPlugin {
             .iter()
             .find(|d| d.name == name)
             .ok_or_else(|| PluginError::Unsupported(id.into()))?;
-        let stat = read_block_stat(&dev.stat_path)?;
+
+        if metric == "capacity_bytes" {
+            return Ok(Reading::Scalar(dev.capacity_bytes as f64));
+        }
+
+        let stats = Self::snapshot(&mut inner)?;
+        let stat = stats
+            .get(name)
+            .ok_or_else(|| PluginError::Unsupported(format!("disk.{name} not in snapshot")))?;
         let value = match metric {
-            "capacity_bytes" => Reading::Scalar(dev.capacity_bytes as f64),
             "bytes_read" => Reading::Counter(stat.sectors_read.saturating_mul(512)),
             "bytes_written" => Reading::Counter(stat.sectors_written.saturating_mul(512)),
             "iops_read" => Reading::Counter(stat.reads_completed),
@@ -181,6 +197,26 @@ impl DiskPlugin {
             _ => return Err(PluginError::Unsupported(id.into())),
         };
         Ok(value)
+    }
+
+    fn snapshot(inner: &mut Inner) -> Result<HashMap<String, BlockStat>, PluginError> {
+        if let Some(cache) = &inner.cache
+            && cache.captured_at.elapsed() <= CACHE_TTL
+        {
+            return Ok(cache.stats.clone());
+        }
+
+        let mut stats = HashMap::with_capacity(inner.devices.len());
+        let mut files_read = 0usize;
+        for dev in &inner.devices {
+            if let Ok(stat) = read_block_stat(&dev.stat_path) {
+                stats.insert(dev.name.clone(), stat);
+                files_read += 1;
+            }
+        }
+        tracing::debug!(target: "linsight_sensors::reads", plugin = "disk", files_read);
+        inner.cache = Some(DiskCache { captured_at: Instant::now(), stats: stats.clone() });
+        Ok(stats)
     }
 }
 
@@ -202,6 +238,7 @@ impl LinsightPlugin for DiskPlugin {
     }
 }
 
+#[derive(Clone)]
 struct BlockStat {
     reads_completed: u64,
     writes_completed: u64,
@@ -409,5 +446,51 @@ mod tests {
             fake_sysroot(&[("sda", "1 2 3 4 5 6 7 8 9 10 11"), ("sdb", "1 2 3 4 5 6 7 8 9 10 11")]);
         let devs = enumerate(Some(dir.path()), &["sd".into()]);
         assert!(devs.is_empty(), "all devices should be excluded");
+    }
+
+    #[test]
+    fn cache_reuses_snapshot_within_ttl() {
+        let dir = fake_sysroot(&[("sda", "100 200 300 400 500 600 700 800 0 900 1000")]);
+        let plugin = DiskPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+
+        // First sample populates cache
+        let r1 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        assert!(matches!(r1, Reading::Counter(153600)));
+
+        // Mutate the stat file on disk
+        let stat_path = dir.path().join("sys/class/block/sda/stat");
+        fs::write(&stat_path, "999 200 999 400 500 600 700 800 0 900 1000").unwrap();
+
+        // Second sample immediately should still see cached value
+        let r2 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        assert!(matches!(r2, Reading::Counter(153600)), "cache should serve stale value");
+    }
+
+    #[test]
+    fn cache_expires_after_ttl() {
+        let dir = fake_sysroot(&[("sda", "100 200 300 400 500 600 700 800 0 900 1000")]);
+        let plugin = DiskPlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+
+        // First sample
+        let r1 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        assert!(matches!(r1, Reading::Counter(153600)));
+
+        // Mutate the stat file
+        let stat_path = dir.path().join("sys/class/block/sda/stat");
+        fs::write(&stat_path, "999 200 999 400 500 600 700 800 0 900 1000").unwrap();
+
+        // Wait for cache expiry
+        std::thread::sleep(std::time::Duration::from_millis(60));
+
+        // Second sample should see new value
+        let r2 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        assert!(
+            matches!(r2, Reading::Counter(511488)),
+            "cache should reflect new value after expiry"
+        );
     }
 }
