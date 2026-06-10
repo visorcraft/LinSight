@@ -385,11 +385,9 @@ Kirigami.Page {
         standardButtons: Kirigami.Dialog.Save | Kirigami.Dialog.Cancel
 
         property string editingName: ""
-        property string editingCooldown: ""
 
         function openNew() {
             editingName = ""
-            editingCooldown = ""
             nameField.text = ""
             exprField.text = ""
             notifyField.text = ""
@@ -402,7 +400,6 @@ Kirigami.Page {
 
         function openEdit(name, expr, notify, cooldown) {
             editingName = name
-            editingCooldown = cooldown
             nameField.text = name
             exprField.text = expr
             notifyField.text = notify
@@ -643,7 +640,6 @@ Kirigami.Page {
             Controls.CheckBox {
                 id: desktopNotifyCheck
                 text: qsTr("Desktop notification")
-                checked: notifyField.text.split(",").some(function(s) { return s.trim() === "desktop" })
                 onClicked: {
                     var parts = notifyField.text.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
                     var hasDesktop = parts.indexOf("desktop") >= 0
@@ -664,7 +660,6 @@ Kirigami.Page {
             Controls.TextField {
                 id: cooldownField
                 Layout.fillWidth: true
-                text: editDialog.editingCooldown
                 placeholderText: qsTr("e.g. 5m (0 = no cooldown)")
             }
 
