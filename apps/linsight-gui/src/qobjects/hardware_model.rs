@@ -20,7 +20,7 @@ use cxx_qt_lib::QString;
 use linsight_core::HardwareDevice;
 use serde::Serialize;
 
-use crate::qobjects::rpc_worker::spawn_rpc;
+use crate::qobjects::rpc_worker::{RequestGenerated, spawn_rpc};
 use crate::qobjects::workspace_handle::with_workspace;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -81,6 +81,16 @@ pub struct HardwareModelRust {
     request_generation: u64,
 }
 
+impl RequestGenerated for HardwareModelRust {
+    fn request_generation(&self) -> u64 {
+        self.request_generation
+    }
+    fn bump_request_generation(&mut self) -> u64 {
+        self.request_generation += 1;
+        self.request_generation
+    }
+}
+
 fn devices_json(devices: &[HardwareDevice], nicknames: &HashMap<String, String>) -> String {
     let payload: Vec<DeviceWithNickname<'_>> = devices
         .iter()
@@ -97,11 +107,7 @@ impl ffi::HardwareModel {
     pub fn reload(mut self: Pin<&mut Self>) {
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
         spawn_rpc(
@@ -113,10 +119,7 @@ impl ffi::HardwareModel {
                     .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
                     .map_err(|e| format!("{e}"))
             },
-            |mut pin, req_gen, result| {
-                if pin.as_mut().rust().request_generation != req_gen {
-                    return;
-                }
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_devices_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
@@ -132,11 +135,7 @@ impl ffi::HardwareModel {
         let value_opt = if value_s.trim().is_empty() { None } else { Some(value_s) };
         self.as_mut().set_is_loading(true);
         self.as_mut().set_last_error(QString::from(""));
-        let generation = {
-            let mut rust = self.as_mut().rust_mut();
-            rust.request_generation += 1;
-            rust.request_generation
-        };
+        let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();
         let client = with_workspace(|w| w.client());
         spawn_rpc(
@@ -149,10 +148,7 @@ impl ffi::HardwareModel {
                     .map(|(devices, nicknames)| devices_json(&devices, &nicknames))
                     .map_err(|e| format!("{e}"))
             },
-            |mut pin, req_gen, result| {
-                if pin.as_mut().rust().request_generation != req_gen {
-                    return;
-                }
+            |mut pin, result| {
                 match result {
                     Ok(json) => pin.as_mut().set_devices_json(QString::from(json.as_str())),
                     Err(e) => pin.as_mut().set_last_error(QString::from(e.as_str())),
