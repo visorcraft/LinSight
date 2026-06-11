@@ -222,6 +222,14 @@ impl Client {
         Ok(())
     }
 
+    pub fn unsubscribe(&self, sensors: Vec<SensorId>) -> Result<()> {
+        self.writer
+            .lock()
+            .unwrap()
+            .write_client(&ClientMsg::Unsubscribe { sensors })?;
+        Ok(())
+    }
+
     /// Take ownership of the sample receiver. Called once by the
     /// QObject that owns the live UI.
     pub fn take_sample_rx(&self) -> Option<Receiver<Sample>> {

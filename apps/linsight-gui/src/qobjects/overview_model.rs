@@ -41,6 +41,7 @@ pub mod ffi {
         #[qproperty(QString, cpu_temp_text)]
         #[qproperty(QString, cpu_freq_text)]
         #[qproperty(QString, tiles_json)]
+        #[qproperty(QString, processes_json)]
         #[qproperty(bool, connected)]
         type OverviewModel = super::OverviewModelRust;
 
@@ -106,6 +107,12 @@ pub mod ffi {
         /// tracked in the open-followups doc.
         #[qinvokable]
         fn env_is_set(self: &OverviewModel, name: &QString) -> bool;
+
+        /// Enable or disable the proc.list sample stream. The process
+        /// page calls this on activation / deactivation so the 5-second
+        /// /proc sweep only runs while the page is visible.
+        #[qinvokable]
+        fn set_process_stream_enabled(self: Pin<&mut OverviewModel>, enabled: bool);
     }
 
     impl cxx_qt::Threading for OverviewModel {}
@@ -210,6 +217,9 @@ pub struct OverviewModelRust {
     /// daemon returns Unsupported (no cpufreq subsystem).
     cpu_freq_text: QString,
     tiles_json: QString,
+    /// JSON array of process objects from proc.list. Empty "[]" until
+    /// the process page is opened and the first sample arrives.
+    processes_json: QString,
     /// True once the handshake + first subscribe have completed and the
     /// sample-pump thread is alive. Flips to false when the daemon closes
     /// the socket so QML can show a disconnected banner instead of
@@ -226,6 +236,7 @@ impl Default for OverviewModelRust {
             cpu_temp_text: QString::from("…"),
             cpu_freq_text: QString::from("…"),
             tiles_json: QString::from("[]"),
+            processes_json: QString::from("[]"),
             connected: false,
             started: false,
         }
@@ -287,7 +298,15 @@ impl ffi::OverviewModel {
         let init_q = QString::from(initial.as_str());
         self.as_mut().set_tiles_json(init_q);
 
-        if let Err(e) = client.subscribe(sensor_infos.iter().map(|s| s.id.clone()).collect()) {
+        // Subscribe to everything except proc.list; the process page will
+        // opt in via set_process_stream_enabled so the 5-second /proc
+        // sweep only runs while the page is visible.
+        let auto_subs: Vec<SensorId> = sensor_infos
+            .iter()
+            .map(|s| s.id.clone())
+            .filter(|id| id.as_str() != "proc.list")
+            .collect();
+        if let Err(e) = client.subscribe(auto_subs) {
             tracing::error!(error = ?e, "subscribe failed");
             return;
         }
@@ -378,7 +397,7 @@ impl ffi::OverviewModel {
             let state = Arc::clone(&state);
             thread::spawn(move || {
                 while let Ok(first) = rx.recv() {
-                    let (json, cpu, mem, cpu_temp, cpu_freq) = {
+                    let (json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
                         let mut guard = state.lock().expect("tile state poisoned");
                         // Drain the first sample plus any others already
                         // queued (typically the rest of this pump tick's
@@ -399,13 +418,19 @@ impl ffi::OverviewModel {
                         let mem = guard.tiles.get("mem.used_bytes").map(|t| t.value.clone());
                         let cpu_temp = guard.tiles.get("cpu.temp_c").map(|t| t.value.clone());
                         let cpu_freq = guard.tiles.get("cpu.freq_hz").map(|t| t.value.clone());
-                        (json, cpu, mem, cpu_temp, cpu_freq)
+                        let proc_json = guard
+                            .tiles
+                            .get("proc.list")
+                            .map(|t| serialize_proc_rows(&t.rows))
+                            .unwrap_or_else(|| "[]".to_string());
+                        (json, cpu, mem, cpu_temp, cpu_freq, proc_json)
                     };
                     let qjson = QString::from(json.as_str());
                     let qcpu = cpu.map(|s| QString::from(s.as_str()));
                     let qmem = mem.map(|s| QString::from(s.as_str()));
                     let qctemp = cpu_temp.map(|s| QString::from(s.as_str()));
                     let qcfreq = cpu_freq.map(|s| QString::from(s.as_str()));
+                    let qproc = QString::from(proc_json.as_str());
                     // queue() returns Err only when the Qt thread has shut
                     // down (i.e. the app is exiting). Silently discarding is
                     // correct in that case.
@@ -423,6 +448,7 @@ impl ffi::OverviewModel {
                         if let Some(q) = qcfreq {
                             pin.as_mut().set_cpu_freq_text(q);
                         }
+                        pin.as_mut().set_processes_json(qproc);
                     });
                 }
                 // rx.recv() returned Err — the sender side dropped because
@@ -516,6 +542,20 @@ impl ffi::OverviewModel {
     pub fn env_is_set(&self, name: &QString) -> bool {
         let name = name.to_string();
         std::env::var_os(name).map(|v| !v.is_empty()).unwrap_or(false)
+    }
+
+    pub fn set_process_stream_enabled(self: Pin<&mut Self>, enabled: bool) {
+        let client = with_workspace(|ws| ws.client());
+        let id = SensorId::new("proc.list");
+        if enabled {
+            if let Err(e) = client.subscribe(vec![id]) {
+                tracing::warn!(error = ?e, "proc.list subscribe failed");
+            }
+        } else {
+            if let Err(e) = client.unsubscribe(vec![id]) {
+                tracing::warn!(error = ?e, "proc.list unsubscribe failed");
+            }
+        }
     }
 }
 
@@ -657,6 +697,24 @@ fn parent_device_for(info: &linsight_protocol::SensorInfo) -> Option<String> {
 fn serialize_tiles(order: &[String], tiles: &HashMap<String, TileJson>) -> String {
     let ordered: Vec<&TileJson> = order.iter().filter_map(|id| tiles.get(id)).collect();
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Convert the raw proc.list table rows into a JSON array of objects
+/// with named keys. Columns: pid, name, cpu, mem, rss, threads, state.
+fn serialize_proc_rows(rows: &[Vec<serde_json::Value>]) -> String {
+    const KEYS: &[&str] = &["pid", "name", "cpu", "mem", "rss", "threads", "state"];
+    let objects: Vec<serde_json::Map<String, serde_json::Value>> = rows
+        .iter()
+        .map(|row| {
+            let mut obj = serde_json::Map::new();
+            for (i, key) in KEYS.iter().enumerate() {
+                let val = row.get(i).cloned().unwrap_or(serde_json::Value::Null);
+                obj.insert(key.to_string(), val);
+            }
+            obj
+        })
+        .collect();
+    serde_json::to_string(&objects).unwrap_or_else(|_| "[]".to_string())
 }
 
 fn format_reading_with_rows(
@@ -1006,5 +1064,74 @@ mod tests {
         let count = drain_into_state(&rx, &mut state, scalar_sample("s.only", 7.0));
         assert_eq!(count, 1);
         assert_eq!(state.sparklines.get("s.only").map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn proc_table_reading_serializes_to_row_objects() {
+        // Reading::Table with 2 TableRows → JSON
+        // [{"pid":1,"name":"init","cpu":0.0,"mem":0.25,"rss":4194304,"threads":1,"state":"S"}, ...]
+        let rows: Vec<Vec<serde_json::Value>> = vec![
+            vec![
+                serde_json::json!(1.0),
+                serde_json::json!("init"),
+                serde_json::json!(0.0),
+                serde_json::json!(0.25),
+                serde_json::json!(4194304),
+                serde_json::json!(1.0),
+                serde_json::json!("S"),
+            ],
+            vec![
+                serde_json::json!(42.0),
+                serde_json::json!("firefox"),
+                serde_json::json!(12.5),
+                serde_json::json!(8.0),
+                serde_json::json!(536870912),
+                serde_json::json!(8.0),
+                serde_json::json!("R"),
+            ],
+        ];
+        let json = serialize_proc_rows(&rows);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let arr = parsed.as_array().expect("array");
+        assert_eq!(arr.len(), 2);
+
+        let first = &arr[0];
+        assert_eq!(first["pid"], 1.0);
+        assert_eq!(first["name"], "init");
+        assert_eq!(first["cpu"], 0.0);
+        assert_eq!(first["mem"], 0.25);
+        assert_eq!(first["rss"], 4194304);
+        assert_eq!(first["threads"], 1.0);
+        assert_eq!(first["state"], "S");
+
+        let second = &arr[1];
+        assert_eq!(second["pid"], 42.0);
+        assert_eq!(second["name"], "firefox");
+        assert_eq!(second["cpu"], 12.5);
+        assert_eq!(second["mem"], 8.0);
+        assert_eq!(second["rss"], 536870912);
+        assert_eq!(second["threads"], 8.0);
+        assert_eq!(second["state"], "R");
+    }
+
+    #[test]
+    fn proc_table_empty_rows_returns_empty_array() {
+        let json = serialize_proc_rows(&[]);
+        assert_eq!(json, "[]");
+    }
+
+    #[test]
+    fn proc_table_short_row_fills_missing_with_null() {
+        let rows: Vec<Vec<serde_json::Value>> = vec![vec![serde_json::json!(1.0), serde_json::json!("init")]];
+        let json = serialize_proc_rows(&rows);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = parsed.as_array().unwrap()[0].as_object().unwrap();
+        assert_eq!(obj["pid"], 1.0);
+        assert_eq!(obj["name"], "init");
+        assert!(obj["cpu"].is_null());
+        assert!(obj["mem"].is_null());
+        assert!(obj["rss"].is_null());
+        assert!(obj["threads"].is_null());
+        assert!(obj["state"].is_null());
     }
 }
