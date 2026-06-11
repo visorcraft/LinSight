@@ -46,6 +46,14 @@ All notable changes to LinSight. Format roughly follows
   Storage page, and state-kind tiles now color-code `ok` as green and
   `failing` as red alongside the existing `up`/`down`/`active`/`dead`
   palette.
+- **Process explorer page.** A new Processes page shows a sortable,
+  filterable table of running processes (PID, name, CPU%, memory%, RSS,
+  threads, state) sourced from the daemon's `proc.list` sensor. The page
+  subscribes to `proc.list` only while visible so the 5-second `/proc`
+  sweep doesn't run in the background. Sort by any column (ascending /
+  descending toggle); filter by name or PID. The `proc.list` sample stream
+  is excluded from the initial batch subscribe and managed independently
+  via `OverviewModel.set_process_stream_enabled`.
 
 ## [1.9.0] — 2026-06-04
 
