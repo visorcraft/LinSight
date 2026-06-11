@@ -14,8 +14,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -206,13 +209,20 @@ fn apply_sample(state: &mut SampleState, sample: &linsight_core::Sample) {
 /// Lifted out of the pump thread so the batch-drain optimization is
 /// directly unit-testable without a Qt context.
 fn drain_into_state(
-    rx: &std::sync::mpsc::Receiver<linsight_core::Sample>,
+    rx: &std::sync::mpsc::Receiver<(u64, linsight_core::Sample)>,
     state: &mut SampleState,
     first: linsight_core::Sample,
+    current_g: &mut u64,
 ) -> usize {
     apply_sample(state, &first);
     let mut count = 1;
-    while let Ok(more) = rx.try_recv() {
+    while let Ok((g, more)) = rx.try_recv() {
+        if g < *current_g {
+            continue;
+        }
+        if g > *current_g {
+            *current_g = g;
+        }
         apply_sample(state, &more);
         count += 1;
     }
@@ -268,9 +278,7 @@ impl ffi::OverviewModel {
         let qt_thread = self.qt_thread();
         let ws = with_workspace(|ws| ws);
 
-        let client = ws.client();
-
-        let sensor_infos: Vec<SensorInfo> = client.sensor_infos();
+        let sensor_infos: Vec<SensorInfo> = ws.sensor_infos();
         if sensor_infos.is_empty() {
             tracing::warn!("daemon advertised zero sensors");
             return;
@@ -342,6 +350,12 @@ impl ffi::OverviewModel {
             tracing::warn!("sample receiver already taken; live updates will not appear");
             return;
         };
+        let Some(catalogue_rx) = ws.take_catalogue_rx() else {
+            tracing::warn!("catalogue receiver already taken");
+            return;
+        };
+        let connection_alive = ws.connection_alive();
+        let connection_generation = ws.connection_generation();
 
         // Subscribe succeeded and the rx is live; flip the UI to
         // "connected" so any disconnected banner stays hidden.
@@ -366,13 +380,19 @@ impl ffi::OverviewModel {
         // each tile's `name` from the fresh `SensorInfo` and push a new
         // tiles_json so QML re-renders titles in place. Spawned BEFORE
         // the sample pump so we don't miss any broadcast that races
-        // with the first sample.
-        let catalogue_rx = client.subscribe_catalogue();
+        // with the first sample. The receiver is a stable bridge owned
+        // by the Workspace, so it survives local↔remote reconnects.
+        // Broadcasts are tagged with the connection generation so stale
+        // updates from a replaced client are ignored.
         {
             let state = Arc::clone(&state);
             let qt_thread = qt_thread.clone();
+            let generation = Arc::clone(&connection_generation);
             thread::spawn(move || {
-                while let Ok(fresh) = catalogue_rx.recv() {
+                while let Ok((g, fresh)) = catalogue_rx.recv() {
+                    if g < generation.load(Ordering::Relaxed) {
+                        continue;
+                    }
                     let json = {
                         let mut guard = state.lock().expect("tile state poisoned");
                         for info in &fresh {
@@ -408,71 +428,113 @@ impl ffi::OverviewModel {
         // visible refresh rate is unchanged (it's bounded by tick rate),
         // but the per-sample CPU work drops by ~N (= number of active
         // sensors) on a populated system.
+        //
+        // The receiver is a stable Workspace bridge, so it does *not* close
+        // when the underlying client is replaced. Instead we poll the
+        // Workspace's connection-alive flag to surface disconnect/reconnect
+        // state to QML.
         {
             let state = Arc::clone(&state);
             thread::spawn(move || {
-                while let Ok(first) = rx.recv() {
-                    let (json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
-                        let mut guard = state.lock().expect("tile state poisoned");
-                        // Drain the first sample plus any others already
-                        // queued (typically the rest of this pump tick's
-                        // batch) into the in-memory state. Non-blocking;
-                        // returns once the channel is empty.
-                        drain_into_state(&rx, &mut guard, first);
-                        // Now snapshot sparklines and re-apply to tiles. Only
-                        // need to do this once per batch since all samples
-                        // share the same destination state.
-                        let sparklines_snapshot: HashMap<String, Vec<f64>> =
-                            guard.sparklines.clone();
-                        for tile in guard.tiles.values_mut() {
-                            tile.sparkline =
-                                sparklines_snapshot.get(&tile.id).cloned().unwrap_or_default();
+                let mut last_alive = true;
+                let mut current_g = connection_generation.load(Ordering::Relaxed);
+                loop {
+                    match rx.recv_timeout(Duration::from_millis(500)) {
+                        Ok((g, first)) => {
+                            if g < current_g {
+                                continue;
+                            }
+                            if g > current_g {
+                                current_g = g;
+                            }
+                            if !last_alive {
+                                last_alive = true;
+                                let _ = qt_thread.queue(|mut pin| {
+                                    pin.as_mut().set_connected(true);
+                                });
+                            }
+                            let (json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
+                                let mut guard = state.lock().expect("tile state poisoned");
+                                // Drain the first sample plus any others already
+                                // queued (typically the rest of this pump tick's
+                                // batch) into the in-memory state. Non-blocking;
+                                // returns once the channel is empty.
+                                drain_into_state(&rx, &mut guard, first, &mut current_g);
+                                // Now snapshot sparklines and re-apply to tiles. Only
+                                // need to do this once per batch since all samples
+                                // share the same destination state.
+                                let sparklines_snapshot: HashMap<String, Vec<f64>> =
+                                    guard.sparklines.clone();
+                                for tile in guard.tiles.values_mut() {
+                                    tile.sparkline = sparklines_snapshot
+                                        .get(&tile.id)
+                                        .cloned()
+                                        .unwrap_or_default();
+                                }
+                                let json = serialize_tiles(&guard.id_order, &guard.tiles);
+                                let cpu = guard.tiles.get("cpu.util").map(|t| t.value.clone());
+                                let mem =
+                                    guard.tiles.get("mem.used_bytes").map(|t| t.value.clone());
+                                let cpu_temp =
+                                    guard.tiles.get("cpu.temp_c").map(|t| t.value.clone());
+                                let cpu_freq =
+                                    guard.tiles.get("cpu.freq_hz").map(|t| t.value.clone());
+                                let proc_json = guard
+                                    .tiles
+                                    .get("proc.list")
+                                    .map(|t| serialize_proc_rows(&t.rows))
+                                    .unwrap_or_else(|| "[]".to_string());
+                                (json, cpu, mem, cpu_temp, cpu_freq, proc_json)
+                            };
+                            let qjson = QString::from(json.as_str());
+                            let qcpu = cpu.map(|s| QString::from(s.as_str()));
+                            let qmem = mem.map(|s| QString::from(s.as_str()));
+                            let qctemp = cpu_temp.map(|s| QString::from(s.as_str()));
+                            let qcfreq = cpu_freq.map(|s| QString::from(s.as_str()));
+                            let qproc = QString::from(proc_json.as_str());
+                            // queue() returns Err only when the Qt thread has shut
+                            // down (i.e. the app is exiting). Silently discarding is
+                            // correct in that case.
+                            let _ = qt_thread.queue(move |mut pin| {
+                                pin.as_mut().set_tiles_json(qjson);
+                                if let Some(q) = qcpu {
+                                    pin.as_mut().set_cpu_text(q);
+                                }
+                                if let Some(q) = qmem {
+                                    pin.as_mut().set_mem_text(q);
+                                }
+                                if let Some(q) = qctemp {
+                                    pin.as_mut().set_cpu_temp_text(q);
+                                }
+                                if let Some(q) = qcfreq {
+                                    pin.as_mut().set_cpu_freq_text(q);
+                                }
+                                pin.as_mut().set_processes_json(qproc);
+                            });
                         }
-                        let json = serialize_tiles(&guard.id_order, &guard.tiles);
-                        let cpu = guard.tiles.get("cpu.util").map(|t| t.value.clone());
-                        let mem = guard.tiles.get("mem.used_bytes").map(|t| t.value.clone());
-                        let cpu_temp = guard.tiles.get("cpu.temp_c").map(|t| t.value.clone());
-                        let cpu_freq = guard.tiles.get("cpu.freq_hz").map(|t| t.value.clone());
-                        let proc_json = guard
-                            .tiles
-                            .get("proc.list")
-                            .map(|t| serialize_proc_rows(&t.rows))
-                            .unwrap_or_else(|| "[]".to_string());
-                        (json, cpu, mem, cpu_temp, cpu_freq, proc_json)
-                    };
-                    let qjson = QString::from(json.as_str());
-                    let qcpu = cpu.map(|s| QString::from(s.as_str()));
-                    let qmem = mem.map(|s| QString::from(s.as_str()));
-                    let qctemp = cpu_temp.map(|s| QString::from(s.as_str()));
-                    let qcfreq = cpu_freq.map(|s| QString::from(s.as_str()));
-                    let qproc = QString::from(proc_json.as_str());
-                    // queue() returns Err only when the Qt thread has shut
-                    // down (i.e. the app is exiting). Silently discarding is
-                    // correct in that case.
-                    let _ = qt_thread.queue(move |mut pin| {
-                        pin.as_mut().set_tiles_json(qjson);
-                        if let Some(q) = qcpu {
-                            pin.as_mut().set_cpu_text(q);
+                        Err(RecvTimeoutError::Timeout) => {
+                            let alive_now = connection_alive.load(Ordering::Relaxed);
+                            let g_now = connection_generation.load(Ordering::Relaxed);
+                            if g_now > current_g {
+                                current_g = g_now;
+                            }
+                            if alive_now != last_alive {
+                                last_alive = alive_now;
+                                let _ = qt_thread.queue(move |mut pin| {
+                                    pin.as_mut().set_connected(alive_now);
+                                });
+                            }
                         }
-                        if let Some(q) = qmem {
-                            pin.as_mut().set_mem_text(q);
+                        Err(RecvTimeoutError::Disconnected) => {
+                            // The stable bridge itself closed (app exiting).
+                            let _ = qt_thread.queue(|mut pin| {
+                                pin.as_mut().set_connected(false);
+                            });
+                            break;
                         }
-                        if let Some(q) = qctemp {
-                            pin.as_mut().set_cpu_temp_text(q);
-                        }
-                        if let Some(q) = qcfreq {
-                            pin.as_mut().set_cpu_freq_text(q);
-                        }
-                        pin.as_mut().set_processes_json(qproc);
-                    });
+                    }
                 }
-                // rx.recv() returned Err — the sender side dropped because
-                // the daemon connection closed. Tell QML so it can show a
-                // banner instead of leaving tiles frozen at last-known values.
                 tracing::warn!("sample stream ended; surfacing disconnected state to QML");
-                let _ = qt_thread.queue(|mut pin| {
-                    pin.as_mut().set_connected(false);
-                });
             });
         }
     }
@@ -1086,16 +1148,17 @@ mod tests {
         // the caller does the expensive emit once per batch instead of
         // once per sample.
         let mut state = empty_state_with_tiles(&["s.a", "s.b", "s.c", "s.d", "s.e"]);
-        let (tx, rx) = mpsc::channel();
-        tx.send(scalar_sample("s.a", 1.0)).unwrap();
-        tx.send(scalar_sample("s.b", 2.0)).unwrap();
-        tx.send(scalar_sample("s.c", 3.0)).unwrap();
-        tx.send(scalar_sample("s.d", 4.0)).unwrap();
-        tx.send(scalar_sample("s.e", 5.0)).unwrap();
+        let (tx, rx) = mpsc::channel::<(u64, linsight_core::Sample)>();
+        tx.send((1, scalar_sample("s.a", 1.0))).unwrap();
+        tx.send((1, scalar_sample("s.b", 2.0))).unwrap();
+        tx.send((1, scalar_sample("s.c", 3.0))).unwrap();
+        tx.send((1, scalar_sample("s.d", 4.0))).unwrap();
+        tx.send((1, scalar_sample("s.e", 5.0))).unwrap();
         // Mirror the production pump-loop: one blocking recv for the
         // first sample, then drain_into_state takes over.
-        let first = rx.recv().unwrap();
-        let count = drain_into_state(&rx, &mut state, first);
+        let (_g, first) = rx.recv().unwrap();
+        let mut current_g = 1;
+        let count = drain_into_state(&rx, &mut state, first, &mut current_g);
         assert_eq!(count, 5, "all five queued samples must be drained in one call");
         for id in ["s.a", "s.b", "s.c", "s.d", "s.e"] {
             assert_eq!(
@@ -1112,10 +1175,27 @@ mod tests {
         // was processed). Confirms try_recv's Empty error doesn't get
         // treated as a real sample.
         let mut state = empty_state_with_tiles(&["s.only"]);
-        let (_tx, rx) = mpsc::channel::<linsight_core::Sample>();
-        let count = drain_into_state(&rx, &mut state, scalar_sample("s.only", 7.0));
+        let (_tx, rx) = mpsc::channel::<(u64, linsight_core::Sample)>();
+        let mut current_g = 1;
+        let count = drain_into_state(&rx, &mut state, scalar_sample("s.only", 7.0), &mut current_g);
         assert_eq!(count, 1);
         assert_eq!(state.sparklines.get("s.only").map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn drain_into_state_skips_stale_generation_samples() {
+        // After a reconnect, buffered samples from the previous connection
+        // must not overwrite state for the new connection.
+        let mut state = empty_state_with_tiles(&["s.a"]);
+        let (tx, rx) = mpsc::channel::<(u64, linsight_core::Sample)>();
+        tx.send((2, scalar_sample("s.a", 99.0))).unwrap();
+        tx.send((1, scalar_sample("s.a", 1.0))).unwrap();
+        tx.send((2, scalar_sample("s.a", 100.0))).unwrap();
+        let (_g, first) = rx.recv().unwrap();
+        let mut current_g = 2;
+        let count = drain_into_state(&rx, &mut state, first, &mut current_g);
+        assert_eq!(count, 2);
+        assert_eq!(state.tiles["s.a"].value, "100");
     }
 
     #[test]

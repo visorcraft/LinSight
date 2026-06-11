@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use linsight_core::{Sample, SensorId};
+use linsight_protocol::SensorInfo;
 
 use crate::client::{Client, ClientHandle, RpcError};
+
+type SampleBridge = (u64, Sample);
+type CatalogueBridge = (u64, Vec<SensorInfo>);
 
 /// Resolve `XDG_RUNTIME_DIR/linsight.sock` per the daemon's default.
 pub fn default_socket_path() -> anyhow::Result<PathBuf> {
@@ -33,14 +38,28 @@ pub struct Workspace {
     /// once via `take_sample_rx`. Each underlying client forwards its
     /// samples into this sender; when a client is replaced, its forwarder
     /// exits and a new one is spawned for the next client.
-    sample_tx: Sender<Sample>,
+    sample_tx: Sender<SampleBridge>,
     /// Receiver side of the bridge. `take()` returns `Some` exactly once.
-    sample_rx: Mutex<Option<Receiver<Sample>>>,
+    sample_rx: Mutex<Option<Receiver<SampleBridge>>>,
+    /// Stable sender for catalogue broadcasts. A matching receiver is
+    /// handed to `OverviewModel` once via `take_catalogue_rx`.
+    catalogue_tx: Sender<CatalogueBridge>,
+    catalogue_rx: Mutex<Option<Receiver<CatalogueBridge>>>,
     /// Sensors the GUI currently wants subscribed. Replayed against a
     /// new client after reconnect so tile streams resume automatically.
     subscriptions: Mutex<Vec<SensorId>>,
     /// Last pump-interval value successfully applied. Replayed on reconnect.
     pump_interval_ms: Mutex<u32>,
+    /// Monotonically incremented on each reconnect so a forwarder from a
+    /// defunct client does not clear the connection-alive flag of a newer
+    /// connection.
+    connection_generation: Arc<AtomicU64>,
+    /// True while the current client is connected. The OverviewModel pump
+    /// polls this to surface disconnect/reconnect state to QML.
+    connection_alive: Arc<AtomicBool>,
+    /// Serializes reconnect attempts so two overlapping reconnects cannot
+    /// interleave generation bumps and client swaps.
+    reconnect_lock: Mutex<()>,
 }
 
 impl Workspace {
@@ -48,22 +67,54 @@ impl Workspace {
         let client_rx = client
             .take_sample_rx()
             .ok_or_else(|| anyhow::anyhow!("client sample receiver already taken"))?;
-        let (sample_tx, sample_rx) = channel::<Sample>();
-        spawn_sample_forwarder(client_rx, sample_tx.clone());
+        let (sample_tx, sample_rx) = channel::<SampleBridge>();
+        let (catalogue_tx, catalogue_rx) = channel::<CatalogueBridge>();
+        let connection_generation = Arc::new(AtomicU64::new(1));
+        let connection_alive = Arc::new(AtomicBool::new(true));
+        spawn_sample_forwarder(
+            client_rx,
+            sample_tx.clone(),
+            Arc::clone(&connection_generation),
+            Arc::clone(&connection_alive),
+            1,
+        );
+        spawn_catalogue_forwarder(client.subscribe_catalogue(), catalogue_tx.clone(), 1);
 
         Ok(Self {
             client: Mutex::new(client),
             sample_tx,
             sample_rx: Mutex::new(Some(sample_rx)),
+            catalogue_tx,
+            catalogue_rx: Mutex::new(Some(catalogue_rx)),
             subscriptions: Mutex::new(Vec::new()),
             pump_interval_ms: Mutex::new(linsight_protocol::PUMP_INTERVAL_DEFAULT_MS),
+            connection_generation,
+            connection_alive,
+            reconnect_lock: Mutex::new(()),
         })
     }
 
-    /// Take the one-shot sample receiver that feeds every live tile. Returns
-    /// `None` if called more than once.
-    pub fn take_sample_rx(&self) -> Option<Receiver<Sample>> {
+    /// Take the one-shot sample receiver that feeds every live tile. Each
+    /// sample is tagged with the connection generation so the pump can drop
+    /// stale values after a reconnect. Returns `None` if called more than
+    /// once.
+    pub fn take_sample_rx(&self) -> Option<Receiver<SampleBridge>> {
         self.sample_rx.lock().expect("sample_rx poisoned").take()
+    }
+
+    /// Take the one-shot catalogue-broadcast receiver used by the
+    /// OverviewModel to refresh tile labels after nickname changes. Each
+    /// broadcast is tagged with the connection generation so the refresh
+    /// thread can drop stale values after a reconnect. Returns `None` if
+    /// called more than once.
+    pub fn take_catalogue_rx(&self) -> Option<Receiver<CatalogueBridge>> {
+        self.catalogue_rx.lock().expect("catalogue_rx poisoned").take()
+    }
+
+    /// Snapshot of the daemon's last-known sensor catalogue from the current
+    /// client.
+    pub fn sensor_infos(&self) -> Vec<SensorInfo> {
+        self.client().sensor_infos()
     }
 
     /// Snapshot of the current client. RPC QObjects use this for one-off
@@ -71,6 +122,19 @@ impl Workspace {
     /// briefly; in-flight RPCs will simply time out on the old connection.
     pub fn client(&self) -> ClientHandle {
         Arc::clone(&*self.client.lock().expect("client poisoned"))
+    }
+
+    /// Shared flag indicating whether the current client connection is alive.
+    /// The OverviewModel sample pump polls this to update `connected`.
+    pub fn connection_alive(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.connection_alive)
+    }
+
+    /// Shared generation counter. Incremented on each reconnect so the
+    /// OverviewModel can ignore samples/catalogue broadcasts from a
+    /// connection that was replaced.
+    pub fn connection_generation(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.connection_generation)
     }
 
     /// Subscribe `sensors` on the current client and remember them for
@@ -130,9 +194,34 @@ impl Workspace {
     }
 
     fn reconnect_with_client(&self, new_client: ClientHandle) -> Result<(), String> {
+        // Serialize the whole reconnect so two overlapping attempts cannot
+        // advance the generation and swap the client out of order.
+        let _guard = self.reconnect_lock.lock().expect("reconnect_lock poisoned");
+
         let new_rx = new_client
             .take_sample_rx()
             .ok_or_else(|| "new client's sample receiver already taken".to_string())?;
+        let new_cat_rx = new_client.subscribe_catalogue();
+
+        // Advance the generation and mark the new connection alive *before*
+        // dropping the old client, so a stale forwarder cannot clear the
+        // flag of the new connection.
+        let new_generation =
+            self.connection_generation.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+        self.connection_alive.store(true, Ordering::SeqCst);
+
+        // Bridge the new client's samples/catalogue into the same stable
+        // receivers *before* replaying subscriptions. The replay may cause
+        // the daemon to emit a SensorListBroadcast (e.g. nickname refresh),
+        // so the catalogue forwarder must already be listening.
+        spawn_sample_forwarder(
+            new_rx,
+            self.sample_tx.clone(),
+            Arc::clone(&self.connection_generation),
+            Arc::clone(&self.connection_alive),
+            new_generation,
+        );
+        spawn_catalogue_forwarder(new_cat_rx, self.catalogue_tx.clone(), new_generation);
 
         // Apply stored state to the new client *before* swapping. If this
         // fails we can still return the error without losing the old
@@ -149,15 +238,13 @@ impl Workspace {
         }
 
         // Swap in the new client. The old one drops, killing its dispatch
-        // thread and therefore its sample forwarder.
+        // thread and therefore its sample/catalogue forwarders.
         let old_client = {
             let mut guard = self.client.lock().expect("client poisoned");
             std::mem::replace(&mut *guard, new_client)
         };
         drop(old_client);
 
-        // Bridge the new client's samples into the same stable receiver.
-        spawn_sample_forwarder(new_rx, self.sample_tx.clone());
         Ok(())
     }
 
@@ -169,11 +256,36 @@ impl Workspace {
     }
 }
 
-fn spawn_sample_forwarder(client_rx: Receiver<Sample>, bridge_tx: Sender<Sample>) {
+fn spawn_sample_forwarder(
+    client_rx: Receiver<Sample>,
+    bridge_tx: Sender<SampleBridge>,
+    generation: Arc<AtomicU64>,
+    alive: Arc<AtomicBool>,
+    my_generation: u64,
+) {
     thread::spawn(move || {
         while let Ok(s) = client_rx.recv() {
-            if bridge_tx.send(s).is_err() {
+            if bridge_tx.send((my_generation, s)).is_err() {
                 // The OverviewModel dropped its receiver (app exiting).
+                break;
+            }
+        }
+        // The client dispatch thread exited. Clear the alive flag only if
+        // this forwarder still belongs to the current generation.
+        if generation.load(Ordering::SeqCst) == my_generation {
+            alive.store(false, Ordering::SeqCst);
+        }
+    });
+}
+
+fn spawn_catalogue_forwarder(
+    client_rx: Receiver<Vec<SensorInfo>>,
+    bridge_tx: Sender<CatalogueBridge>,
+    my_generation: u64,
+) {
+    thread::spawn(move || {
+        while let Ok(infos) = client_rx.recv() {
+            if bridge_tx.send((my_generation, infos)).is_err() {
                 break;
             }
         }
@@ -237,6 +349,11 @@ mod tests {
             loop {
                 match reader.read_client() {
                     Ok(ClientMsg::Subscribe { sensors, .. }) => {
+                        writer
+                            .write_server(&ServerMsg::SensorListBroadcast(vec![fake_sensor(
+                                sensor_id,
+                            )]))
+                            .expect("write broadcast on subscribe");
                         for s in sensors {
                             writer
                                 .write_server(&ServerMsg::Sample(Sample {
@@ -271,10 +388,10 @@ mod tests {
         (workspace, path, disconnected)
     }
 
-    fn recv_sample(rx: &Receiver<Sample>, sensor_id: &str) -> Sample {
+    fn recv_sample(rx: &Receiver<SampleBridge>, sensor_id: &str) -> Sample {
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
-            if let Ok(s) = rx.recv_timeout(Duration::from_millis(100))
+            if let Ok((_gen, s)) = rx.recv_timeout(Duration::from_millis(100))
                 && s.sensor.as_str() == sensor_id
             {
                 return s;
@@ -350,5 +467,67 @@ mod tests {
         // explicitly subscribing again.
         let replayed = recv_sample(&rx, "cpu.util");
         assert!(matches!(replayed.reading, Reading::Scalar(42.0)));
+    }
+
+    #[test]
+    fn connection_alive_clears_when_client_drops() {
+        let (workspace, _path, _disconnected) = make_workspace("cpu.util");
+        let alive = workspace.connection_alive();
+        assert!(alive.load(Ordering::SeqCst));
+
+        drop(workspace);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline && alive.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive.load(Ordering::SeqCst), "connection_alive should clear when client drops");
+    }
+
+    #[test]
+    fn catalogue_receiver_survives_reconnect() {
+        let (workspace, _path_a, _disconnected_a) = make_workspace("cpu.util");
+        let sample_rx = workspace.take_sample_rx().expect("take sample rx");
+        let catalogue_rx = workspace.take_catalogue_rx().expect("take catalogue rx");
+
+        workspace.subscribe(vec![SensorId::new("cpu.util")]).expect("subscribe");
+        let _ = recv_sample(&sample_rx, "cpu.util");
+        let (gen_before, _) = catalogue_rx.recv().expect("initial broadcast");
+
+        let dir_b = tempfile::tempdir().expect("tempdir");
+        let path_b = dir_b.path().join("linsight.sock");
+        let listener_b = UnixListener::bind(&path_b).expect("bind");
+        let disconnected_b = Arc::new(AtomicBool::new(false));
+        spawn_fake_daemon(listener_b, "mem.used_bytes", Arc::clone(&disconnected_b));
+        std::thread::sleep(Duration::from_millis(50));
+
+        workspace.reconnect_to_path(&path_b).expect("reconnect");
+
+        // The stable catalogue receiver should survive and see a broadcast
+        // from the new daemon with a higher generation.
+        let (gen_after, _) = catalogue_rx.recv().expect("post-reconnect broadcast");
+        assert!(
+            workspace.connection_alive().load(Ordering::SeqCst),
+            "catalogue receiver should survive reconnect"
+        );
+        assert!(gen_after > gen_before, "generation should advance after reconnect");
+    }
+
+    #[test]
+    fn reconnect_advances_generation() {
+        let (workspace, _path_a, _disconnected_a) = make_workspace("cpu.util");
+        let gen_before = workspace.connection_generation().load(Ordering::SeqCst);
+
+        let dir_b = tempfile::tempdir().expect("tempdir");
+        let path_b = dir_b.path().join("linsight.sock");
+        let listener_b = UnixListener::bind(&path_b).expect("bind");
+        let disconnected_b = Arc::new(AtomicBool::new(false));
+        spawn_fake_daemon(listener_b, "mem.used_bytes", Arc::clone(&disconnected_b));
+        std::thread::sleep(Duration::from_millis(50));
+
+        workspace.reconnect_to_path(&path_b).expect("reconnect");
+
+        let gen_after = workspace.connection_generation().load(Ordering::SeqCst);
+        assert_eq!(gen_after, gen_before + 1, "generation should increment by one");
     }
 }
