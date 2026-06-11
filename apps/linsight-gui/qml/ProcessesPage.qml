@@ -50,7 +50,7 @@ Kirigami.Page {
         if (!term) return page.allProcesses
         return page.allProcesses.filter(p =>
             (p.name || "").toLowerCase().includes(term) ||
-            String(p.pid || "").includes(term)
+            String(p.pid !== undefined && p.pid !== null ? p.pid : "").includes(term)
         )
     }
 
@@ -120,6 +120,7 @@ Kirigami.Page {
                     Layout.alignment: Qt.AlignVCenter
                     placeholderText: qsTr("Filter by name or PID…")
                     selectByMouse: true
+                    Accessible.name: qsTr("Filter processes")
                 }
             }
         }
@@ -169,12 +170,12 @@ Kirigami.Page {
                         anchors.rightMargin: app.tokens.spaceXL
                         spacing: 0
 
-                        DataCell { text: String(modelData.pid || "") || ""; widthFrac: 0.08 }
+                        DataCell { text: modelData.pid !== undefined && modelData.pid !== null ? String(modelData.pid) : ""; widthFrac: 0.08 }
                         DataCell { text: modelData.name || ""; widthFrac: 0.25 }
                         DataCell { text: formatFloat(modelData.cpu) + "%"; widthFrac: 0.10 }
                         DataCell { text: formatFloat(modelData.mem) + "%"; widthFrac: 0.10 }
                         DataCell { text: formatBytes(modelData.rss); widthFrac: 0.14 }
-                        DataCell { text: String(modelData.threads || "") || ""; widthFrac: 0.10 }
+                        DataCell { text: modelData.threads !== undefined && modelData.threads !== null ? String(modelData.threads) : ""; widthFrac: 0.10 }
                         DataCell { text: modelData.state || ""; widthFrac: 0.08 }
                     }
                 }
@@ -188,7 +189,7 @@ Kirigami.Page {
                         anchors.centerIn: parent
                         spacing: app.tokens.spaceM
                         Controls.Label {
-                            text: qsTr("No processes")
+                            text: filterField.text.length > 0 ? qsTr("No matching processes") : qsTr("No processes")
                             font.pixelSize: app.tokens.textSubheading
                             color: app.tokens.textSecondary
                             Layout.alignment: Qt.AlignHCenter
@@ -198,7 +199,7 @@ Kirigami.Page {
                             font.pixelSize: app.tokens.textBody
                             color: app.tokens.textSecondary
                             Layout.alignment: Qt.AlignHCenter
-                            visible: filterField.text.length === 0
+                            visible: filterField.text.length === 0 && page.allProcesses.length === 0
                         }
                     }
                 }
