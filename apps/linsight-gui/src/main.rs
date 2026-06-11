@@ -20,7 +20,7 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 use tracing_subscriber::EnvFilter;
 
 use crate::client::Client;
-use crate::workspace::Workspace;
+use crate::workspace::{Workspace, default_socket_path};
 
 /// Default screenshot warm-up delay. Long enough for QML scene + sensor
 /// catalogue to settle on a cold start; short enough not to feel like
@@ -109,7 +109,7 @@ fn main() -> anyhow::Result<()> {
             Client::connect_or_spawn(&socket)?
         }
     };
-    qobjects::install_workspace(Arc::new(Workspace::new(client)));
+    qobjects::install_workspace(Arc::new(Workspace::new(client)?));
 
     let mut app = QGuiApplication::new();
     if app.is_null() {
@@ -181,16 +181,4 @@ fn validate_screenshot_path(path: &Path) -> anyhow::Result<()> {
         }
         Err(e) => anyhow::bail!("screenshot path `{}` is not writable: {e}", path.display(),),
     }
-}
-
-fn default_socket_path() -> anyhow::Result<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .map(|dir| dir.join("linsight.sock"))
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "$XDG_RUNTIME_DIR is not set; refusing to fall back to /tmp. \
-                 Set XDG_RUNTIME_DIR or pass --socket explicitly."
-            )
-        })
 }

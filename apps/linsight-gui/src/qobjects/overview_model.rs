@@ -266,7 +266,9 @@ impl ffi::OverviewModel {
         self.as_mut().rust_mut().started = true;
 
         let qt_thread = self.qt_thread();
-        let client = with_workspace(|ws| ws.client());
+        let ws = with_workspace(|ws| ws);
+
+        let client = ws.client();
 
         let sensor_infos: Vec<SensorInfo> = client.sensor_infos();
         if sensor_infos.is_empty() {
@@ -320,7 +322,7 @@ impl ffi::OverviewModel {
             .map(|s| s.id.clone())
             .filter(|id| id.as_str() != "proc.list")
             .collect();
-        if let Err(e) = client.subscribe(auto_subs) {
+        if let Err(e) = ws.subscribe(auto_subs) {
             tracing::error!(error = ?e, "subscribe failed");
             return;
         }
@@ -331,13 +333,12 @@ impl ffi::OverviewModel {
         // daemon falls back to its compiled-in default
         // (`PUMP_INTERVAL_DEFAULT_MS`).
         let persisted_ms = crate::qobjects::preferences_model::load_prefs().sample_interval_ms;
-        if let Err(e) = client.set_pump_interval_ms(persisted_ms, std::time::Duration::from_secs(5))
-        {
+        if let Err(e) = ws.set_pump_interval_ms(persisted_ms, std::time::Duration::from_secs(5)) {
             tracing::warn!(error = %e, ms = persisted_ms,
                 "set_pump_interval_ms at handshake failed; daemon will use its default tick");
         }
 
-        let Some(rx) = client.take_sample_rx() else {
+        let Some(rx) = ws.take_sample_rx() else {
             tracing::warn!("sample receiver already taken; live updates will not appear");
             return;
         };
@@ -596,14 +597,14 @@ impl ffi::OverviewModel {
     }
 
     pub fn set_process_stream_enabled(self: Pin<&mut Self>, enabled: bool) {
-        let client = with_workspace(|ws| ws.client());
+        let ws = with_workspace(|ws| ws);
         let id = SensorId::new("proc.list");
         if enabled {
-            if let Err(e) = client.subscribe(vec![id]) {
+            if let Err(e) = ws.subscribe(vec![id]) {
                 tracing::warn!(error = ?e, "proc.list subscribe failed");
             }
         } else {
-            if let Err(e) = client.unsubscribe(vec![id]) {
+            if let Err(e) = ws.unsubscribe(vec![id]) {
                 tracing::warn!(error = ?e, "proc.list unsubscribe failed");
             }
         }

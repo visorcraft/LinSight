@@ -18,11 +18,11 @@ pub fn install_workspace(workspace: Arc<Workspace>) {
     WORKSPACE.with(|cell| *cell.borrow_mut() = Some(workspace));
 }
 
-pub fn with_workspace<R>(f: impl FnOnce(&Workspace) -> R) -> R {
+pub fn with_workspace<R>(f: impl FnOnce(Arc<Workspace>) -> R) -> R {
     WORKSPACE.with(|cell| {
         let binding = cell.borrow();
         let ws =
             binding.as_ref().expect("install_workspace must be called before any QObject method");
-        f(ws)
+        f(Arc::clone(ws))
     })
 }
