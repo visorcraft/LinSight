@@ -32,15 +32,16 @@ pub struct SmartPlugin {
 struct Inner {
     /// Disk name → cached sensor readings.
     cache: HashMap<String, (Instant, Vec<(SensorId, Reading)>)>,
-    /// Whether we already warned about missing udisks2.
+    /// Whether we already warned about missing udisks2 at init.
     warned: bool,
+    /// Whether we already warned about a sample-time udisks2 failure.
+    sample_warned: bool,
 }
 
 impl SmartPlugin {
     fn init_inner(&self, _ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {
         let mut inner = self.inner.lock().expect("SmartPlugin poisoned");
         inner.cache.clear();
-        inner.warned = false;
 
         let drives = match crate::udisks::fetch_smart_drives() {
             Ok(d) => d,
@@ -58,6 +59,9 @@ impl SmartPlugin {
                 });
             }
         };
+
+        inner.warned = false;
+        inner.sample_warned = false;
 
         let mut sensors = Vec::new();
         let mut devices = Vec::new();
@@ -118,9 +122,14 @@ impl SmartPlugin {
         let drives = match crate::udisks::fetch_smart_drives() {
             Ok(d) => d,
             Err(e) => {
+                if !inner.sample_warned {
+                    warn!("udisks2 fetch failed: {e}; sampling disabled");
+                    inner.sample_warned = true;
+                }
                 return Err(PluginError::Io(format!("udisks2 fetch failed: {e}")));
             }
         };
+        inner.sample_warned = false;
 
         for (disk_name, props) in &drives {
             let sensor_list = udisks::sensors_from_drive(disk_name, props)?;
