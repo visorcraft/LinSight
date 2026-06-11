@@ -26,6 +26,7 @@ fn main() {
             "qml/DashWindow.qml",
             "qml/OverviewPage.qml",
             "qml/CategoryPage.qml",
+            "qml/ProcessesPage.qml",
             "qml/SensorTile.qml",
             "qml/StorageSectionView.qml",
             "qml/DesignTokens.qml",

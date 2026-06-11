@@ -180,7 +180,7 @@ Add one using the button above.</source>
     </message>
     <message>
         <location filename="../qml/AlertsPage.qml" line="260"/>
-        <location filename="../qml/AlertsPage.qml" line="566"/>
+        <location filename="../qml/AlertsPage.qml" line="568"/>
         <source>Test</source>
         <translation type="unfinished"></translation>
     </message>
@@ -221,92 +221,92 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="408"/>
+        <location filename="../qml/AlertsPage.qml" line="410"/>
         <source>Edit Rule: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="416"/>
+        <location filename="../qml/AlertsPage.qml" line="418"/>
         <source>Name and expression are required.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="425"/>
+        <location filename="../qml/AlertsPage.qml" line="427"/>
         <source>Saving rule &apos;%1&apos;...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="434"/>
+        <location filename="../qml/AlertsPage.qml" line="436"/>
         <source>Rule Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="441"/>
+        <location filename="../qml/AlertsPage.qml" line="443"/>
         <source>e.g. high-cpu</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="445"/>
+        <location filename="../qml/AlertsPage.qml" line="447"/>
         <source>Expression</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="452"/>
+        <location filename="../qml/AlertsPage.qml" line="454"/>
         <source>e.g. cpu.util &gt; 90 &amp;&amp; mem.used_bytes &gt; 8e9</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="461"/>
+        <location filename="../qml/AlertsPage.qml" line="463"/>
         <source>Insert:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="537"/>
+        <location filename="../qml/AlertsPage.qml" line="539"/>
         <source>Sensor:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="586"/>
+        <location filename="../qml/AlertsPage.qml" line="588"/>
         <source>Expression Syntax</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="596"/>
+        <location filename="../qml/AlertsPage.qml" line="598"/>
         <source>Sensor IDs are variables (e.g. &lt;b&gt;cpu.util&lt;/b&gt;, &lt;b&gt;mem.used_bytes&lt;/b&gt;).&lt;br&gt;Compare: &lt;b&gt;&gt;&lt;/b&gt; &lt;b&gt;&lt;&lt;/b&gt; &lt;b&gt;&gt;=&lt;/b&gt; &lt;b&gt;&lt;=&lt;/b&gt; &lt;b&gt;==&lt;/b&gt; &lt;b&gt;!=&lt;/b&gt;&lt;br&gt;Combine: &lt;b&gt;&amp;&amp;&lt;/b&gt; (AND) &lt;b&gt;||&lt;/b&gt; (OR) &lt;b&gt;!&lt;/b&gt; (NOT)&lt;br&gt;Group: &lt;b&gt;( )&lt;/b&gt; parentheses for precedence&lt;br&gt;&lt;br&gt;Examples:&lt;br&gt;  cpu.util &gt; 90&lt;br&gt;  cpu.util &gt; 80 &amp;&amp; mem.used_bytes &gt; 8e9&lt;br&gt;  (xe.gpu0.temp_c &gt; 85 || xe.gpu1.temp_c &gt; 85)&lt;br&gt;  !(cpu.util &gt; 10) &amp;&amp; system.load_1m &gt; 4</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="616"/>
+        <location filename="../qml/AlertsPage.qml" line="618"/>
         <source>Hide Syntax Help</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="616"/>
+        <location filename="../qml/AlertsPage.qml" line="618"/>
         <source>Show Syntax Help</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="621"/>
+        <location filename="../qml/AlertsPage.qml" line="623"/>
         <source>Notification Targets</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="628"/>
+        <location filename="../qml/AlertsPage.qml" line="630"/>
         <source>desktop, webhook:https://...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="632"/>
+        <location filename="../qml/AlertsPage.qml" line="634"/>
         <source>Comma-separated. Supported: desktop, exec:/path, webhook:url</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="640"/>
+        <location filename="../qml/AlertsPage.qml" line="642"/>
         <source>Desktop notification</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/AlertsPage.qml" line="655"/>
+        <location filename="../qml/AlertsPage.qml" line="656"/>
         <source>Cooldown</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1045,90 +1045,95 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="327"/>
+        <location filename="../qml/Main.qml" line="329"/>
         <source>Open Sidebar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="328"/>
+        <location filename="../qml/Main.qml" line="330"/>
         <source>Close Sidebar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="364"/>
+        <location filename="../qml/Main.qml" line="366"/>
         <source>Multi-GPU system insight</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="379"/>
+        <location filename="../qml/Main.qml" line="381"/>
         <source>WORKSPACE</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="388"/>
+        <location filename="../qml/Main.qml" line="390"/>
         <source>Overview</source>
         <translation type="unfinished">概要</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="396"/>
-        <location filename="../qml/Main.qml" line="609"/>
+        <location filename="../qml/Main.qml" line="398"/>
+        <location filename="../qml/Main.qml" line="619"/>
         <source>GPUs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="404"/>
-        <location filename="../qml/Main.qml" line="610"/>
+        <location filename="../qml/Main.qml" line="406"/>
+        <location filename="../qml/Main.qml" line="620"/>
         <source>Storage</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="412"/>
-        <location filename="../qml/Main.qml" line="611"/>
+        <location filename="../qml/Main.qml" line="414"/>
+        <location filename="../qml/Main.qml" line="621"/>
         <source>Network</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="420"/>
+        <location filename="../qml/Main.qml" line="422"/>
+        <source>Processes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="430"/>
         <source>Hardware</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="433"/>
+        <location filename="../qml/Main.qml" line="443"/>
         <source>New Window</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="452"/>
+        <location filename="../qml/Main.qml" line="462"/>
         <source>DASHBOARDS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="492"/>
+        <location filename="../qml/Main.qml" line="502"/>
         <source>Alerts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="500"/>
+        <location filename="../qml/Main.qml" line="510"/>
         <source>New Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="514"/>
+        <location filename="../qml/Main.qml" line="524"/>
         <source>SYSTEM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="523"/>
+        <location filename="../qml/Main.qml" line="533"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="531"/>
+        <location filename="../qml/Main.qml" line="541"/>
         <source>About</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="602"/>
+        <location filename="../qml/Main.qml" line="612"/>
         <source>Disconnected from linsightd — values shown are last known.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1193,6 +1198,66 @@ Add one using the button above.</source>
     <message>
         <location filename="../qml/OverviewPage.qml" line="129"/>
         <source>CPU frequency</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ProcessesPage</name>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="16"/>
+        <location filename="../qml/ProcessesPage.qml" line="22"/>
+        <location filename="../qml/ProcessesPage.qml" line="110"/>
+        <source>Processes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="121"/>
+        <source>Filter by name or PID…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="138"/>
+        <source>PID</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="139"/>
+        <source>Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="140"/>
+        <source>CPU %</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="141"/>
+        <source>Mem %</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="142"/>
+        <source>RSS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="143"/>
+        <source>Threads</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="144"/>
+        <source>State</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="191"/>
+        <source>No processes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="197"/>
+        <source>Waiting for proc.list samples…</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

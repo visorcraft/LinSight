@@ -1122,7 +1122,8 @@ mod tests {
 
     #[test]
     fn proc_table_short_row_fills_missing_with_null() {
-        let rows: Vec<Vec<serde_json::Value>> = vec![vec![serde_json::json!(1.0), serde_json::json!("init")]];
+        let rows: Vec<Vec<serde_json::Value>> =
+            vec![vec![serde_json::json!(1.0), serde_json::json!("init")]];
         let json = serialize_proc_rows(&rows);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let obj = parsed.as_array().unwrap()[0].as_object().unwrap();

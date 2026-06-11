@@ -223,10 +223,7 @@ impl Client {
     }
 
     pub fn unsubscribe(&self, sensors: Vec<SensorId>) -> Result<()> {
-        self.writer
-            .lock()
-            .unwrap()
-            .write_client(&ClientMsg::Unsubscribe { sensors })?;
+        self.writer.lock().unwrap().write_client(&ClientMsg::Unsubscribe { sensors })?;
         Ok(())
     }
 

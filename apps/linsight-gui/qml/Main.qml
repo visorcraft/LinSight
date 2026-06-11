@@ -111,7 +111,7 @@ Kirigami.ApplicationWindow {
         app.requestActivate()
         const initial = Qt.application.arguments && Qt.application.arguments.length > 1
             ? Qt.application.arguments[1] : ""
-        const known = ["overview","gpus","storage","network","hardware","alerts","editor","settings","about","licenses","credits"]
+        const known = ["overview","gpus","storage","network","hardware","processes","alerts","editor","settings","about","licenses","credits"]
         if (initial && (known.indexOf(initial) !== -1
                         || initial.indexOf("dashboard:") === 0
                         || initial.indexOf("editor:") === 0)) {
@@ -134,7 +134,7 @@ Kirigami.ApplicationWindow {
     function resolveStartPage() {
         if (!app.preferences) return "overview"
         const raw = String(app.preferences.startPage || "overview")
-        const workspaces = ["overview", "gpus", "storage", "network", "hardware", "alerts"]
+        const workspaces = ["overview", "gpus", "storage", "network", "hardware", "processes", "alerts"]
         if (workspaces.indexOf(raw) !== -1) return raw
         if (raw.indexOf("dashboard:") === 0 && app.dashboards) {
             const slug = raw.substring("dashboard:".length)
@@ -184,6 +184,7 @@ Kirigami.ApplicationWindow {
     Shortcut { sequence: "Ctrl+3"; context: Qt.ApplicationShortcut; onActivated: app.goTo("storage") }
     Shortcut { sequence: "Ctrl+4"; context: Qt.ApplicationShortcut; onActivated: app.goTo("network") }
     Shortcut { sequence: "Ctrl+5"; context: Qt.ApplicationShortcut; onActivated: app.goTo("hardware") }
+    Shortcut { sequence: "Ctrl+Shift+P"; context: Qt.ApplicationShortcut; onActivated: app.goTo("processes") }
     Shortcut { sequence: "Ctrl+6"; context: Qt.ApplicationShortcut; onActivated: app.goTo("editor") }
     Shortcut { sequence: "Ctrl+N"; context: Qt.ApplicationShortcut; onActivated: app.openNewWindow() }
     Shortcut { sequences: [StandardKey.Quit]; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
@@ -269,6 +270,7 @@ Kirigami.ApplicationWindow {
             case "storage":  app.pageStack.replace(storagePage); break
             case "network":  app.pageStack.replace(networkPage); break
             case "hardware": app.pageStack.replace(hardwarePage); break
+            case "processes": app.pageStack.replace(processesPage); break
             case "alerts":   app.pageStack.replace(alertsPage); break
             case "settings": app.pageStack.replace(settingsPage); break
             case "about":    app.pageStack.replace(aboutPage); break
@@ -414,6 +416,14 @@ Kirigami.ApplicationWindow {
                 active: app.currentPageKey === "network"
                 compact: drawer.isCollapsed
                 onTriggered: app.goTo("network")
+            }
+            NavItem {
+                Layout.fillWidth: true
+                label: qsTr("Processes")
+                iconName: "system-run-symbolic"
+                active: app.currentPageKey === "processes"
+                compact: drawer.isCollapsed
+                onTriggered: app.goTo("processes")
             }
             NavItem {
                 Layout.fillWidth: true
@@ -610,6 +620,7 @@ Kirigami.ApplicationWindow {
     Component { id: storagePage;   CategoryPage  { dashModel: app.dashModel; category: "storage"; pageTitle: qsTr("Storage"); groupBy: "deviceLabel" } }
     Component { id: networkPage;   CategoryPage  { dashModel: app.dashModel; category: "network"; pageTitle: qsTr("Network") } }
     Component { id: hardwarePage;  HardwarePage  {} }
+    Component { id: processesPage; ProcessesPage { dashModel: app.dashModel } }
     Component { id: alertsPage;    AlertsPage    { alertModel: app.alerts; dashModel: app.dashModel } }
     Component { id: editorPage;        CanvasEditorPage  { dashModel: app.dashModel; editingSlug: app.currentEditorSlug } }
     Component { id: dashboardViewPage; DashboardViewPage { dashModel: app.dashModel; viewingSlug: app.currentViewSlug } }

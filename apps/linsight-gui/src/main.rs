@@ -38,11 +38,11 @@ const MAX_SCREENSHOT_DELAY_MS: u32 = 30_000;
                   one is auto-spawned as a child process. Pass `--connect ssh://user@host` to \
                   attach to a remote daemon over an SSH-forwarded socket instead. The first \
                   positional argument is the page to open (overview / gpus / storage / network / \
-                  hardware / editor / settings / about / licenses / credits)."
+                  hardware / processes / editor / settings / about / licenses / credits)."
 )]
 struct Cli {
     /// Page to open at launch (overview, gpus, storage, network, hardware,
-    /// editor, settings, about, licenses, credits). Anything else is ignored.
+    /// processes, editor, settings, about, licenses, credits). Anything else is ignored.
     page: Option<String>,
 
     /// Attach to a remote daemon via SSH port forwarding. Format:
