@@ -113,6 +113,20 @@ pub mod ffi {
         /// /proc sweep only runs while the page is visible.
         #[qinvokable]
         fn set_process_stream_enabled(self: Pin<&mut OverviewModel>, enabled: bool);
+
+        /// Fetch daemon subsystem states (history, alerts, prom) via RPC.
+        /// Result is a JSON string: {"history":true,"alerts":false,"prom":true,"promBind":"127.0.0.1:9777"}
+        #[qinvokable]
+        fn fetch_daemon_settings(self: Pin<&mut OverviewModel>) -> QString;
+
+        /// Toggle a daemon subsystem. `subsystem` is "history", "alerts", or "prom".
+        /// `enabled` is the desired state. Returns a JSON status string.
+        #[qinvokable]
+        fn set_daemon_setting(
+            self: Pin<&mut OverviewModel>,
+            subsystem: &QString,
+            enabled: bool,
+        ) -> QString;
     }
 
     impl cxx_qt::Threading for OverviewModel {}
@@ -542,6 +556,43 @@ impl ffi::OverviewModel {
     pub fn env_is_set(&self, name: &QString) -> bool {
         let name = name.to_string();
         std::env::var_os(name).map(|v| !v.is_empty()).unwrap_or(false)
+    }
+
+    pub fn fetch_daemon_settings(self: Pin<&mut Self>) -> QString {
+        let client = with_workspace(|ws| ws.client());
+        match client.get_daemon_settings(std::time::Duration::from_secs(5)) {
+            Ok((history, alerts, prom, prom_bind)) => {
+                let json = serde_json::json!({
+                    "history": history,
+                    "alerts": alerts,
+                    "prom": prom,
+                    "promBind": prom_bind,
+                });
+                QString::from(json.to_string().as_str())
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "fetch_daemon_settings failed");
+                QString::from("{}")
+            }
+        }
+    }
+
+    pub fn set_daemon_setting(self: Pin<&mut Self>, subsystem: &QString, enabled: bool) -> QString {
+        let client = with_workspace(|ws| ws.client());
+        let s = subsystem.to_string();
+        let (history, alerts, prom) = match s.as_str() {
+            "history" => (Some(enabled), None, None),
+            "alerts" => (None, Some(enabled), None),
+            "prom" => (None, None, Some(enabled)),
+            _ => return QString::from(format!("error: unknown subsystem {s}").as_str()),
+        };
+        match client.set_daemon_settings(history, alerts, prom, std::time::Duration::from_secs(5)) {
+            Ok((h, a, p)) => {
+                let json = serde_json::json!({"history": h, "alerts": a, "prom": p});
+                QString::from(json.to_string().as_str())
+            }
+            Err(e) => QString::from(format!("error: {e}").as_str()),
+        }
     }
 
     pub fn set_process_stream_enabled(self: Pin<&mut Self>, enabled: bool) {

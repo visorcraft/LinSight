@@ -30,6 +30,20 @@ Kirigami.ScrollablePage {
     readonly property string envAlerts:  "LINSIGHT_ALERTS"
     readonly property string envProm:    "LINSIGHT_PROM_BIND"
 
+    property var daemonSettings: ({ history: false, alerts: false, prom: false, promBind: "" })
+
+    function refreshDaemonSettings() {
+        if (!page.dashModel) return
+        const raw = page.dashModel.fetchDaemonSettings().toString()
+        try {
+            daemonSettings = JSON.parse(raw)
+        } catch (e) {
+            daemonSettings = { history: false, alerts: false, prom: false, promBind: "" }
+        }
+    }
+
+    Component.onCompleted: page.refreshDaemonSettings()
+
     Kirigami.Theme.inherit: false
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.backgroundColor: app.tokens.surface0
@@ -208,49 +222,45 @@ Kirigami.ScrollablePage {
                 content: ColumnLayout {
                     spacing: app.tokens.spaceS
                     Controls.Label {
-                        text: qsTr("Today these subsystems are enabled via environment variables and the systemd user unit at <code>packaging/systemd/linsight.service</code>. Edit + <code>systemctl --user daemon-reload && systemctl --user restart linsight</code> to flip them.")
-                        textFormat: Text.RichText
+                        text: qsTr("Toggle subsystems at runtime. Changes take effect immediately on the daemon.")
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                         opacity: 0.85
                     }
                     Repeater {
                         model: [
-                            { env: page.envHistory, name: qsTr("SQLite history (~/.local/share/linsight/history.db)") },
-                            { env: page.envAlerts,  name: qsTr("Alert rules (~/.config/linsight/alerts.toml)") },
-                            { env: page.envProm,    name: qsTr("Prometheus exporter (default 127.0.0.1:9777)") },
+                            { key: "history", name: qsTr("SQLite history") },
+                            { key: "alerts",  name: qsTr("Alert rules") },
+                            { key: "prom",    name: qsTr("Prometheus exporter") },
                         ]
                         delegate: RowLayout {
                             Layout.fillWidth: true
                             spacing: app.tokens.spaceM
-                            // Real on/off status: green check when the
-                            // env var is set in this process, gray dash
-                            // when it isn't. Previously this was always
-                            // the same icon regardless of state — fake
-                            // status display.
-                            readonly property bool isOn:
-                                page.dashModel !== null
-                                && page.dashModel.envIsSet(modelData.env)
-                            Kirigami.Icon {
-                                source: isOn ? "emblem-checked-symbolic"
-                                             : "edit-none-symbolic"
-                                implicitWidth: 16
-                                implicitHeight: 16
-                                opacity: isOn ? 0.9 : 0.5
-                                color: isOn ? app.tokens.accent
-                                            : app.tokens.textPrimary
-                                isMask: true
-                                Accessible.role: Accessible.Indicator
-                                Accessible.name: isOn ? qsTr("enabled")
-                                                      : qsTr("disabled")
+                            readonly property bool isOn: {
+                                var key = modelData.key
+                                return page.daemonSettings[key] === true
+                            }
+                            readonly property bool canToggle: modelData.key !== "prom"
+                            Controls.Switch {
+                                checked: parent.isOn
+                                enabled: parent.canToggle && page.dashModel !== null
+                                onToggled: {
+                                    if (!page.dashModel) return
+                                    var result = page.dashModel.setDaemonSetting(
+                                        modelData.key, checked
+                                    ).toString()
+                                    if (result.indexOf("error:") === 0) {
+                                        app.showPassiveNotification(result, 4000)
+                                    }
+                                    page.refreshDaemonSettings()
+                                }
                             }
                             Controls.Label {
                                 text: modelData.name
                                 Layout.fillWidth: true
                             }
                             Controls.Label {
-                                text: modelData.env
-                                font.family: app.tokens.monoFamily
+                                text: parent.isOn ? qsTr("On") : qsTr("Off")
                                 font.pixelSize: app.tokens.textCaption
                                 opacity: 0.6
                             }

@@ -9,6 +9,10 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-06-11
+
+- Version bump to 1.11.0.
+
 ## [1.10.0] — 2026-06-10
 
 - **Process explorer page.** A new Processes page shows a sortable,

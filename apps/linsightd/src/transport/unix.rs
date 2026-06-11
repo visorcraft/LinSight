@@ -910,6 +910,65 @@ fn handle_request(
                 result: Ok(ResponsePayload::AlertEventList { events_json }),
             })
         }
+        RequestOp::GetDaemonSettings => {
+            let (history, alerts, _prom, prom_bind) = sched.lock().unwrap().daemon_settings();
+            writer.lock().unwrap().write_server(&ServerMsg::Response {
+                req_id,
+                result: Ok(ResponsePayload::DaemonSettings {
+                    history_enabled: history,
+                    alerts_enabled: alerts,
+                    prom_enabled: prom_bind.is_some(),
+                    prom_bind,
+                }),
+            })
+        }
+        RequestOp::SetDaemonSettings { history, alerts, prom } => {
+            let mut s = sched.lock().unwrap();
+            let mut errors: Vec<String> = Vec::new();
+            if let Some(v) = history
+                && let Err(e) = s.toggle_history(v)
+            {
+                errors.push(e);
+            }
+            if let Some(v) = alerts
+                && let Err(e) = s.toggle_alerts(v)
+            {
+                errors.push(e);
+            }
+            if let Some(v) = prom
+                && v
+            {
+                errors.push(
+                    "Prometheus toggle-on is not supported via RPC; set LINSIGHT_PROM_BIND and restart".into(),
+                );
+            }
+            if let Some(v) = prom
+                && !v
+            {
+                errors.push(
+                    "Prometheus toggle-off is not supported via RPC; unset LINSIGHT_PROM_BIND and restart".into(),
+                );
+            }
+            let (history_enabled, alerts_enabled, _prom, prom_bind) = s.daemon_settings();
+            drop(s);
+            if !errors.is_empty() {
+                return writer.lock().unwrap().write_server(&ServerMsg::Response {
+                    req_id,
+                    result: Err(ProtoError {
+                        code: ProtoErrorCode::Internal,
+                        message: errors.join("; "),
+                    }),
+                });
+            }
+            writer.lock().unwrap().write_server(&ServerMsg::Response {
+                req_id,
+                result: Ok(ResponsePayload::DaemonSettingsSet {
+                    history_enabled,
+                    alerts_enabled,
+                    prom_enabled: prom_bind.is_some(),
+                }),
+            })
+        }
     }
 }
 

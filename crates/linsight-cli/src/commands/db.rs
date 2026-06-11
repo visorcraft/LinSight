@@ -8,6 +8,7 @@
 //! The daemon keeps the DB in WAL mode; we use a 5-second busy_timeout so the
 //! two can coexist safely.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -134,10 +135,16 @@ pub fn prune(db_path: Option<PathBuf>, older_than: &str, vacuum: bool) -> Result
         .as_micros() as u64;
     let cutoff_micros = now_micros.saturating_sub(dur.as_micros() as u64);
 
-    let removed =
+    let removed_samples =
         conn.execute("DELETE FROM samples WHERE ts < ?1", rusqlite::params![cutoff_micros as i64])?;
+    let removed_events = conn.execute(
+        "DELETE FROM alert_events WHERE ts < ?1",
+        rusqlite::params![cutoff_micros as i64],
+    )?;
 
-    println!("removed {removed} rows older than {older_than} (cutoff ts: {cutoff_micros})");
+    println!(
+        "removed {removed_samples} sample rows and {removed_events} alert-event rows older than {older_than} (cutoff ts: {cutoff_micros})"
+    );
 
     if vacuum {
         conn.execute_batch("VACUUM")?;
@@ -145,6 +152,118 @@ pub fn prune(db_path: Option<PathBuf>, older_than: &str, vacuum: bool) -> Result
     }
 
     Ok(())
+}
+
+/// Export historical samples to CSV or JSON.
+pub fn export(
+    db_path: Option<PathBuf>,
+    sensor: Option<&str>,
+    since: &str,
+    format: &str,
+    output: Option<&std::path::Path>,
+) -> Result<()> {
+    let path = db_path.unwrap_or_else(default_db_path);
+    let conn = open_db(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+
+    let dur = parse_duration(since)?;
+    let now_micros = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    let cutoff_micros = now_micros.saturating_sub(dur.as_micros() as u64);
+
+    let mut stmt = if let Some(_sid) = sensor {
+        conn.prepare_cached(
+            "SELECT sensor_id, ts, scalar, counter, state FROM samples WHERE sensor_id = ?1 AND ts >= ?2 ORDER BY ts"
+        )?
+    } else {
+        conn.prepare_cached(
+            "SELECT sensor_id, ts, scalar, counter, state FROM samples WHERE ts >= ?1 ORDER BY ts",
+        )?
+    };
+
+    let rows: Vec<_> = if let Some(sid) = sensor {
+        stmt.query_map(rusqlite::params![sid, cutoff_micros as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map(rusqlite::params![cutoff_micros as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    let mut out: Box<dyn std::io::Write> = match output {
+        Some(p) => Box::new(
+            std::fs::File::create(p)
+                .with_context(|| format!("creating output file {}", p.display()))?,
+        ),
+        None => Box::new(std::io::stdout()),
+    };
+
+    match format {
+        "csv" => {
+            writeln!(out, "sensor_id,ts,scalar,counter,state")?;
+            for row in rows {
+                let (sid, ts, scalar, counter, state) = row;
+                let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
+                let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
+                let state_s = state.as_deref().unwrap_or("");
+                writeln!(
+                    out,
+                    "{},{},{},{},{}",
+                    escape_csv(&sid),
+                    ts,
+                    scalar_s,
+                    counter_s,
+                    escape_csv(state_s),
+                )?;
+            }
+        }
+        "json" => {
+            let mut arr = Vec::new();
+            for row in rows {
+                let (sid, ts, scalar, counter, state) = row;
+                arr.push(serde_json::json!({
+                    "sensor_id": sid,
+                    "ts": ts,
+                    "scalar": scalar,
+                    "counter": counter,
+                    "state": state,
+                }));
+            }
+            writeln!(out, "{}", serde_json::to_string_pretty(&arr)?)?;
+        }
+        other => {
+            return Err(anyhow::anyhow!(
+                "unknown export format; expected csv or json format (got: {other})"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn escape_csv(s: &str) -> String {
+    if s.contains(",") || s.contains("\"") || s.contains("\n") {
+        let escaped = s.replace("\"", "\"\"");
+        format!("\"{}\"", escaped)
+    } else {
+        s.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -171,7 +290,14 @@ mod tests {
                  state     TEXT,
                  PRIMARY KEY (sensor_id, ts)
              ) WITHOUT ROWID;
-             CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);",
+             CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);
+             CREATE TABLE IF NOT EXISTS alert_events (
+                 rule      TEXT NOT NULL,
+                 ts        INTEGER NOT NULL,
+                 kind      TEXT NOT NULL,
+                 PRIMARY KEY (rule, ts)
+             ) WITHOUT ROWID;
+             CREATE INDEX IF NOT EXISTS alert_events_ts ON alert_events(ts);",
         )
         .unwrap();
         (f, conn)
@@ -233,16 +359,29 @@ mod tests {
         insert_row(&conn, "cpu.util", two_hours_ago, 5.0);
         insert_row(&conn, "cpu.util", ninety_min_ago, 10.0);
         insert_row(&conn, "cpu.util", thirty_min_ago, 15.0);
+        conn.execute(
+            "INSERT INTO alert_events (rule, ts, kind) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["high-cpu", two_hours_ago as i64, "fired"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO alert_events (rule, ts, kind) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["high-cpu", thirty_min_ago as i64, "cleared"],
+        )
+        .unwrap();
 
         drop(conn);
 
-        // Prune rows older than 1h — should remove the 2 old rows
+        // Prune rows older than 1h — should remove the 2 old sample rows and 1 old alert event
         prune(Some(f.path().to_path_buf()), "1h", false).unwrap();
 
         let conn2 = Connection::open(f.path()).unwrap();
         let remaining: u64 =
             conn2.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap();
-        assert_eq!(remaining, 1, "expected only the 30-min-old row to survive");
+        assert_eq!(remaining, 1, "expected only the 30-min-old sample row to survive");
+        let remaining_events: u64 =
+            conn2.query_row("SELECT COUNT(*) FROM alert_events", [], |r| r.get(0)).unwrap();
+        assert_eq!(remaining_events, 1, "expected only the 30-min-old alert event to survive");
     }
 
     #[test]

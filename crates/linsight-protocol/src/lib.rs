@@ -10,7 +10,7 @@ pub use frame::{FrameError, FrameReader, FrameWriter, MAX_FRAME_BYTES};
 pub use messages::*;
 
 /// Wire-format protocol version. Bump only on breaking changes.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Minimum value accepted by `RequestOp::SetPumpIntervalMs`. Values
 /// below 50 ms are wasteful — the daemon would wake faster than the

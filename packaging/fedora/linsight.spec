@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.10.0
+Version:        1.11.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,9 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Thu Jun 11 2026 VisorCraft LLC <support@visorcraft.com> - 1.11.0-1
+- Version bump to 1.11.0.
+
 * Wed Jun 10 2026 VisorCraft LLC <support@visorcraft.com> - 1.10.0-1
 - Process explorer page with sortable/filterable process table, SMART disk
   health sensors, alert event log and cooldown, sensor snapshot caches, and

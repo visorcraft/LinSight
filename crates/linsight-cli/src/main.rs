@@ -124,6 +124,24 @@ enum DbCmd {
         #[arg(long)]
         db: Option<std::path::PathBuf>,
     },
+    /// Export historical samples to CSV or JSON.
+    Export {
+        /// Output format: csv or json.
+        #[arg(long, default_value = "csv")]
+        format: String,
+        /// Sensor id to export (e.g. cpu.util). If omitted, exports all sensors.
+        #[arg(long)]
+        sensor: Option<String>,
+        /// How far back to export (e.g. "5m", "1h", "7d"). Default "24h".
+        #[arg(long, default_value = "24h")]
+        since: String,
+        /// Override the database path (default: $XDG_DATA_HOME/linsight/history.db).
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+        /// Output file path. Defaults to stdout.
+        #[arg(long)]
+        output: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -156,6 +174,9 @@ fn main() -> anyhow::Result<()> {
         return match action {
             DbCmd::Stats { db } => commands::db::stats(db),
             DbCmd::Prune { older_than, vacuum, db } => commands::db::prune(db, &older_than, vacuum),
+            DbCmd::Export { format, sensor, since, db, output } => {
+                commands::db::export(db, sensor.as_deref(), &since, &format, output.as_deref())
+            }
         };
     }
 

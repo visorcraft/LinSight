@@ -245,26 +245,14 @@ Kirigami.Page {
         if (!app.dashboards) return
         cardFlow.data = []
 
-        // Get the list of dashboard slugs. dashboards doesn't expose a
-        // list property, so we iterate known slugs by checking existence
-        // (this is a best-effort gallery — the DashboardsModel's actual
-        // list is in its Rust internals which we can't enumerate from QML
-        // without a dedicated property).
-        const known = [
-            "overview", "gpus", "storage", "network", "hardware"
-        ]
-        for (let i = 0; i < known.length; ++i) {
-            const slug = known[i]
+        // Enumerate dashboards from the model's slugListJson.
+        const slugs = JSON.parse(app.dashboards.slugListJson || "[]")
+        for (let i = 0; i < slugs.length; ++i) {
+            const slug = slugs[i]
             const name = app.dashboards.nameOf(slug).toString()
             if (name.length === 0) continue
             addCard(slug, name)
         }
-
-        // Also try to discover user-created dashboards by scanning
-        // incremental names. This is a workaround — ideally DashboardsModel
-        // exposes a list property.
-        // TODO: enumerate user dashboards once DashboardsModel exposes
-        // a slugList property.
     }
 
     function addCard(slug, name) {

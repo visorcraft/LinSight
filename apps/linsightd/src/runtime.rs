@@ -85,6 +85,7 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     // held until the runtime exits so a writer-thread crash is observable
     // on shutdown (the join will surface a panic).
     let mut _history_join: Option<std::thread::JoinHandle<()>> = None;
+    let mut history_writer_clone: Option<crate::history::HistoryWriter> = None;
     if std::env::var_os("LINSIGHT_HISTORY").is_some() {
         let db_path = history_db_path();
         let retention = history::retention_from_env(
@@ -96,6 +97,7 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
         }
         match history::spawn(db_path.clone(), retention) {
             Ok((writer, join)) => {
+                history_writer_clone = Some(writer.clone());
                 scheduler.set_history_writer(Some(writer));
                 scheduler.set_history_db_path(Some(db_path));
                 _history_join = Some(join);
@@ -109,7 +111,13 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
         let toml_path = alerts_config_path();
         match AlertEngine::load(&toml_path) {
             Ok(engine) => {
-                scheduler.set_alert_engine(Some(engine.into_handle()));
+                let handle = engine.into_handle();
+                // If history is also enabled, wire the writer so alert
+                // events survive daemon restarts.
+                if let Some(ref writer) = history_writer_clone {
+                    handle.set_event_writer(Some(writer.clone()));
+                }
+                scheduler.set_alert_engine(Some(handle));
                 scheduler.set_alerts_config_path(Some(toml_path));
             }
             Err(e) => {
@@ -124,7 +132,10 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     let mut _prom_shutdown: Option<Arc<AtomicBool>> = None;
     if let Ok(bind) = std::env::var("LINSIGHT_PROM_BIND") {
         match prom::spawn(&bind, Arc::clone(&scheduler), Arc::clone(&registry)) {
-            Ok(prom_shutdown) => _prom_shutdown = Some(prom_shutdown),
+            Ok(prom_shutdown) => {
+                scheduler.lock().unwrap().set_prom_running(true);
+                _prom_shutdown = Some(prom_shutdown);
+            }
             Err(e) => warn!(error = ?e, "Prometheus exporter disabled"),
         }
     }
@@ -147,7 +158,7 @@ pub fn nickname_store_path() -> PathBuf {
     }
 }
 
-fn alerts_config_path() -> PathBuf {
+pub(crate) fn alerts_config_path() -> PathBuf {
     if let Some(d) = std::env::var_os("XDG_CONFIG_HOME") {
         PathBuf::from(d).join("linsight/alerts.toml")
     } else if let Some(h) = std::env::var_os("HOME") {

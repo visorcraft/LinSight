@@ -46,6 +46,8 @@ use linsight_protocol::AlertRuleJson;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::history::HistoryWriter;
+
 /// Whether the alert transitioned to firing or back to normal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -176,6 +178,8 @@ pub struct AlertEngine {
     values: HashMap<String, f64>,
     /// Ring buffer of recent fire/clear events; newest-first (front = newest).
     events: VecDeque<AlertEvent>,
+    /// Optional history writer for persisting events to SQLite.
+    event_writer: Option<HistoryWriter>,
 }
 
 #[derive(Clone)]
@@ -187,6 +191,13 @@ impl AlertEngineHandle {
     pub fn on_sample(&self, sample: &Sample) {
         let mut eng = self.inner.lock().unwrap();
         eng.observe(sample);
+    }
+
+    /// Attach a history writer so alert fire/clear events are persisted
+    /// alongside samples.
+    pub fn set_event_writer(&self, writer: Option<HistoryWriter>) {
+        let mut eng = self.inner.lock().unwrap();
+        eng.event_writer = writer;
     }
 
     /// Return a JSON-encoded list of recent alert events, newest first.
@@ -333,7 +344,12 @@ impl AlertEngine {
             });
         }
         info!(count = compiled.len(), "alerts loaded");
-        Ok(Self { rules: compiled, values: HashMap::new(), events: VecDeque::new() })
+        Ok(Self {
+            rules: compiled,
+            values: HashMap::new(),
+            events: VecDeque::new(),
+            event_writer: None,
+        })
     }
 
     pub fn into_handle(self) -> AlertEngineHandle {
@@ -437,12 +453,16 @@ impl AlertEngine {
     }
 
     /// Push an event to the front of the ring buffer (newest-first), evicting
-    /// the oldest entry when the buffer is full.
+    /// the oldest entry when the buffer is full. Also persists to SQLite when
+    /// a history writer is attached.
     fn push_event(&mut self, event: AlertEvent) {
         if self.events.len() == EVENT_CAPACITY {
             self.events.pop_back();
         }
-        self.events.push_front(event);
+        self.events.push_front(event.clone());
+        if let Some(ref writer) = self.event_writer {
+            writer.record_alert_event(event);
+        }
     }
 }
 
@@ -798,6 +818,7 @@ impl AlertEngine {
             }],
             values: HashMap::new(),
             events: VecDeque::new(),
+            event_writer: None,
         }
     }
 

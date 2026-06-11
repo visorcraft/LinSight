@@ -379,6 +379,42 @@ impl Client {
         })
     }
 
+    pub fn get_daemon_settings(
+        &self,
+        timeout: Duration,
+    ) -> Result<(bool, bool, bool, Option<String>), RpcError> {
+        self.request_rpc(RequestOp::GetDaemonSettings, timeout, |payload| match payload {
+            ResponsePayload::DaemonSettings {
+                history_enabled,
+                alerts_enabled,
+                prom_enabled,
+                prom_bind,
+            } => Ok((history_enabled, alerts_enabled, prom_enabled, prom_bind)),
+            other => Err(other),
+        })
+    }
+
+    pub fn set_daemon_settings(
+        &self,
+        history: Option<bool>,
+        alerts: Option<bool>,
+        prom: Option<bool>,
+        timeout: Duration,
+    ) -> Result<(bool, bool, bool), RpcError> {
+        self.request_rpc(
+            RequestOp::SetDaemonSettings { history, alerts, prom },
+            timeout,
+            |payload| match payload {
+                ResponsePayload::DaemonSettingsSet {
+                    history_enabled,
+                    alerts_enabled,
+                    prom_enabled,
+                } => Ok((history_enabled, alerts_enabled, prom_enabled)),
+                other => Err(other),
+            },
+        )
+    }
+
     /// Send a v2 `Request` and wait for the matching `Response`.
     /// `extract` pattern-matches the success payload into the caller's
     /// return type, returning `Err(payload)` if the variant doesn't

@@ -77,6 +77,14 @@ pub enum RequestOp {
     /// of entries returned; `None` returns all (up to the engine's ring-buffer
     /// capacity). New variant — appended at end per wire-format stability rules.
     ListAlertEvents { limit: Option<u32> },
+    /// Query current daemon settings (history, alerts, prom enabled state).
+    /// New variant — appended at end per wire-format stability rules.
+    GetDaemonSettings,
+    /// Toggle daemon subsystems at runtime. `history`, `alerts`, and `prom`
+    /// are tristated: `Some(true)` enables, `Some(false)` disables,
+    /// `None` leaves unchanged.
+    /// New variant — appended at end per wire-format stability rules.
+    SetDaemonSettings { history: Option<bool>, alerts: Option<bool>, prom: Option<bool> },
 }
 
 /// A daemon → client message.
@@ -139,6 +147,15 @@ pub enum ResponsePayload {
     /// fire/clear events, newest first. New variant — appended at end per
     /// wire-format stability rules.
     AlertEventList { events_json: String },
+    /// Reply to `RequestOp::GetDaemonSettings`. Current subsystem states.
+    DaemonSettings {
+        history_enabled: bool,
+        alerts_enabled: bool,
+        prom_enabled: bool,
+        prom_bind: Option<String>,
+    },
+    /// Reply to `RequestOp::SetDaemonSettings`. Echoes the applied state.
+    DaemonSettingsSet { history_enabled: bool, alerts_enabled: bool, prom_enabled: bool },
 }
 
 /// Failure payload for a v2 `ServerMsg::Response`.
@@ -346,7 +363,7 @@ mod tests {
             ClientMsg::Hello { protocol_version: 999, client_name: "x".into(), auth_token: None };
         assert!(matches!(
             verify_hello(&hello),
-            Err(HandshakeError::VersionMismatch { client: 999, daemon: 2 })
+            Err(HandshakeError::VersionMismatch { client: 999, daemon: 3 })
         ));
     }
 
@@ -555,6 +572,48 @@ mod tests {
         round_trip(ServerMsg::Response {
             req_id: 17,
             result: Ok(ResponsePayload::AlertEventList { events_json: "[]".into() }),
+        });
+    }
+
+    #[test]
+    fn request_get_daemon_settings_round_trips() {
+        round_trip(ClientMsg::Request { req_id: 18, op: RequestOp::GetDaemonSettings });
+    }
+
+    #[test]
+    fn request_set_daemon_settings_round_trips() {
+        round_trip(ClientMsg::Request {
+            req_id: 19,
+            op: RequestOp::SetDaemonSettings {
+                history: Some(true),
+                alerts: Some(false),
+                prom: None,
+            },
+        });
+    }
+
+    #[test]
+    fn response_daemon_settings_round_trips() {
+        round_trip(ServerMsg::Response {
+            req_id: 18,
+            result: Ok(ResponsePayload::DaemonSettings {
+                history_enabled: true,
+                alerts_enabled: false,
+                prom_enabled: true,
+                prom_bind: Some("127.0.0.1:9777".into()),
+            }),
+        });
+    }
+
+    #[test]
+    fn response_daemon_settings_set_round_trips() {
+        round_trip(ServerMsg::Response {
+            req_id: 19,
+            result: Ok(ResponsePayload::DaemonSettingsSet {
+                history_enabled: true,
+                alerts_enabled: true,
+                prom_enabled: false,
+            }),
         });
     }
 }

@@ -35,25 +35,39 @@ use linsight_core::{Reading, Sample, SensorId, parse_duration_dhm};
 use rusqlite::{Connection, OpenFlags, params};
 use tracing::{error, info, warn};
 
+use crate::alerts::AlertEvent;
+
 const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_BATCH: usize = 4096;
 const QUEUE_CAPACITY: usize = 16_384;
+
+/// Record type carried by the history channel. Samples are the hot path;
+/// alert events are rare (only on fire/clear transitions).
+enum HistoryRecord {
+    Sample(Sample),
+    AlertEvent(AlertEvent),
+}
 
 /// Async-write handle. Cloneable so multiple producers can `record(sample)`
 /// without coordinating around a mutex. Dropping the last clone signals the
 /// writer thread to flush + exit.
 #[derive(Clone)]
 pub struct HistoryWriter {
-    tx: SyncSender<Sample>,
+    tx: SyncSender<HistoryRecord>,
     dropped: Arc<AtomicU64>,
 }
 
 impl HistoryWriter {
     pub fn record(&self, sample: Sample) {
-        // The scheduler hot path must never block on history I/O pressure.
-        // Under sustained backlog we intentionally drop samples and let the
-        // writer thread report aggregated pressure.
-        match self.tx.try_send(sample) {
+        self.send(HistoryRecord::Sample(sample));
+    }
+
+    pub fn record_alert_event(&self, event: AlertEvent) {
+        self.send(HistoryRecord::AlertEvent(event));
+    }
+
+    fn send(&self, record: HistoryRecord) {
+        match self.tx.try_send(record) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -67,9 +81,11 @@ impl HistoryWriter {
 
 /// Delete all rows with `ts < cutoff_micros`. Returns the number of rows removed.
 pub(crate) fn prune_older_than(conn: &Connection, cutoff_micros: u64) -> Result<usize> {
-    let removed =
+    let removed_samples =
         conn.execute("DELETE FROM samples WHERE ts < ?1", params![cutoff_micros as i64])?;
-    Ok(removed)
+    let removed_events =
+        conn.execute("DELETE FROM alert_events WHERE ts < ?1", params![cutoff_micros as i64])?;
+    Ok(removed_samples + removed_events)
 }
 
 /// Open the history database (creating it if needed) and spawn the writer
@@ -107,7 +123,14 @@ pub fn spawn(
             state     TEXT,
             PRIMARY KEY (sensor_id, ts)
          ) WITHOUT ROWID;
-         CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);",
+         CREATE INDEX IF NOT EXISTS samples_ts ON samples(ts);
+         CREATE TABLE IF NOT EXISTS alert_events (
+            rule      TEXT NOT NULL,
+            ts        INTEGER NOT NULL,
+            kind      TEXT NOT NULL,
+            PRIMARY KEY (rule, ts)
+         ) WITHOUT ROWID;
+         CREATE INDEX IF NOT EXISTS alert_events_ts ON alert_events(ts);",
     )
     .context("init schema")?;
 
@@ -128,7 +151,7 @@ pub fn spawn(
 
     let dropped = Arc::new(AtomicU64::new(0));
     let writer_dropped = Arc::clone(&dropped);
-    let (tx, rx) = sync_channel::<Sample>(QUEUE_CAPACITY);
+    let (tx, rx) = sync_channel::<HistoryRecord>(QUEUE_CAPACITY);
     let handle = thread::spawn(move || {
         if let Err(e) = run_writer(conn, rx, writer_dropped, retention) {
             error!(error = ?e, "history writer thread crashed");
@@ -182,41 +205,54 @@ pub(crate) fn maybe_prune(
 
 fn run_writer(
     mut conn: Connection,
-    rx: Receiver<Sample>,
+    rx: Receiver<HistoryRecord>,
     dropped: Arc<AtomicU64>,
     retention: Option<Duration>,
 ) -> Result<()> {
-    let mut pending: Vec<Sample> = Vec::with_capacity(MAX_BATCH);
+    let mut pending_samples: Vec<Sample> = Vec::with_capacity(MAX_BATCH);
+    let mut pending_events: Vec<AlertEvent> = Vec::with_capacity(64);
     let mut last_flush = Instant::now();
     let mut last_prune = Instant::now()
         .checked_sub(PRUNE_INTERVAL - PRUNE_INITIAL_DELAY)
         .unwrap_or_else(Instant::now);
     loop {
         match rx.recv_timeout(FLUSH_INTERVAL) {
-            Ok(s) => pending.push(s),
+            Ok(HistoryRecord::Sample(s)) => pending_samples.push(s),
+            Ok(HistoryRecord::AlertEvent(e)) => pending_events.push(e),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             // All producers gone — flush remaining + exit. Errors on this
             // final flush are surfaced so an operator notices if the last
             // batch was lost to e.g. disk-full.
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 log_dropped_pressure(&dropped);
-                if !pending.is_empty()
-                    && let Err(e) = flush(&mut conn, &pending)
+                if !pending_samples.is_empty()
+                    && let Err(e) = flush_samples(&mut conn, &pending_samples)
                 {
-                    warn!(error = ?e, count = pending.len(), "final history flush failed; samples lost");
+                    warn!(error = ?e, count = pending_samples.len(), "final history flush failed; samples lost");
+                }
+                if !pending_events.is_empty()
+                    && let Err(e) = flush_alert_events(&mut conn, &pending_events)
+                {
+                    warn!(error = ?e, count = pending_events.len(), "final alert event flush failed");
                 }
                 return Ok(());
             }
         }
-        if pending.len() >= MAX_BATCH
-            || (!pending.is_empty() && last_flush.elapsed() >= FLUSH_INTERVAL)
+        if pending_samples.len() >= MAX_BATCH
+            || (!pending_samples.is_empty() && last_flush.elapsed() >= FLUSH_INTERVAL)
         {
             log_dropped_pressure(&dropped);
-            if let Err(e) = flush(&mut conn, &pending) {
+            if let Err(e) = flush_samples(&mut conn, &pending_samples) {
                 warn!(error = ?e, "history flush failed");
             }
-            pending.clear();
+            pending_samples.clear();
             last_flush = Instant::now();
+        }
+        if !pending_events.is_empty() {
+            if let Err(e) = flush_alert_events(&mut conn, &pending_events) {
+                warn!(error = ?e, "alert event flush failed");
+            }
+            pending_events.clear();
         }
         // Evaluate the prune gate on every iteration so an idle daemon (no
         // samples → no flushes) still rotates stale rows on schedule.
@@ -231,7 +267,7 @@ fn log_dropped_pressure(dropped: &AtomicU64) {
     }
 }
 
-fn flush(conn: &mut Connection, batch: &[Sample]) -> Result<()> {
+fn flush_samples(conn: &mut Connection, batch: &[Sample]) -> Result<()> {
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare_cached(
@@ -250,6 +286,24 @@ fn flush(conn: &mut Connection, batch: &[Sample]) -> Result<()> {
                     Reading::Table(_) => continue,
                 };
             stmt.execute(params![s.sensor.as_str(), s.ts_micros as i64, scalar, counter, state])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn flush_alert_events(conn: &mut Connection, batch: &[AlertEvent]) -> Result<()> {
+    let tx = conn.transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT OR REPLACE INTO alert_events (rule, ts, kind) VALUES (?1, ?2, ?3)",
+        )?;
+        for e in batch {
+            let kind_str = match e.kind {
+                crate::alerts::AlertEventKind::Fired => "fired",
+                crate::alerts::AlertEventKind::Cleared => "cleared",
+            };
+            stmt.execute(params![&e.rule, e.ts_micros as i64, kind_str])?;
         }
     }
     tx.commit()?;
@@ -406,7 +460,7 @@ mod tests {
 
     #[test]
     fn record_drops_when_queue_is_full_without_blocking() {
-        let (tx, rx) = sync_channel::<Sample>(1);
+        let (tx, rx) = sync_channel::<HistoryRecord>(1);
         let writer = HistoryWriter { tx, dropped: Arc::new(AtomicU64::new(0)) };
         let sensor = SensorId::new("cpu.util");
 

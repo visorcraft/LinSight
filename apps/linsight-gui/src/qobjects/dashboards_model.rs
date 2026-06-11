@@ -356,6 +356,10 @@ pub mod ffi {
         #[qobject]
         #[qml_element]
         #[qproperty(QString, summary_json)]
+        // JSON array of dashboard slugs, newest-first. QML parses this
+        // to enumerate user-created dashboards without probing
+        // incremental names.
+        #[qproperty(QString, slug_list_json)]
         // Last-error qproperty replaces the `"error: ..."`-prefixed
         // string sentinels the original draft returned for create /
         // rename / duplicate / save_layout. QML callers check for an
@@ -407,6 +411,7 @@ pub mod ffi {
 
 pub struct DashboardsModelRust {
     summary_json: QString,
+    slug_list_json: QString,
     last_error: QString,
 }
 
@@ -414,7 +419,12 @@ impl Default for DashboardsModelRust {
     fn default() -> Self {
         migrate_legacy_dashboard();
         let arr = current_summary_json();
-        Self { summary_json: QString::from(arr.as_str()), last_error: QString::default() }
+        let slugs = current_slug_list_json();
+        Self {
+            summary_json: QString::from(arr.as_str()),
+            slug_list_json: QString::from(slugs.as_str()),
+            last_error: QString::default(),
+        }
     }
 }
 
@@ -433,10 +443,18 @@ fn current_summary_json() -> String {
     serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
 }
 
+fn current_slug_list_json() -> String {
+    let files = list_files();
+    let slugs: Vec<&str> = files.iter().map(|d| d.slug.as_str()).collect();
+    serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into())
+}
+
 impl ffi::DashboardsModel {
     pub fn refresh(mut self: Pin<&mut Self>) {
         let s = current_summary_json();
+        let slugs = current_slug_list_json();
         self.as_mut().set_summary_json(QString::from(s.as_str()));
+        self.as_mut().set_slug_list_json(QString::from(slugs.as_str()));
     }
 
     pub fn create(mut self: Pin<&mut Self>, name: &QString) -> QString {

@@ -57,6 +57,7 @@ pub struct Scheduler {
     history_db_path: Option<PathBuf>,
     alerts_config_path: Option<PathBuf>,
     alerts: Option<AlertEngineHandle>,
+    prom_running: bool,
 }
 
 impl Scheduler {
@@ -68,6 +69,7 @@ impl Scheduler {
             history_db_path: None,
             alerts_config_path: None,
             alerts: None,
+            prom_running: false,
         }
     }
 
@@ -268,6 +270,82 @@ impl Scheduler {
     /// Expose the alert engine handle for RPC dispatch outside the tick path.
     pub fn alert_engine_handle(&self) -> Option<AlertEngineHandle> {
         self.alerts.clone()
+    }
+
+    /// Toggle the history subsystem at runtime. Returns Ok on success or an
+    /// error message on failure. Keeps the alert engine's event writer in
+    /// sync so fire/clear events persist when both subsystems are enabled.
+    pub fn toggle_history(&mut self, enable: bool) -> Result<(), String> {
+        if enable {
+            if self.history.is_some() {
+                return Ok(());
+            }
+            let db_path = linsight_core::history_db_path();
+            let retention = crate::history::retention_from_env(
+                std::env::var("LINSIGHT_HISTORY_RETENTION").ok().as_deref(),
+            );
+            match crate::history::spawn(db_path.clone(), retention) {
+                Ok((writer, _join)) => {
+                    if let Some(ref alerts) = self.alerts {
+                        alerts.set_event_writer(Some(writer.clone()));
+                    }
+                    self.history = Some(writer);
+                    self.history_db_path = Some(db_path);
+                    Ok(())
+                }
+                Err(e) => Err(format!("history spawn failed: {e}")),
+            }
+        } else {
+            if let Some(ref alerts) = self.alerts {
+                alerts.set_event_writer(None);
+            }
+            self.history = None;
+            self.history_db_path = None;
+            Ok(())
+        }
+    }
+
+    /// Toggle the alert subsystem at runtime. Returns Ok on success or an
+    /// error message on failure. Wires the history writer into the alert
+    /// engine when both subsystems are enabled.
+    pub fn toggle_alerts(&mut self, enable: bool) -> Result<(), String> {
+        if enable {
+            if self.alerts.is_some() {
+                return Ok(());
+            }
+            let toml_path = crate::runtime::alerts_config_path();
+            match crate::alerts::AlertEngine::load(&toml_path) {
+                Ok(engine) => {
+                    let handle = engine.into_handle();
+                    if let Some(ref writer) = self.history {
+                        handle.set_event_writer(Some(writer.clone()));
+                    }
+                    self.alerts = Some(handle);
+                    self.alerts_config_path = Some(toml_path);
+                    Ok(())
+                }
+                Err(e) => Err(format!("alert load failed: {e}")),
+            }
+        } else {
+            self.alerts = None;
+            self.alerts_config_path = None;
+            Ok(())
+        }
+    }
+
+    /// Set whether the Prometheus exporter actually bound and is running.
+    pub fn set_prom_running(&mut self, running: bool) {
+        self.prom_running = running;
+    }
+
+    /// Current daemon settings snapshot.
+    pub fn daemon_settings(&self) -> (bool, bool, bool, Option<String>) {
+        (
+            self.history.is_some(),
+            self.alerts.is_some(),
+            self.prom_running,
+            std::env::var("LINSIGHT_PROM_BIND").ok(),
+        )
     }
 }
 
