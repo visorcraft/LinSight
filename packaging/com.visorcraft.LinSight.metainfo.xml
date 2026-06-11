@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.10.0" date="2026-06-10">
+      <description>
+        <p>Process explorer page with sortable, filterable process table.
+        SMART disk health sensors via udisks2. Alert event log with per-rule
+        cooldown. Sensor snapshot caches for disk, net, fs, and system plugins.
+        History charts with configurable retention pruning.</p>
+      </description>
+    </release>
     <release version="1.9.0" date="2026-06-04">
       <description>
         <p>Hardening and performance update: client subscriptions are isolated

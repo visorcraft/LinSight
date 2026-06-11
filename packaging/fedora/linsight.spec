@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.9.0
+Version:        1.10.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Wed Jun 10 2026 VisorCraft LLC <support@visorcraft.com> - 1.10.0-1
+- Process explorer page with sortable/filterable process table, SMART disk
+  health sensors, alert event log and cooldown, sensor snapshot caches, and
+  history charts with retention pruning.
+
 * Thu Jun 04 2026 VisorCraft LLC <support@visorcraft.com> - 1.9.0-1
 - Harden daemon subscriptions, history, Prometheus, plugin loading, dashboard
   persistence, CLI JSON/socket defaults, tunnel shutdown, and CPU/memory sensor

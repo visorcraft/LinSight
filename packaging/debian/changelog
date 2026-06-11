@@ -1,3 +1,12 @@
+linsight (1.10.0-1) unstable; urgency=medium
+
+  * v1.10.0 release. Process explorer page with sortable/filterable process
+    table. SMART disk health sensors via udisks2. Alert event log with
+    per-rule cooldown. Sensor snapshot caches. History charts with retention
+    pruning.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 10 Jun 2026 12:00:00 +0000
+
 linsight (1.9.0-1) unstable; urgency=medium
 
   * v1.9.0 release. Harden daemon subscriptions, history, Prometheus, plugin

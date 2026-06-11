@@ -9,6 +9,25 @@ All notable changes to LinSight. Format roughly follows
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-06-10
+
+- **Process explorer page.** A new Processes page shows a sortable,
+  filterable table of running processes (PID, name, CPU%, memory%, RSS,
+  threads, state) sourced from the daemon's `proc.list` sensor. The page
+  subscribes to `proc.list` only while visible so the 5-second `/proc`
+  sweep doesn't run in the background. Sort by any column (ascending /
+  descending toggle); filter by name or PID. The `proc.list` sample stream
+  is excluded from the initial batch subscribe and managed independently
+  via `OverviewModel.set_process_stream_enabled`.
+- **SMART disk health.** A new built-in sensor plugin reads ATA and NVMe
+  SMART data via udisks2's D-Bus interface (no root required). Sensors
+  include temperature, health (`ok`/`failing`), power-on hours, wear
+  percentage (NVMe), and reallocated sectors (ATA). The plugin caches
+  property snapshots for 30 s and silently registers zero sensors when
+  udisks2 is absent. SMART tiles appear inside each disk's section on the
+  Storage page, and state-kind tiles now color-code `ok` as green and
+  `failing` as red alongside the existing `up`/`down`/`active`/`dead`
+  palette.
 - **History charts in the GUI.** Click any scalar or counter tile to open a
   per-sensor history chart (15m / 1h / 24h / 7d ranges) backed by the
   daemon's SQLite history; the dialog explains how to enable history when
