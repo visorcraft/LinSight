@@ -78,6 +78,9 @@ i18n-extract:
         qml/AlertsPage.qml \
         qml/HistoryChart.qml \
         qml/HistoryDialog.qml \
+        qml/NetworkPage.qml \
+        qml/NetworkCard.qml \
+        qml/NetworkMetric.qml \
         -ts i18n/linsight_en.ts i18n/linsight_de.ts i18n/linsight_ja.ts
 
 # Compile .ts catalogs to runtime-loadable .qm files. Run after

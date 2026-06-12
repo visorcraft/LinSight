@@ -49,6 +49,9 @@ fn main() {
             "qml/AlertsPage.qml",
             "qml/HistoryChart.qml",
             "qml/HistoryDialog.qml",
+            "qml/NetworkPage.qml",
+            "qml/NetworkCard.qml",
+            "qml/NetworkMetric.qml",
         ]),
     )
     .file("src/qobjects/overview_model.rs")
