@@ -124,6 +124,7 @@ Kirigami.Page {
                     placeholderText: qsTr("Filter by name or PID…")
                     selectByMouse: true
                     Accessible.name: qsTr("Filter processes")
+                    rightPadding: clearFilterButton.width + app.tokens.spaceS
                     text: app.preferences ? app.preferences.process_table_filter_text : ""
 
                     onTextChanged: filterDebounceTimer.restart()
@@ -140,6 +141,7 @@ Kirigami.Page {
 
                     // Clear-filter affordance so a persisted hidden filter doesn't look broken.
                     Controls.ToolButton {
+                        id: clearFilterButton
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         visible: filterField.text.length > 0
@@ -147,6 +149,8 @@ Kirigami.Page {
                         flat: true
                         onClicked: filterField.text = ""
                         Controls.ToolTip.text: qsTr("Clear filter")
+                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.delay: 400
                     }
                 }
             }
