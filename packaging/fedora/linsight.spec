@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.11.0
+Version:        1.13.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Fri Jun 12 2026 VisorCraft LLC <support@visorcraft.com> - 1.13.0-1
+- v1.13.0 release. Multi-host view: save remote hosts, switch between them
+  from the sidebar, and survive reconnects with catalogue rebuild,
+  subscription replay, and pump-interval replay.
+
 * Thu Jun 11 2026 VisorCraft LLC <support@visorcraft.com> - 1.11.0-1
 - Version bump to 1.11.0.
 

@@ -7,7 +7,7 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
-## [1.12.0] — Unreleased
+## [1.13.0] — Unreleased
 
 - **Multi-host view.** Save remote hosts in `~/.config/linsight/hosts.json`
   and switch between them from the sidebar dropdown ("This computer", saved
