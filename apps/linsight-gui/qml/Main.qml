@@ -110,6 +110,61 @@ Kirigami.ApplicationWindow {
         historyDialog.openForSensor(sensorId, label, unit)
     }
 
+    // Host switcher model: "This computer", each saved host, then "Manage…".
+    // Built from HostsModel.hosts_json so adding/removing hosts updates the
+    // dropdown without a new QObject.
+    property var hostSwitcherModel: []
+    function refreshHostSwitcherModel() {
+        let entries = [{ label: qsTr("This computer"), target: "local", url: "local" }]
+        if (app.hostsModel) {
+            try {
+                const hosts = JSON.parse(app.hostsModel.hosts_json || "[]")
+                for (let i = 0; i < hosts.length; i++) {
+                    entries.push({
+                        label: hosts[i].name,
+                        target: "host:" + hosts[i].name,
+                        url: hosts[i].url
+                    })
+                }
+            } catch (e) {
+                entries = [{ label: qsTr("This computer"), target: "local", url: "local" }]
+            }
+        }
+        entries.push({ label: qsTr("Manage…"), target: "manage", url: "" })
+        app.hostSwitcherModel = entries
+    }
+    function hostSwitcherActivated(index) {
+        if (index < 0 || index >= app.hostSwitcherModel.length) return
+        const entry = app.hostSwitcherModel[index]
+        if (entry.target === "local") {
+            app.hostsModel.connect_local()
+        } else if (entry.target === "manage") {
+            app.goTo("settings")
+        } else if (entry.target.indexOf("host:") === 0) {
+            app.hostsModel.connect_to(entry.target.substring(5))
+        }
+    }
+    function activeHostSwitcherIndex() {
+        if (!app.hostsModel) return 0
+        const active = app.hostsModel.active_host.toString()
+        for (let i = 0; i < app.hostSwitcherModel.length; i++) {
+            const entry = app.hostSwitcherModel[i]
+            if (entry.target === "local" && active === "local") return i
+            if (entry.target.indexOf("host:") === 0 && active === entry.url) return i
+        }
+        return 0
+    }
+    Connections {
+        target: app.hostsModel
+        function onHostsJsonChanged() { app.refreshHostSwitcherModel() }
+        function onActiveHostChanged() { app.refreshHostSwitcherModel() }
+        function onLastErrorChanged() {
+            if (app.hostsModel && app.hostsModel.lastError.toString().length > 0) {
+                app.showPassiveNotification(app.hostsModel.lastError, 5000)
+            }
+        }
+    }
+
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
     pageStack.initialPage: overviewPage
 
@@ -377,6 +432,51 @@ Kirigami.ApplicationWindow {
                         font.pixelSize: tokens.textCaption
                         opacity: 0.55
                         color: tokens.textPrimary
+                    }
+                }
+            }
+
+            // Host switcher: lives right under the header so the current
+            // daemon target is visible from every page. Selecting a host
+            // reconnects the shared Workspace; failures surface via the
+            // HostsModel.lastError -> showPassiveNotification path.
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: tokens.spaceL
+                Layout.rightMargin: tokens.spaceL
+                Layout.topMargin: tokens.spaceS
+                Layout.bottomMargin: tokens.spaceS
+                spacing: tokens.spaceM
+                visible: !drawer.isCollapsed
+
+                ThemedComboBox {
+                    id: hostSwitcher
+                    Layout.fillWidth: true
+                    textRole: "label"
+                    enabled: app.hostsModel && !app.hostsModel.is_connecting
+                    model: app.hostSwitcherModel
+                    currentIndex: app.activeHostSwitcherIndex()
+                    Component.onCompleted: app.refreshHostSwitcherModel()
+                    onActivated: index => app.hostSwitcherActivated(index)
+                }
+
+                Rectangle {
+                    id: connDot
+                    Layout.preferredWidth: 10
+                    Layout.preferredHeight: 10
+                    radius: 5
+                    color: app.dashModel && app.dashModel.connected
+                           ? tokens.positive : tokens.negative
+                    MouseArea {
+                        id: connDotMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                    }
+                    Controls.ToolTip {
+                        text: app.dashModel && app.dashModel.connected
+                              ? qsTr("Connected") : qsTr("Disconnected")
+                        visible: connDotMouse.containsMouse
+                        delay: 400
                     }
                 }
             }

@@ -150,6 +150,16 @@ For most remote use, an SSH-forwarded socket
 (`ssh -L $XDG_RUNTIME_DIR/linsight.sock:remote-runtime/linsight.sock host`)
 is simpler and equally secure.
 
+**Remote host switching in the GUI**
+
+The Settings page lets you save remote hosts (`ssh://[user@]host[:port]`)
+and switch between them from the sidebar dropdown. Hosts are persisted in
+`~/.config/linsight/hosts.json`. Selecting a host reconnects the GUI to that
+daemon; a failed reconnect keeps the previous connection alive and shows an
+error banner. You can also launch straight to a remote host with
+`linsight --connect ssh://user@host`. Key-based SSH authentication is
+assumed; the trust model is the same as using `ssh -L` manually.
+
 ---
 
 ## Build

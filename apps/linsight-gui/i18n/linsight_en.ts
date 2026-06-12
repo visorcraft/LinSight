@@ -734,7 +734,7 @@ Add one using the button above.</source>
 <context>
     <name>DashboardViewPage</name>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="366"/>
+        <location filename="../qml/DashboardViewPage.qml" line="354"/>
         <source>Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
@@ -784,32 +784,32 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="373"/>
+        <location filename="../qml/DashboardViewPage.qml" line="361"/>
         <source>%1 tile(s)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="381"/>
+        <location filename="../qml/DashboardViewPage.qml" line="369"/>
         <source>Export</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="386"/>
+        <location filename="../qml/DashboardViewPage.qml" line="374"/>
         <source>Edit</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="391"/>
+        <location filename="../qml/DashboardViewPage.qml" line="379"/>
         <source>Gallery</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="408"/>
+        <location filename="../qml/DashboardViewPage.qml" line="396"/>
         <source>This dashboard is empty. Open it in the Editor to add sensors.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="467"/>
+        <location filename="../qml/DashboardViewPage.qml" line="455"/>
         <source> (hidden)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1045,95 +1045,116 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="329"/>
+        <location filename="../qml/Main.qml" line="118"/>
+        <location filename="../qml/Main.qml" line="130"/>
+        <source>This computer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="133"/>
+        <source>Manage…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="394"/>
         <source>Open Sidebar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="330"/>
+        <location filename="../qml/Main.qml" line="395"/>
         <source>Close Sidebar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="366"/>
+        <location filename="../qml/Main.qml" line="431"/>
         <source>Multi-GPU system insight</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="381"/>
+        <location filename="../qml/Main.qml" line="477"/>
+        <source>Connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="477"/>
+        <source>Disconnected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/Main.qml" line="491"/>
         <source>WORKSPACE</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="390"/>
+        <location filename="../qml/Main.qml" line="500"/>
         <source>Overview</source>
         <translation type="unfinished">Overview</translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="398"/>
-        <location filename="../qml/Main.qml" line="619"/>
+        <location filename="../qml/Main.qml" line="508"/>
+        <location filename="../qml/Main.qml" line="729"/>
         <source>GPUs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="406"/>
-        <location filename="../qml/Main.qml" line="620"/>
+        <location filename="../qml/Main.qml" line="516"/>
+        <location filename="../qml/Main.qml" line="730"/>
         <source>Storage</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="414"/>
-        <location filename="../qml/Main.qml" line="621"/>
+        <location filename="../qml/Main.qml" line="524"/>
+        <location filename="../qml/Main.qml" line="731"/>
         <source>Network</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="422"/>
+        <location filename="../qml/Main.qml" line="532"/>
         <source>Processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="430"/>
+        <location filename="../qml/Main.qml" line="540"/>
         <source>Hardware</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="443"/>
+        <location filename="../qml/Main.qml" line="553"/>
         <source>New Window</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="462"/>
+        <location filename="../qml/Main.qml" line="572"/>
         <source>DASHBOARDS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="502"/>
+        <location filename="../qml/Main.qml" line="612"/>
         <source>Alerts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="510"/>
+        <location filename="../qml/Main.qml" line="620"/>
         <source>New Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="524"/>
+        <location filename="../qml/Main.qml" line="634"/>
         <source>SYSTEM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="533"/>
+        <location filename="../qml/Main.qml" line="643"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="541"/>
+        <location filename="../qml/Main.qml" line="651"/>
         <source>About</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/Main.qml" line="612"/>
+        <location filename="../qml/Main.qml" line="722"/>
         <source>Disconnected from linsightd — values shown are last known.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1216,47 +1237,57 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="138"/>
-        <source>PID</source>
+        <location filename="../qml/ProcessesPage.qml" line="123"/>
+        <source>Filter processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="139"/>
-        <source>Name</source>
+        <source>PID</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="140"/>
-        <source>CPU %</source>
+        <source>Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="141"/>
-        <source>Mem %</source>
+        <source>CPU %</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="142"/>
-        <source>RSS</source>
+        <source>Mem %</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="143"/>
-        <source>Threads</source>
+        <source>RSS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="144"/>
+        <source>Threads</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="145"/>
         <source>State</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="191"/>
+        <location filename="../qml/ProcessesPage.qml" line="192"/>
         <source>No processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="197"/>
+        <location filename="../qml/ProcessesPage.qml" line="192"/>
+        <source>No matching processes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="198"/>
         <source>Waiting for proc.list samples…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1264,132 +1295,162 @@ Add one using the button above.</source>
 <context>
     <name>SettingsPage</name>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="62"/>
+        <location filename="../qml/SettingsPage.qml" line="76"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="68"/>
+        <location filename="../qml/SettingsPage.qml" line="82"/>
         <source>Daemon behavior, sensors, and always-on subsystems.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="80"/>
+        <location filename="../qml/SettingsPage.qml" line="94"/>
         <source>Reload</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="82"/>
+        <location filename="../qml/SettingsPage.qml" line="96"/>
         <source>Re-read preferences.json from disk.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="109"/>
+        <location filename="../qml/SettingsPage.qml" line="123"/>
         <source>Start page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="110"/>
+        <location filename="../qml/SettingsPage.qml" line="124"/>
         <source>Which page LinSight opens on launch. A deleted dashboard falls back to Overview automatically.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="115"/>
+        <location filename="../qml/SettingsPage.qml" line="129"/>
         <source>Sample interval</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="116"/>
+        <location filename="../qml/SettingsPage.qml" line="130"/>
         <source>How often the daemon checks for new sensor data. Lower values feel smoother; higher values reduce daemon CPU usage. The setting is per-client — changing it only affects this LinSight window.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="171"/>
+        <location filename="../qml/SettingsPage.qml" line="185"/>
         <source>Default is 150 ms. The daemon clamps to %1–%2 ms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="178"/>
+        <location filename="../qml/SettingsPage.qml" line="192"/>
         <source>Tile sparklines</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="179"/>
+        <location filename="../qml/SettingsPage.qml" line="193"/>
         <source>Show a mini trend chart inside each scalar sensor tile.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="197"/>
+        <location filename="../qml/SettingsPage.qml" line="211"/>
         <source>Enabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="197"/>
+        <location filename="../qml/SettingsPage.qml" line="211"/>
         <source>Disabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="206"/>
-        <source>Always-on mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../qml/SettingsPage.qml" line="207"/>
-        <source>History, alerts, and Prometheus continue running after the GUI closes.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../qml/SettingsPage.qml" line="211"/>
-        <source>Today these subsystems are enabled via environment variables and the systemd user unit at &lt;code&gt;packaging/systemd/linsight.service&lt;/code&gt;. Edit + &lt;code&gt;systemctl --user daemon-reload &amp;&amp; systemctl --user restart linsight&lt;/code&gt; to flip them.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../qml/SettingsPage.qml" line="219"/>
-        <source>SQLite history (~/.local/share/linsight/history.db)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <location filename="../qml/SettingsPage.qml" line="220"/>
-        <source>Alert rules (~/.config/linsight/alerts.toml)</source>
+        <source>Remote hosts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="221"/>
-        <source>Prometheus exporter (default 127.0.0.1:9777)</source>
+        <source>Saved SSH targets for in-app switching. Key-based SSH authentication is assumed; the trust model is the same as launching with --connect ssh://....</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="244"/>
-        <source>enabled</source>
+        <location filename="../qml/SettingsPage.qml" line="246"/>
+        <source>Remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="245"/>
-        <source>disabled</source>
+        <location filename="../qml/SettingsPage.qml" line="259"/>
+        <source>Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="264"/>
+        <source>ssh://user@host:port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="267"/>
+        <source>Add</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="292"/>
+        <source>Always-on mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="293"/>
+        <source>History, alerts, and Prometheus continue running after the GUI closes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="297"/>
+        <source>Toggle subsystems at runtime. Changes take effect immediately on the daemon.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="304"/>
+        <source>SQLite history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="305"/>
+        <source>Alert rules</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="306"/>
+        <source>Prometheus exporter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="335"/>
+        <source>On</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="335"/>
+        <source>Off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="346"/>
         <source>Command-line tools</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="265"/>
+        <location filename="../qml/SettingsPage.qml" line="347"/>
         <source>The CLI and daemon ship alongside the GUI.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="269"/>
+        <location filename="../qml/SettingsPage.qml" line="351"/>
         <source>&lt;code&gt;linsight-cli list&lt;/code&gt; shows every sensor the daemon advertises.&lt;br&gt;&lt;code&gt;linsight-cli read &amp;lt;sensor&amp;gt; --count N&lt;/code&gt; streams live values.&lt;br&gt;&lt;code&gt;linsight-cli plugin new &amp;lt;name&amp;gt;&lt;/code&gt; scaffolds a third-party plugin crate.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="103"/>
+        <location filename="../qml/SettingsPage.qml" line="117"/>
         <source>Appearance</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="104"/>
+        <location filename="../qml/SettingsPage.qml" line="118"/>
         <source>Pick a built-in palette or follow your KDE Plasma color scheme.</source>
         <translation type="unfinished"></translation>
     </message>

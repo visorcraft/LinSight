@@ -215,6 +215,78 @@ Kirigami.ScrollablePage {
                 }
             }
 
+            // Remote hosts section
+            SettingsCard {
+                title: qsTr("Remote hosts")
+                subtitle: qsTr("Saved SSH targets for in-app switching. Key-based SSH authentication is assumed; the trust model is the same as launching with --connect ssh://....")
+                content: ColumnLayout {
+                    spacing: app.tokens.spaceM
+
+                    Repeater {
+                        model: {
+                            try { return JSON.parse(app.hostsModel.hosts_json || "[]") }
+                            catch (e) { return [] }
+                        }
+                        delegate: RowLayout {
+                            Layout.fillWidth: true
+                            spacing: app.tokens.spaceM
+                            Controls.Label {
+                                text: modelData.name
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Controls.Label {
+                                text: modelData.url
+                                opacity: 0.6
+                                font.pixelSize: app.tokens.textCaption
+                                Layout.maximumWidth: 220
+                                elide: Text.ElideMiddle
+                            }
+                            ThemedButton {
+                                text: qsTr("Remove")
+                                icon.name: "list-remove-symbolic"
+                                onClicked: app.hostsModel.remove(modelData.name)
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: app.tokens.spaceM
+                        ThemedTextField {
+                            id: newHostName
+                            Layout.preferredWidth: 160
+                            placeholderText: qsTr("Name")
+                        }
+                        ThemedTextField {
+                            id: newHostUrl
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("ssh://user@host:port")
+                        }
+                        ThemedButton {
+                            text: qsTr("Add")
+                            icon.name: "list-add-symbolic"
+                            onClicked: {
+                                app.hostsModel.add(newHostName.text, newHostUrl.text)
+                                if (app.hostsModel.lastError.toString().length === 0) {
+                                    newHostName.text = ""
+                                    newHostUrl.text = ""
+                                }
+                            }
+                        }
+                    }
+
+                    Controls.Label {
+                        visible: app.hostsModel && app.hostsModel.lastError.toString().length > 0
+                        text: app.hostsModel.lastError
+                        color: app.tokens.negative
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                        font.pixelSize: app.tokens.textCaption
+                    }
+                }
+            }
+
             // Always-on section
             SettingsCard {
                 title: qsTr("Always-on mode")
