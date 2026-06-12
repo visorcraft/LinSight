@@ -245,12 +245,21 @@ impl ffi::HostsModel {
         // Ignore overlapping reconnect requests. The Workspace serializes
         // reconnects internally, but each UI click still spawns a thread
         // that blocks on the lock; drop duplicates here to avoid unbounded
-        // thread accumulation if the user hammers the switcher.
-        if *self.is_connecting() {
+        // thread accumulation if the user hammers the switcher. Read and
+        // set the flag in one mutable borrow so two rapid signals cannot
+        // both observe false.
+        let was_connecting = {
+            let this = self.as_mut();
+            let connecting = *this.is_connecting();
+            if !connecting {
+                this.set_is_connecting(true);
+            }
+            connecting
+        };
+        if was_connecting {
             return;
         }
         let active_target = target.clone();
-        self.as_mut().set_is_connecting(true);
         self.as_mut().set_last_error(QString::from(""));
         let generation = self.as_mut().rust_mut().bump_request_generation();
         let qt_thread = self.qt_thread();

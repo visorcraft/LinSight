@@ -284,41 +284,12 @@ impl ffi::OverviewModel {
             return;
         }
 
-        let mut tiles: HashMap<String, TileJson> = HashMap::new();
-        let mut units: HashMap<String, Unit> = HashMap::new();
-        let mut id_order: Vec<String> = Vec::new();
-        let mut static_ids: HashSet<String> = HashSet::new();
-        for info in &sensor_infos {
-            let category = serialize_category(info.category);
-            if info.tags.iter().any(|t| t == linsight_core::STATIC_TAG) {
-                static_ids.insert(info.id.as_str().to_string());
-            }
-            let kind = serialize_kind(info.kind);
-            let id = info.id.as_str().to_string();
-            id_order.push(id.clone());
-            units.insert(id.clone(), info.unit.clone());
-            tiles.insert(
-                id.clone(),
-                TileJson {
-                    id,
-                    category,
-                    device: info.device_id.clone(),
-                    name: info.display_name.clone(),
-                    device_label: device_label_for(info),
-                    parent_device: parent_device_for(info),
-                    value: "…".into(),
-                    kind,
-                    unit: info.unit.symbol().to_string(),
-                    sparkline: vec![],
-                    rows: vec![],
-                },
-            );
-        }
+        let initial_state = build_sample_state(&sensor_infos);
 
         // Initial render so the catalogue is visible before the first
         // sample arrives. Setter is called on the GUI thread here, so its
         // changed signal does fire correctly.
-        let initial = serialize_tiles(&id_order, &tiles);
+        let initial = serialize_tiles(&initial_state.id_order, &initial_state.tiles);
         let init_q = QString::from(initial.as_str());
         self.as_mut().set_tiles_json(init_q);
 
@@ -356,6 +327,7 @@ impl ffi::OverviewModel {
         };
         let connection_alive = ws.connection_alive();
         let connection_generation = ws.connection_generation();
+        let ws_for_pump = Arc::clone(&ws);
 
         // Subscribe succeeded and the rx is live; flip the UI to
         // "connected" so any disconnected banner stays hidden.
@@ -367,13 +339,7 @@ impl ffi::OverviewModel {
         // critical sections are tiny — a HashMap lookup or a per-info
         // rename loop — so contention with the 1 Hz sample rate is
         // negligible.
-        let state = Arc::new(Mutex::new(SampleState {
-            tiles,
-            id_order,
-            units,
-            static_ids,
-            sparklines: HashMap::new(),
-        }));
+        let state = Arc::new(Mutex::new(initial_state));
 
         // Catalogue-refresh worker: when the daemon sends a
         // `SensorListBroadcast` (e.g. after a nickname change), rebuild
@@ -445,7 +411,42 @@ impl ffi::OverviewModel {
                                 continue;
                             }
                             if g > current_g {
+                                // The Workspace reconnected to a different
+                                // daemon. Rebuild the tile catalogue from the
+                                // new host's sensor list and auto-subscribe to
+                                // its sensors so pages repopulate correctly.
                                 current_g = g;
+                                let sensor_infos = ws_for_pump.sensor_infos();
+                                if sensor_infos.is_empty() {
+                                    tracing::warn!(
+                                        "new daemon advertised zero sensors after reconnect"
+                                    );
+                                }
+                                let auto_subs: Vec<SensorId> = sensor_infos
+                                    .iter()
+                                    .map(|s| s.id.clone())
+                                    .filter(|id| id.as_str() != "proc.list")
+                                    .collect();
+                                if let Err(e) = ws_for_pump.subscribe(auto_subs) {
+                                    tracing::warn!(
+                                        error = ?e,
+                                        "auto-subscribe after reconnect failed"
+                                    );
+                                }
+                                let json = {
+                                    let mut guard = state.lock().expect("tile state poisoned");
+                                    *guard = build_sample_state(&sensor_infos);
+                                    serialize_tiles(&guard.id_order, &guard.tiles)
+                                };
+                                let qjson = QString::from(json.as_str());
+                                let _ = qt_thread.queue(move |mut pin| {
+                                    pin.as_mut().set_tiles_json(qjson);
+                                    pin.as_mut().set_cpu_text(QString::from("…"));
+                                    pin.as_mut().set_mem_text(QString::from("…"));
+                                    pin.as_mut().set_cpu_temp_text(QString::from("…"));
+                                    pin.as_mut().set_cpu_freq_text(QString::from("…"));
+                                    pin.as_mut().set_processes_json(QString::from("[]"));
+                                });
                             }
                             if !last_alive {
                                 last_alive = true;
@@ -811,6 +812,44 @@ fn parent_device_for(info: &linsight_protocol::SensorInfo) -> Option<String> {
 fn serialize_tiles(order: &[String], tiles: &HashMap<String, TileJson>) -> String {
     let ordered: Vec<&TileJson> = order.iter().filter_map(|id| tiles.get(id)).collect();
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Build a fresh `SampleState` from a daemon catalogue. Used at first
+/// connect and again after a reconnect to a different host, so pages
+/// repopulate from the new daemon's sensor set instead of keeping stale
+/// tile IDs from the previous host.
+fn build_sample_state(sensor_infos: &[SensorInfo]) -> SampleState {
+    let mut tiles: HashMap<String, TileJson> = HashMap::new();
+    let mut units: HashMap<String, Unit> = HashMap::new();
+    let mut id_order: Vec<String> = Vec::new();
+    let mut static_ids: HashSet<String> = HashSet::new();
+    for info in sensor_infos {
+        let category = serialize_category(info.category);
+        if info.tags.iter().any(|t| t == linsight_core::STATIC_TAG) {
+            static_ids.insert(info.id.as_str().to_string());
+        }
+        let kind = serialize_kind(info.kind);
+        let id = info.id.as_str().to_string();
+        id_order.push(id.clone());
+        units.insert(id.clone(), info.unit.clone());
+        tiles.insert(
+            id.clone(),
+            TileJson {
+                id,
+                category,
+                device: info.device_id.clone(),
+                name: info.display_name.clone(),
+                device_label: device_label_for(info),
+                parent_device: parent_device_for(info),
+                value: "…".into(),
+                kind,
+                unit: info.unit.symbol().to_string(),
+                sparkline: vec![],
+                rows: vec![],
+            },
+        );
+    }
+    SampleState { tiles, id_order, units, static_ids, sparklines: HashMap::new() }
 }
 
 /// Convert the raw proc.list table rows into a JSON array of objects
