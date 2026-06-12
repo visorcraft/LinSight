@@ -824,11 +824,13 @@ pub(crate) mod tests {
     #[test]
     fn process_table_prefs_round_trip() {
         let _g = TempXdgConfig::new();
-        let mut prefs = PreferencesFile::default();
-        prefs.process_table = ProcessTablePrefs {
-            sort_column: Some("mem".into()),
-            sort_descending: Some(false),
-            filter_text: Some("kwin".into()),
+        let prefs = PreferencesFile {
+            process_table: ProcessTablePrefs {
+                sort_column: Some("mem".into()),
+                sort_descending: Some(false),
+                filter_text: Some("kwin".into()),
+            },
+            ..Default::default()
         };
         save_prefs(&prefs).unwrap();
         let loaded = load_prefs();
