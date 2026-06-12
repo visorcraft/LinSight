@@ -63,6 +63,7 @@ i18n-extract:
         qml/OverviewPage.qml \
         qml/CanvasEditorPage.qml \
         qml/CategoryPage.qml \
+        qml/SensorTile.qml \
         qml/ProcessesPage.qml \
         qml/SettingsPage.qml \
         qml/AboutPage.qml \
