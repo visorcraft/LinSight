@@ -136,11 +136,6 @@ pub mod ffi {
         #[qinvokable]
         fn connect_local(self: Pin<&mut HostsModel>);
 
-        /// Synchronise `active_host` with the Workspace's current target.
-        /// Called from `Main.qml` on launch so the host switcher reflects
-        /// a CLI `--connect` remote URL.
-        #[qinvokable]
-        fn sync_active_host(self: Pin<&mut HostsModel>);
     }
 
     impl cxx_qt::Threading for HostsModel {}
@@ -170,6 +165,10 @@ impl ffi::HostsModel {
         let hosts = load_hosts();
         self.as_mut().set_hosts_json(QString::from(hosts_json(&hosts).as_str()));
         self.as_mut().set_last_error(QString::from(""));
+        // Mirror the Workspace's current target so a CLI --connect launch
+        // shows the right label in the host switcher from the first frame.
+        let target = with_workspace(|w| w.active_target());
+        self.as_mut().set_active_host(QString::from(target.as_str()));
     }
 
     pub fn add(mut self: Pin<&mut Self>, name: &QString, url: &QString) {
@@ -281,11 +280,6 @@ impl ffi::HostsModel {
                 }
             },
         );
-    }
-
-    pub fn sync_active_host(mut self: Pin<&mut Self>) {
-        let target = with_workspace(|w| w.active_target());
-        self.as_mut().set_active_host(QString::from(target.as_str()));
     }
 }
 

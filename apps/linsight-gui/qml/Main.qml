@@ -90,10 +90,7 @@ Kirigami.ApplicationWindow {
     property var hostsModel: theHostsModel
     HostsModel {
         id: theHostsModel
-        Component.onCompleted: {
-            theHostsModel.reload()
-            theHostsModel.sync_active_host()
-        }
+        Component.onCompleted: theHostsModel.reload()
     }
 
     // HistoryModel — shared instance for the per-sensor history dialog.
@@ -146,7 +143,7 @@ Kirigami.ApplicationWindow {
     }
     function activeHostSwitcherIndex() {
         if (!app.hostsModel) return 0
-        const active = app.hostsModel.active_host.toString()
+        const active = String(app.hostsModel.active_host || "")
         for (let i = 0; i < app.hostSwitcherModel.length; i++) {
             const entry = app.hostSwitcherModel[i]
             if (entry.target === "local" && active === "local") return i
@@ -159,8 +156,9 @@ Kirigami.ApplicationWindow {
         function onHostsJsonChanged() { app.refreshHostSwitcherModel() }
         function onActiveHostChanged() { app.refreshHostSwitcherModel() }
         function onLastErrorChanged() {
-            if (app.hostsModel && app.hostsModel.lastError.toString().length > 0) {
-                app.showPassiveNotification(app.hostsModel.lastError, 5000)
+            const err = app.hostsModel ? String(app.hostsModel.lastError || "") : ""
+            if (err.length > 0) {
+                app.showPassiveNotification(err, 5000)
             }
         }
     }
@@ -455,9 +453,20 @@ Kirigami.ApplicationWindow {
                     textRole: "label"
                     enabled: app.hostsModel && !app.hostsModel.is_connecting
                     model: app.hostSwitcherModel
-                    currentIndex: app.activeHostSwitcherIndex()
-                    Component.onCompleted: app.refreshHostSwitcherModel()
+                    Component.onCompleted: {
+                        app.refreshHostSwitcherModel()
+                        hostSwitcher.currentIndex = app.activeHostSwitcherIndex()
+                    }
                     onActivated: index => app.hostSwitcherActivated(index)
+                    Connections {
+                        target: app.hostsModel
+                        function onActiveHostChanged() {
+                            hostSwitcher.currentIndex = app.activeHostSwitcherIndex()
+                        }
+                        function onHostsJsonChanged() {
+                            hostSwitcher.currentIndex = app.activeHostSwitcherIndex()
+                        }
+                    }
                 }
 
                 Rectangle {

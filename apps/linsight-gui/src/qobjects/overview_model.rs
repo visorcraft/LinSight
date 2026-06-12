@@ -515,10 +515,12 @@ impl ffi::OverviewModel {
                         }
                         Err(RecvTimeoutError::Timeout) => {
                             let alive_now = connection_alive.load(Ordering::Relaxed);
-                            let g_now = connection_generation.load(Ordering::Relaxed);
-                            if g_now > current_g {
-                                current_g = g_now;
-                            }
+                            // Do NOT advance current_g to the published
+                            // generation here. If a reconnect happened during
+                            // the timeout window, the next sample from the new
+                            // host must arrive with g > current_g so the pump
+                            // rebuilds the tile catalogue from the new daemon's
+                            // sensor list.
                             if alive_now != last_alive {
                                 last_alive = alive_now;
                                 let _ = qt_thread.queue(move |mut pin| {

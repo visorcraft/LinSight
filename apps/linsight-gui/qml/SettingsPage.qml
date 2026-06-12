@@ -268,7 +268,7 @@ Kirigami.ScrollablePage {
                             icon.name: "list-add-symbolic"
                             onClicked: {
                                 app.hostsModel.add(newHostName.text, newHostUrl.text)
-                                if (app.hostsModel.lastError.toString().length === 0) {
+                                if (String(app.hostsModel.lastError || "").length === 0) {
                                     newHostName.text = ""
                                     newHostUrl.text = ""
                                 }
@@ -277,8 +277,10 @@ Kirigami.ScrollablePage {
                     }
 
                     Controls.Label {
-                        visible: app.hostsModel && app.hostsModel.lastError.toString().length > 0
-                        text: app.hostsModel.lastError
+                        readonly property string hostError: app.hostsModel
+                            ? String(app.hostsModel.lastError || "") : ""
+                        visible: hostError.length > 0
+                        text: hostError
                         color: app.tokens.negative
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
