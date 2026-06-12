@@ -1496,32 +1496,32 @@ Add one using the button above.</source>
     <message>
         <location filename="../qml/SettingsPage.qml" line="299"/>
         <source>Toggle subsystems at runtime. Changes take effect immediately on the daemon.</source>
-        <translation type="unfinished"></translation>
+        <translation>Subsysteme zur Laufzeit umschalten. Änderungen werden sofort im Daemon wirksam.</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="306"/>
         <source>SQLite history</source>
-        <translation type="unfinished"></translation>
+        <translation>SQLite-Verlauf</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="307"/>
         <source>Alert rules</source>
-        <translation type="unfinished"></translation>
+        <translation>Alarmregeln</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="308"/>
         <source>Prometheus exporter</source>
-        <translation type="unfinished"></translation>
+        <translation>Prometheus-Exporter</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="337"/>
         <source>On</source>
-        <translation type="unfinished"></translation>
+        <translation>Ein</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="337"/>
         <source>Off</source>
-        <translation type="unfinished"></translation>
+        <translation>Aus</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="346"/>

@@ -1496,32 +1496,32 @@ Add one using the button above.</source>
     <message>
         <location filename="../qml/SettingsPage.qml" line="299"/>
         <source>Toggle subsystems at runtime. Changes take effect immediately on the daemon.</source>
-        <translation type="unfinished"></translation>
+        <translation>実行時にサブシステムを切り替えます。変更はデーモンに即座に反映されます。</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="306"/>
         <source>SQLite history</source>
-        <translation type="unfinished"></translation>
+        <translation>SQLite 履歴</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="307"/>
         <source>Alert rules</source>
-        <translation type="unfinished"></translation>
+        <translation>アラートルール</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="308"/>
         <source>Prometheus exporter</source>
-        <translation type="unfinished"></translation>
+        <translation>Prometheus エクスポーター</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="337"/>
         <source>On</source>
-        <translation type="unfinished"></translation>
+        <translation>オン</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="337"/>
         <source>Off</source>
-        <translation type="unfinished"></translation>
+        <translation>オフ</translation>
     </message>
     <message>
         <location filename="../qml/SettingsPage.qml" line="346"/>

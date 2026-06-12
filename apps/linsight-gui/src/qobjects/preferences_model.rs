@@ -432,9 +432,9 @@ impl Default for PreferencesModelRust {
             start_page: QString::from(p.start_page.as_str()),
             sample_interval_ms: p.sample_interval_ms as i32,
             sparklines: p.sparklines,
-            process_table_sort_column: QString::from(
-                p.process_table.sort_column.as_deref().unwrap_or("cpu"),
-            ),
+            process_table_sort_column: QString::from(validated_process_sort_column(
+                p.process_table.sort_column.as_deref(),
+            )),
             process_table_sort_descending: p.process_table.sort_descending.unwrap_or(true),
             process_table_filter_text: QString::from(
                 p.process_table.filter_text.as_deref().unwrap_or(""),
@@ -448,6 +448,19 @@ impl Default for PreferencesModelRust {
 /// `apply_start_page`.
 const VALID_START_WORKSPACES: &[&str] =
     &["overview", "gpus", "storage", "network", "hardware", "processes", "alerts"];
+
+/// Columns the Processes page table can sort by. A persisted sort key
+/// from an older build (or a hand-edited preferences.json) that no
+/// longer matches a column is ignored so the table doesn't sort by an
+/// undefined field.
+const VALID_PROCESS_COLUMNS: &[&str] = &["pid", "name", "cpu", "mem", "rss", "threads", "state"];
+
+fn validated_process_sort_column(column: Option<&str>) -> &str {
+    match column {
+        Some(c) if VALID_PROCESS_COLUMNS.contains(&c) => c,
+        _ => "cpu",
+    }
+}
 
 /// True iff `key` is a syntactically valid start_page value.
 /// Whether the named dashboard actually exists on disk is the
@@ -542,9 +555,9 @@ impl ffi::PreferencesModel {
         self.as_mut().set_start_page(QString::from(p.start_page.as_str()));
         self.as_mut().set_sample_interval_ms(p.sample_interval_ms as i32);
         self.as_mut().set_sparklines(p.sparklines);
-        self.as_mut().set_process_table_sort_column(QString::from(
-            p.process_table.sort_column.as_deref().unwrap_or("cpu"),
-        ));
+        self.as_mut().set_process_table_sort_column(QString::from(validated_process_sort_column(
+            p.process_table.sort_column.as_deref(),
+        )));
         self.as_mut()
             .set_process_table_sort_descending(p.process_table.sort_descending.unwrap_or(true));
         self.as_mut().set_process_table_filter_text(QString::from(
@@ -844,5 +857,18 @@ pub(crate) mod tests {
         assert_eq!(loaded.process_table.sort_column, None);
         assert_eq!(loaded.process_table.sort_descending, None);
         assert_eq!(loaded.process_table.filter_text, None);
+    }
+
+    #[test]
+    fn process_table_invalid_sort_column_falls_back_to_cpu() {
+        let _g = TempXdgConfig::new();
+        let mut prefs = PreferencesFile::default();
+        prefs.process_table.sort_column = Some("not_a_column".into());
+        save_prefs(&prefs).unwrap();
+        let loaded = load_prefs();
+        assert_eq!(loaded.process_table.sort_column, Some("not_a_column".into()));
+        // The model exposes the validated column, not the raw persisted value.
+        let model = PreferencesModelRust::default();
+        assert_eq!(model.process_table_sort_column.to_string(), "cpu");
     }
 }
