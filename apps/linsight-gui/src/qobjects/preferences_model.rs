@@ -226,6 +226,16 @@ fn theme_by_id(id: &str) -> &'static Theme {
     THEMES.iter().find(|t| t.id == id).unwrap_or(&THEMES[0])
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(crate) struct ProcessTablePrefs {
+    #[serde(default)]
+    pub sort_column: Option<String>,
+    #[serde(default)]
+    pub sort_descending: Option<bool>,
+    #[serde(default)]
+    pub filter_text: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct PreferencesFile {
     #[serde(default = "default_schema_version")]
@@ -252,6 +262,9 @@ pub(crate) struct PreferencesFile {
     /// existed (sparklines were unconditionally rendered).
     #[serde(default = "default_sparklines")]
     pub sparklines: bool,
+    /// Sort column/direction and filter text for the Processes page table.
+    #[serde(default)]
+    pub process_table: ProcessTablePrefs,
 }
 fn default_schema_version() -> u32 {
     1
@@ -277,6 +290,7 @@ impl Default for PreferencesFile {
             start_page: default_start_page(),
             sample_interval_ms: default_sample_interval_ms(),
             sparklines: default_sparklines(),
+            process_table: ProcessTablePrefs::default(),
         }
     }
 }
@@ -339,6 +353,10 @@ pub mod ffi {
         #[qproperty(i32, sample_interval_ms)]
         // Whether mini sparkline charts are rendered inside scalar tiles.
         #[qproperty(bool, sparklines)]
+        // Processes page table state.
+        #[qproperty(QString, process_table_sort_column)]
+        #[qproperty(bool, process_table_sort_descending)]
+        #[qproperty(QString, process_table_filter_text)]
         type PreferencesModel = super::PreferencesModelRust;
 
         #[qinvokable]
@@ -368,6 +386,18 @@ pub mod ffi {
         #[qinvokable]
         fn apply_sparklines(self: Pin<&mut PreferencesModel>, enabled: bool);
 
+        /// Persist the Processes page table sort column/direction.
+        #[qinvokable]
+        fn apply_process_table_sort(
+            self: Pin<&mut PreferencesModel>,
+            column: &QString,
+            descending: bool,
+        );
+
+        /// Persist the Processes page table filter text.
+        #[qinvokable]
+        fn apply_process_table_filter(self: Pin<&mut PreferencesModel>, text: &QString);
+
         #[qinvokable]
         fn color(self: &PreferencesModel, role: &QString) -> QString;
 
@@ -388,6 +418,9 @@ pub struct PreferencesModelRust {
     start_page: QString,
     sample_interval_ms: i32,
     sparklines: bool,
+    process_table_sort_column: QString,
+    process_table_sort_descending: bool,
+    process_table_filter_text: QString,
 }
 
 impl Default for PreferencesModelRust {
@@ -399,6 +432,13 @@ impl Default for PreferencesModelRust {
             start_page: QString::from(p.start_page.as_str()),
             sample_interval_ms: p.sample_interval_ms as i32,
             sparklines: p.sparklines,
+            process_table_sort_column: QString::from(
+                p.process_table.sort_column.as_deref().unwrap_or("cpu"),
+            ),
+            process_table_sort_descending: p.process_table.sort_descending.unwrap_or(true),
+            process_table_filter_text: QString::from(
+                p.process_table.filter_text.as_deref().unwrap_or(""),
+            ),
         }
     }
 }
@@ -483,6 +523,17 @@ impl ffi::PreferencesModel {
         let _ = save_prefs(&self.snapshot());
     }
 
+    pub fn apply_process_table_sort(mut self: Pin<&mut Self>, column: &QString, descending: bool) {
+        self.as_mut().set_process_table_sort_column(column.clone());
+        self.as_mut().set_process_table_sort_descending(descending);
+        let _ = save_prefs(&self.snapshot());
+    }
+
+    pub fn apply_process_table_filter(mut self: Pin<&mut Self>, text: &QString) {
+        self.as_mut().set_process_table_filter_text(text.clone());
+        let _ = save_prefs(&self.snapshot());
+    }
+
     pub fn reload(mut self: Pin<&mut Self>) {
         let p = load_prefs();
         self.as_mut().set_theme(QString::from(p.theme.as_str()));
@@ -491,6 +542,14 @@ impl ffi::PreferencesModel {
         self.as_mut().set_start_page(QString::from(p.start_page.as_str()));
         self.as_mut().set_sample_interval_ms(p.sample_interval_ms as i32);
         self.as_mut().set_sparklines(p.sparklines);
+        self.as_mut().set_process_table_sort_column(QString::from(
+            p.process_table.sort_column.as_deref().unwrap_or("cpu"),
+        ));
+        self.as_mut()
+            .set_process_table_sort_descending(p.process_table.sort_descending.unwrap_or(true));
+        self.as_mut().set_process_table_filter_text(QString::from(
+            p.process_table.filter_text.as_deref().unwrap_or(""),
+        ));
     }
 
     pub fn themes_json(&self) -> QString {
@@ -516,6 +575,13 @@ impl ffi::PreferencesModel {
             start_page: self.start_page().to_string(),
             sample_interval_ms: (*self.sample_interval_ms()).max(0) as u32,
             sparklines: *self.sparklines(),
+            process_table: ProcessTablePrefs {
+                sort_column: Some(self.process_table_sort_column().to_string())
+                    .filter(|s| !s.is_empty()),
+                sort_descending: Some(*self.process_table_sort_descending()),
+                filter_text: Some(self.process_table_filter_text().to_string())
+                    .filter(|s| !s.is_empty()),
+            },
         }
     }
 }
@@ -581,6 +647,7 @@ pub(crate) mod tests {
             start_page: "dashboard:production".into(),
             sample_interval_ms: 200,
             sparklines: true,
+            process_table: ProcessTablePrefs::default(),
         };
         save_prefs(&original).unwrap();
         let loaded = load_prefs();
@@ -752,5 +819,28 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn process_table_prefs_round_trip() {
+        let _g = TempXdgConfig::new();
+        let mut prefs = PreferencesFile::default();
+        prefs.process_table = ProcessTablePrefs {
+            sort_column: Some("mem".into()),
+            sort_descending: Some(false),
+            filter_text: Some("kwin".into()),
+        };
+        save_prefs(&prefs).unwrap();
+        let loaded = load_prefs();
+        assert_eq!(loaded.process_table, prefs.process_table);
+    }
+
+    #[test]
+    fn process_table_prefs_defaults_to_cpu_desc() {
+        let _g = TempXdgConfig::new();
+        let loaded = load_prefs();
+        assert_eq!(loaded.process_table.sort_column, None);
+        assert_eq!(loaded.process_table.sort_descending, None);
+        assert_eq!(loaded.process_table.filter_text, None);
     }
 }
