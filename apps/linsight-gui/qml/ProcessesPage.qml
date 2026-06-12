@@ -73,8 +73,8 @@ Kirigami.Page {
         return arr
     }
 
-    property string sortColumn: "cpu"
-    property string sortDirection: "desc"
+    property string sortColumn: app.preferences ? app.preferences.process_table_sort_column : "cpu"
+    property string sortDirection: app.preferences && app.preferences.process_table_sort_descending ? "desc" : "asc"
 
     function toggleSort(col) {
         if (page.sortColumn === col) {
@@ -82,6 +82,9 @@ Kirigami.Page {
         } else {
             page.sortColumn = col
             page.sortDirection = "desc"
+        }
+        if (app.preferences) {
+            app.preferences.apply_process_table_sort(page.sortColumn, page.sortDirection === "desc")
         }
     }
 
@@ -121,8 +124,42 @@ Kirigami.Page {
                     placeholderText: qsTr("Filter by name or PID…")
                     selectByMouse: true
                     Accessible.name: qsTr("Filter processes")
+                    text: app.preferences ? app.preferences.process_table_filter_text : ""
+
+                    onTextChanged: filterDebounceTimer.restart()
+
+                    Timer {
+                        id: filterDebounceTimer
+                        interval: 300
+                        onTriggered: {
+                            if (app.preferences) {
+                                app.preferences.apply_process_table_filter(filterField.text)
+                            }
+                        }
+                    }
+
+                    // Clear-filter affordance so a persisted hidden filter doesn't look broken.
+                    Controls.ToolButton {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: filterField.text.length > 0
+                        icon.name: "edit-clear"
+                        flat: true
+                        onClicked: filterField.text = ""
+                        Controls.ToolTip.text: qsTr("Clear filter")
+                    }
                 }
             }
+        }
+
+        Controls.Label {
+            visible: filterField.text.length > 0
+            text: qsTr("Filtering by: %1").arg(filterField.text)
+            font.pixelSize: app.tokens.textCaption
+            opacity: 0.7
+            color: app.tokens.textPrimary
+            Layout.leftMargin: app.tokens.spaceXL
+            Layout.topMargin: app.tokens.spaceS
         }
 
         // Column headers
