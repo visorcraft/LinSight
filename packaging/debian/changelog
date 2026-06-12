@@ -1,3 +1,11 @@
+linsight (1.14.0-1) unstable; urgency=medium
+
+  * v1.14.0 release. UI polish batch: dedicated Network page with
+    per-interface throughput, persisted process-table state, copy sensor ID
+    from any tile, read-only Prometheus bind hint, and refreshed i18n.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 12 Jun 2026 12:00:00 +0000
+
 linsight (1.13.0-1) unstable; urgency=medium
 
   * v1.13.0 release. Multi-host view: save remote hosts, switch between them

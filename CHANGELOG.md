@@ -7,6 +7,24 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.14.0] — 2026-06-12
+
+- **Dedicated Network page.** Shows one card per interface with live
+  throughput (RX/TX bytes and packets per second), error/drop counters,
+  link state, and negotiated speed. Rates are computed from raw `net.*`
+  counter deltas in the GUI model.
+- **Persisted process-table state.** Sort column/direction and filter text
+  are saved to `~/.config/linsight/preferences.json` and restored on the
+  Processes page.
+- **Copy sensor ID from any tile.** Right-click on desktop or long-press on
+  touch copies the full sensor ID to the clipboard for use with
+  `linsight-cli read <id>`.
+- **Settings Prometheus hint.** The Prometheus exporter toggle remains
+  runtime-read-only; the configured bind address and restart instructions
+  are now visible.
+- **Refreshed translations.** German and Japanese catalogs updated for all
+  new UI strings.
+
 ## [1.13.0] — 2026-06-12
 
 - **Multi-host view.** Save remote hosts in `~/.config/linsight/hosts.json`

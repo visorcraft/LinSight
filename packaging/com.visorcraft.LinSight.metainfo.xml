@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.14.0" date="2026-06-12">
+      <description>
+        <p>UI polish batch: dedicated Network page with per-interface
+        throughput, persisted process-table state, copy sensor ID from any
+        tile, read-only Prometheus bind hint in Settings, and refreshed
+        translations.</p>
+      </description>
+    </release>
     <release version="1.13.0" date="2026-06-12">
       <description>
         <p>Multi-host view: save remote hosts, switch between them from the
