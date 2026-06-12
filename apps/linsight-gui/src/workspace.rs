@@ -214,25 +214,17 @@ impl Workspace {
         let new_cat_rx = new_client.subscribe_catalogue();
 
         // Compute the generation we will use if the replay succeeds, but do
-        // not publish it yet. The forwarders below tag their samples with
-        // this future generation; if the subscription replay fails and we
-        // return early, the new client is dropped, the forwarders exit, and
-        // the generation never becomes current, so the old connection keeps
-        // working unchanged.
+        // not publish it yet. If the subscription replay fails and we return
+        // early, the new client is dropped and the generation never becomes
+        // current, so the old connection keeps working unchanged.
         let new_generation = self.connection_generation.load(Ordering::SeqCst).saturating_add(1);
 
-        // Bridge the new client's samples/catalogue into the same stable
-        // receivers *before* replaying subscriptions. The replay may cause
-        // the daemon to emit a SensorListBroadcast (e.g. nickname refresh),
-        // so the catalogue forwarder must already be listening. Samples sent
-        // before the generation is published are ignored by the pump.
-        spawn_sample_forwarder(
-            new_rx,
-            self.sample_tx.clone(),
-            Arc::clone(&self.connection_generation),
-            Arc::clone(&self.connection_alive),
-            new_generation,
-        );
+        // Bridge the new client's catalogue into the same stable receiver
+        // *before* replaying subscriptions. The replay may cause the daemon
+        // to emit a SensorListBroadcast (e.g. nickname refresh), so the
+        // catalogue forwarder must already be listening. Broadcasts sent
+        // before the generation is published are dropped by the refresh
+        // thread because their generation is not yet current.
         spawn_catalogue_forwarder(new_cat_rx, self.catalogue_tx.clone(), new_generation);
 
         // Apply stored state to the new client *before* swapping. If this
@@ -250,7 +242,11 @@ impl Workspace {
         }
 
         // Commit the new connection: publish the generation, mark it alive,
-        // and swap out the old client.
+        // and swap out the old client. Only *after* the generation is
+        // published do we start forwarding samples; otherwise a sample from
+        // the new client could advance the pump's current generation before
+        // the replay succeeds, causing the old connection's samples to be
+        // dropped if the replay later fails.
         self.connection_generation.store(new_generation, Ordering::SeqCst);
         self.connection_alive.store(true, Ordering::SeqCst);
 
@@ -259,6 +255,14 @@ impl Workspace {
             std::mem::replace(&mut *guard, new_client)
         };
         drop(old_client);
+
+        spawn_sample_forwarder(
+            new_rx,
+            self.sample_tx.clone(),
+            Arc::clone(&self.connection_generation),
+            Arc::clone(&self.connection_alive),
+            new_generation,
+        );
 
         *self.active_target.lock().expect("active_target poisoned") = target.to_string();
         Ok(())
@@ -313,7 +317,10 @@ fn spawn_catalogue_forwarder(
 mod tests {
     use super::*;
     use linsight_core::{Category, Reading, SensorKind, Unit};
-    use linsight_protocol::{ClientMsg, FrameReader, FrameWriter, PROTOCOL_VERSION, ServerMsg};
+    use linsight_protocol::{
+        ClientMsg, FrameReader, FrameWriter, PROTOCOL_VERSION, RequestOp, ResponsePayload,
+        ServerMsg,
+    };
     use std::os::unix::net::UnixListener;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -381,6 +388,14 @@ mod tests {
                                 .expect("write sample");
                         }
                     }
+                    Ok(ClientMsg::Request { req_id, op: RequestOp::SetPumpIntervalMs { ms } }) => {
+                        writer
+                            .write_server(&ServerMsg::Response {
+                                req_id,
+                                result: Ok(ResponsePayload::PumpIntervalSet { ms }),
+                            })
+                            .expect("write pump interval response");
+                    }
                     Ok(ClientMsg::Goodbye) | Err(_) => {
                         disconnected.store(true, Ordering::SeqCst);
                         break;
@@ -388,6 +403,57 @@ mod tests {
                     Ok(_) => {}
                 }
             }
+        });
+    }
+
+    /// A fake daemon that accepts a connection and handshake, then closes the
+    /// socket as soon as it receives a Subscribe. Used to verify that a failed
+    /// reconnect leaves the previous connection intact.
+    fn spawn_flaky_daemon(listener: UnixListener, sensor_id: &'static str) {
+        thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else { return };
+            let mut reader = FrameReader::new(stream.try_clone().expect("clone"));
+            let mut writer = FrameWriter::new(stream);
+
+            let Ok(ClientMsg::Hello { .. }) = reader.read_client() else {
+                panic!("expected Hello");
+            };
+            writer
+                .write_server(&ServerMsg::Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    daemon_version: env!("CARGO_PKG_VERSION").into(),
+                    plugins: vec![],
+                })
+                .expect("write welcome");
+
+            let Ok(ClientMsg::ListSensors) = reader.read_client() else {
+                panic!("expected ListSensors");
+            };
+            writer
+                .write_server(&ServerMsg::SensorList(vec![fake_sensor(sensor_id)]))
+                .expect("write sensor list");
+
+            // Wait for the reconnect replay, send one sample, then close.
+            // The sample must not advance the pump's generation because the
+            // replay is about to fail on the next RPC.
+            match reader.read_client() {
+                Ok(ClientMsg::Subscribe { sensors, .. }) => {
+                    writer
+                        .write_server(&ServerMsg::SensorListBroadcast(vec![fake_sensor(sensor_id)]))
+                        .expect("write broadcast");
+                    for s in sensors {
+                        writer
+                            .write_server(&ServerMsg::Sample(Sample {
+                                sensor: s,
+                                ts_micros: 1,
+                                reading: Reading::Scalar(42.0),
+                            }))
+                            .expect("write sample");
+                    }
+                }
+                other => panic!("expected Subscribe, got {other:?}"),
+            }
+            // Socket closes on thread exit, causing the next RPC to fail.
         });
     }
 
@@ -546,5 +612,37 @@ mod tests {
 
         let gen_after = workspace.connection_generation().load(Ordering::SeqCst);
         assert_eq!(gen_after, gen_before + 1, "generation should increment by one");
+    }
+
+    #[test]
+    fn failed_reconnect_keeps_old_connection_alive() {
+        let (workspace, path_a, disconnected_a) = make_workspace("cpu.util");
+        let rx = workspace.take_sample_rx().expect("take sample rx");
+
+        workspace.subscribe(vec![SensorId::new("cpu.util")]).expect("subscribe");
+        let _ = recv_sample(&rx, "cpu.util");
+
+        // Use a non-default pump interval so the reconnect replay has a
+        // second RPC that will fail when the flaky daemon closes.
+        workspace
+            .set_pump_interval_ms(200, Duration::from_secs(3))
+            .expect("set pump interval on old connection");
+
+        let dir_b = tempfile::tempdir().expect("tempdir");
+        let path_b = dir_b.path().join("linsight.sock");
+        let listener_b = UnixListener::bind(&path_b).expect("bind");
+        spawn_flaky_daemon(listener_b, "mem.used_bytes");
+        std::thread::sleep(Duration::from_millis(50));
+
+        let result = workspace.reconnect_to_path(&path_b);
+        assert!(result.is_err(), "reconnect should fail after daemon closes");
+
+        // The original connection must still be usable.
+        workspace.subscribe(vec![SensorId::new("cpu.util")]).expect("resubscribe old");
+        let sample = recv_sample(&rx, "cpu.util");
+        assert!(matches!(sample.reading, Reading::Scalar(42.0)));
+        assert!(!disconnected_a.load(Ordering::SeqCst), "old daemon should still be connected");
+
+        drop(path_a);
     }
 }

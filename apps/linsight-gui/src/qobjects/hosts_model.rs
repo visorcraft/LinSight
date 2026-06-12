@@ -242,6 +242,13 @@ impl ffi::HostsModel {
     }
 
     fn spawn_reconnect(mut self: Pin<&mut Self>, target: String) {
+        // Ignore overlapping reconnect requests. The Workspace serializes
+        // reconnects internally, but each UI click still spawns a thread
+        // that blocks on the lock; drop duplicates here to avoid unbounded
+        // thread accumulation if the user hammers the switcher.
+        if *self.is_connecting() {
+            return;
+        }
         let active_target = target.clone();
         self.as_mut().set_is_connecting(true);
         self.as_mut().set_last_error(QString::from(""));
