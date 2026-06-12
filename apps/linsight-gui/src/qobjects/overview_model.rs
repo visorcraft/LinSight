@@ -12,7 +12,7 @@
 //!
 //! `save_layout` / `load_layout` / `layout_path` back the canvas editor.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::RecvTimeoutError;
@@ -44,6 +44,7 @@ pub mod ffi {
         #[qproperty(QString, cpu_temp_text)]
         #[qproperty(QString, cpu_freq_text)]
         #[qproperty(QString, tiles_json)]
+        #[qproperty(QString, network_json)]
         #[qproperty(QString, processes_json)]
         #[qproperty(bool, connected)]
         type OverviewModel = super::OverviewModelRust;
@@ -155,6 +156,25 @@ struct TileJson {
     sparkline: Vec<f64>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     rows: Vec<Vec<serde_json::Value>>,
+    #[serde(skip)]
+    last_raw_value: u64,
+    #[serde(skip)]
+    last_ts_micros: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+struct NetworkInterfaceJson {
+    iface: String,
+    rx_bytes_per_sec: f64,
+    tx_bytes_per_sec: f64,
+    rx_packets_per_sec: f64,
+    tx_packets_per_sec: f64,
+    rx_errors_per_sec: f64,
+    tx_errors_per_sec: f64,
+    rx_dropped_per_sec: f64,
+    tx_dropped_per_sec: f64,
+    link_state: String,
+    speed_mbps: f64,
 }
 
 struct SampleState {
@@ -167,6 +187,8 @@ struct SampleState {
     static_ids: HashSet<String>,
     /// Rolling scalar window per sensor (max 30 points) for sparkline rendering.
     sparklines: HashMap<String, Vec<f64>>,
+    /// Previous raw counter sample per net sensor, keyed by sensor id.
+    net_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
 }
 
 impl SampleState {
@@ -195,6 +217,10 @@ fn apply_sample(state: &mut SampleState, sample: &linsight_core::Sample) {
     if let Some(tile) = state.tiles.get_mut(&sensor_id) {
         tile.value = value_str;
         tile.rows = table_rows;
+        tile.last_ts_micros = sample.ts_micros;
+        if let linsight_core::Reading::Counter(v) = &sample.reading {
+            tile.last_raw_value = *v;
+        }
     }
     if let linsight_core::Reading::Scalar(v) = &sample.reading {
         state.push_sparkline(&sensor_id, *v);
@@ -241,6 +267,9 @@ pub struct OverviewModelRust {
     /// daemon returns Unsupported (no cpufreq subsystem).
     cpu_freq_text: QString,
     tiles_json: QString,
+    /// JSON array of per-interface network throughput objects. Empty "[]"
+    /// until the first net counter samples have been processed.
+    network_json: QString,
     /// JSON array of process objects from proc.list. Empty "[]" until
     /// the process page is opened and the first sample arrives.
     processes_json: QString,
@@ -260,6 +289,7 @@ impl Default for OverviewModelRust {
             cpu_temp_text: QString::from("…"),
             cpu_freq_text: QString::from("…"),
             tiles_json: QString::from("[]"),
+            network_json: QString::from("[]"),
             processes_json: QString::from("[]"),
             connected: false,
             started: false,
@@ -441,6 +471,7 @@ impl ffi::OverviewModel {
                                 let qjson = QString::from(json.as_str());
                                 let _ = qt_thread.queue(move |mut pin| {
                                     pin.as_mut().set_tiles_json(qjson);
+                                    pin.as_mut().set_network_json(QString::from("[]"));
                                     pin.as_mut().set_cpu_text(QString::from("…"));
                                     pin.as_mut().set_mem_text(QString::from("…"));
                                     pin.as_mut().set_cpu_temp_text(QString::from("…"));
@@ -454,7 +485,7 @@ impl ffi::OverviewModel {
                                     pin.as_mut().set_connected(true);
                                 });
                             }
-                            let (json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
+                            let (json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
                                 let mut guard = state.lock().expect("tile state poisoned");
                                 // Drain the first sample plus any others already
                                 // queued (typically the rest of this pump tick's
@@ -473,6 +504,7 @@ impl ffi::OverviewModel {
                                         .unwrap_or_default();
                                 }
                                 let json = serialize_tiles(&guard.id_order, &guard.tiles);
+                                let network_json = compute_network_rates(&mut guard);
                                 let cpu = guard.tiles.get("cpu.util").map(|t| t.value.clone());
                                 let mem =
                                     guard.tiles.get("mem.used_bytes").map(|t| t.value.clone());
@@ -485,9 +517,10 @@ impl ffi::OverviewModel {
                                     .get("proc.list")
                                     .map(|t| serialize_proc_rows(&t.rows))
                                     .unwrap_or_else(|| "[]".to_string());
-                                (json, cpu, mem, cpu_temp, cpu_freq, proc_json)
+                                (json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json)
                             };
                             let qjson = QString::from(json.as_str());
+                            let qnetwork = QString::from(network_json.as_str());
                             let qcpu = cpu.map(|s| QString::from(s.as_str()));
                             let qmem = mem.map(|s| QString::from(s.as_str()));
                             let qctemp = cpu_temp.map(|s| QString::from(s.as_str()));
@@ -498,6 +531,7 @@ impl ffi::OverviewModel {
                             // correct in that case.
                             let _ = qt_thread.queue(move |mut pin| {
                                 pin.as_mut().set_tiles_json(qjson);
+                                pin.as_mut().set_network_json(qnetwork);
                                 if let Some(q) = qcpu {
                                     pin.as_mut().set_cpu_text(q);
                                 }
@@ -848,10 +882,99 @@ fn build_sample_state(sensor_infos: &[SensorInfo]) -> SampleState {
                 unit: info.unit.symbol().to_string(),
                 sparkline: vec![],
                 rows: vec![],
+                last_raw_value: 0,
+                last_ts_micros: 0,
             },
         );
     }
-    SampleState { tiles, id_order, units, static_ids, sparklines: HashMap::new() }
+    SampleState {
+        tiles,
+        id_order,
+        units,
+        static_ids,
+        sparklines: HashMap::new(),
+        net_prev: HashMap::new(),
+    }
+}
+
+/// Compute per-interface network rates from the latest counter samples.
+///
+/// Uses `state.net_prev` as the previous sample and updates it to the
+/// current sample so the next call sees a one-tick delta. Non-counter
+/// tiles (`link_state`, `speed_mbps`) are read directly for metadata.
+fn compute_network_rates(state: &mut SampleState) -> String {
+    const METRICS: &[&str] = &[
+        "rx_bytes",
+        "tx_bytes",
+        "rx_packets",
+        "tx_packets",
+        "rx_errors",
+        "tx_errors",
+        "rx_dropped",
+        "tx_dropped",
+    ];
+
+    let mut by_iface: BTreeMap<String, NetworkInterfaceJson> = BTreeMap::new();
+    let ids: Vec<String> =
+        state.tiles.keys().filter(|id| id.starts_with("net.")).cloned().collect();
+
+    for id in ids {
+        let parts: Vec<&str> = id.split('.').collect();
+        if parts.len() != 3 {
+            continue;
+        }
+        let iface = parts[1].to_string();
+        let metric = parts[2].to_string();
+        drop(parts);
+        let tile = match state.tiles.get(&id) {
+            Some(t) => t.clone(),
+            None => continue,
+        };
+
+        let entry = by_iface
+            .entry(iface.clone())
+            .or_insert_with(|| NetworkInterfaceJson { iface: iface.clone(), ..Default::default() });
+
+        if METRICS.contains(&metric.as_str()) {
+            let rate = if tile.last_ts_micros == 0 {
+                0.0
+            } else if let Some((prev_ts, prev_val)) = state.net_prev.get(&id) {
+                let delta_val = tile.last_raw_value.saturating_sub(*prev_val);
+                let delta_us = tile.last_ts_micros.saturating_sub(*prev_ts);
+                if delta_us > 0 {
+                    (delta_val as f64) / (delta_us as f64 / 1_000_000.0)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+            match metric.as_str() {
+                "rx_bytes" => entry.rx_bytes_per_sec = rate,
+                "tx_bytes" => entry.tx_bytes_per_sec = rate,
+                "rx_packets" => entry.rx_packets_per_sec = rate,
+                "tx_packets" => entry.tx_packets_per_sec = rate,
+                "rx_errors" => entry.rx_errors_per_sec = rate,
+                "tx_errors" => entry.tx_errors_per_sec = rate,
+                "rx_dropped" => entry.rx_dropped_per_sec = rate,
+                "tx_dropped" => entry.tx_dropped_per_sec = rate,
+                _ => {}
+            }
+            state.net_prev.insert(id, (tile.last_ts_micros, tile.last_raw_value));
+        } else if metric == "link_state" {
+            entry.link_state = tile.value;
+        } else if metric == "speed_mbps" {
+            entry.speed_mbps = tile
+                .value
+                .split_whitespace()
+                .next()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(-1.0);
+        }
+    }
+
+    let ordered: Vec<&NetworkInterfaceJson> = by_iface.values().collect();
+    serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Convert the raw proc.list table rows into a JSON array of objects
@@ -1034,6 +1157,8 @@ mod tests {
                         unit: "count".into(),
                         sparkline: vec![],
                         rows: vec![],
+                        last_raw_value: 0,
+                        last_ts_micros: 0,
                     },
                 )
             })
@@ -1049,6 +1174,7 @@ mod tests {
             units,
             static_ids: HashSet::new(),
             sparklines: HashMap::new(),
+            net_prev: HashMap::new(),
         }
     }
 
@@ -1057,6 +1183,14 @@ mod tests {
             sensor: SensorId::new(id),
             ts_micros: 0,
             reading: linsight_core::Reading::Scalar(value),
+        }
+    }
+
+    fn counter_sample(id: &str, ts_micros: u64, value: u64) -> linsight_core::Sample {
+        linsight_core::Sample {
+            sensor: SensorId::new(id),
+            ts_micros,
+            reading: linsight_core::Reading::Counter(value),
         }
     }
 
@@ -1079,6 +1213,8 @@ mod tests {
             unit: String::new(),
             sparkline: vec![],
             rows: vec![],
+            last_raw_value: 0,
+            last_ts_micros: 0,
         };
         let json = serde_json::to_string(&gpu).unwrap();
         assert!(json.contains(r#""name":"GPU utilization""#), "{json}");
@@ -1166,6 +1302,24 @@ mod tests {
         let (s2, _) =
             format_reading_with_rows(&id, &Reading::Scalar(34_190_917_632.0), &Unit::Bytes, false);
         assert_eq!(s2, "31.84 GiB");
+    }
+
+    #[test]
+    fn network_rate_computes_from_counter_delta() {
+        // The Network page needs per-interface throughput rates computed
+        // from cumulative counters. Apply two rx_bytes samples one second
+        // apart and verify the rate equals the delta.
+        let mut state = empty_state_with_tiles(&["net.eth0.rx_bytes"]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 0, 1_000_000));
+        let _ = compute_network_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 2_500_000));
+        let json = compute_network_rates(&mut state);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let arr = parsed.as_array().expect("array");
+        assert_eq!(arr.len(), 1);
+        let iface = &arr[0];
+        assert_eq!(iface["iface"], "eth0");
+        assert_eq!(iface["rx_bytes_per_sec"], 1_500_000.0);
     }
 
     #[test]
