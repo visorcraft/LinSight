@@ -61,12 +61,12 @@ Rectangle {
             columnSpacing: app.tokens.spaceL
             rowSpacing: app.tokens.spaceS
 
-            NetworkMetric { label: qsTr("RX"); value: root.iface ? root.iface.rx_bytes_per_sec : 0 }
-            NetworkMetric { label: qsTr("TX"); value: root.iface ? root.iface.tx_bytes_per_sec : 0 }
-            NetworkMetric { label: qsTr("RX pkt/s"); value: root.iface ? root.iface.rx_packets_per_sec : 0 }
-            NetworkMetric { label: qsTr("TX pkt/s"); value: root.iface ? root.iface.tx_packets_per_sec : 0 }
-            NetworkMetric { label: qsTr("Errors"); value: root.iface ? root.iface.rx_errors_per_sec + root.iface.tx_errors_per_sec : 0 }
-            NetworkMetric { label: qsTr("Drops"); value: root.iface ? root.iface.rx_dropped_per_sec + root.iface.tx_dropped_per_sec : 0 }
+            NetworkMetric { label: qsTr("RX"); value: root.iface ? root.iface.rx_bytes_per_sec : 0; isBytes: true }
+            NetworkMetric { label: qsTr("TX"); value: root.iface ? root.iface.tx_bytes_per_sec : 0; isBytes: true }
+            NetworkMetric { label: qsTr("RX pkt/s"); value: root.iface ? root.iface.rx_packets_per_sec : 0; isBytes: false }
+            NetworkMetric { label: qsTr("TX pkt/s"); value: root.iface ? root.iface.tx_packets_per_sec : 0; isBytes: false }
+            NetworkMetric { label: qsTr("Errors"); value: root.iface ? root.iface.rx_errors_per_sec + root.iface.tx_errors_per_sec : 0; isBytes: false }
+            NetworkMetric { label: qsTr("Drops"); value: root.iface ? root.iface.rx_dropped_per_sec + root.iface.tx_dropped_per_sec : 0; isBytes: false }
         }
     }
 }

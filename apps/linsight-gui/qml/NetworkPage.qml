@@ -17,7 +17,7 @@ Kirigami.Page {
 
     readonly property var interfaces: {
         if (!page.dashModel) return []
-        try { return JSON.parse(page.dashModel.network_json || "[]") }
+        try { return JSON.parse(page.dashModel.networkJson || "[]") }
         catch (e) { return [] }
     }
 
