@@ -219,14 +219,6 @@ impl Workspace {
         // current, so the old connection keeps working unchanged.
         let new_generation = self.connection_generation.load(Ordering::SeqCst).saturating_add(1);
 
-        // Bridge the new client's catalogue into the same stable receiver
-        // *before* replaying subscriptions. The replay may cause the daemon
-        // to emit a SensorListBroadcast (e.g. nickname refresh), so the
-        // catalogue forwarder must already be listening. Broadcasts sent
-        // before the generation is published are dropped by the refresh
-        // thread because their generation is not yet current.
-        spawn_catalogue_forwarder(new_cat_rx, self.catalogue_tx.clone(), new_generation);
-
         // Apply stored state to the new client *before* swapping. If this
         // fails we return the error without publishing the generation, so
         // the old connection stays alive.
@@ -242,11 +234,11 @@ impl Workspace {
         }
 
         // Commit the new connection: publish the generation, mark it alive,
-        // and swap out the old client. Only *after* the generation is
-        // published do we start forwarding samples; otherwise a sample from
-        // the new client could advance the pump's current generation before
-        // the replay succeeds, causing the old connection's samples to be
-        // dropped if the replay later fails.
+        // and swap out the old client. Only *after* the swap do we start
+        // forwarding samples/catalogue updates; otherwise data from the new
+        // client could advance the pump's current generation (or refresh
+        // tile names from a not-yet-committed catalogue) before the replay
+        // succeeds, poisoning the old connection if the replay later fails.
         self.connection_generation.store(new_generation, Ordering::SeqCst);
         self.connection_alive.store(true, Ordering::SeqCst);
 
@@ -256,6 +248,8 @@ impl Workspace {
         };
         drop(old_client);
 
+        // Both receivers were created before the replay so any broadcasts or
+        // samples emitted during replay are buffered here and drained now.
         spawn_sample_forwarder(
             new_rx,
             self.sample_tx.clone(),
@@ -263,6 +257,7 @@ impl Workspace {
             Arc::clone(&self.connection_alive),
             new_generation,
         );
+        spawn_catalogue_forwarder(new_cat_rx, self.catalogue_tx.clone(), new_generation);
 
         *self.active_target.lock().expect("active_target poisoned") = target.to_string();
         Ok(())
@@ -322,7 +317,7 @@ mod tests {
         ServerMsg,
     };
     use std::os::unix::net::UnixListener;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     fn fake_sensor(id: &str) -> linsight_protocol::SensorInfo {
         linsight_protocol::SensorInfo {
@@ -346,6 +341,15 @@ mod tests {
         listener: UnixListener,
         sensor_id: &'static str,
         disconnected: Arc<AtomicBool>,
+    ) {
+        spawn_fake_daemon_with_pump_recorder(listener, sensor_id, disconnected, None);
+    }
+
+    fn spawn_fake_daemon_with_pump_recorder(
+        listener: UnixListener,
+        sensor_id: &'static str,
+        disconnected: Arc<AtomicBool>,
+        pump_interval_ms: Option<Arc<AtomicU32>>,
     ) {
         thread::spawn(move || {
             let Ok((stream, _)) = listener.accept() else { return };
@@ -389,6 +393,9 @@ mod tests {
                         }
                     }
                     Ok(ClientMsg::Request { req_id, op: RequestOp::SetPumpIntervalMs { ms } }) => {
+                        if let Some(ref recorder) = pump_interval_ms {
+                            recorder.store(ms, Ordering::SeqCst);
+                        }
                         writer
                             .write_server(&ServerMsg::Response {
                                 req_id,
@@ -644,5 +651,40 @@ mod tests {
         assert!(!disconnected_a.load(Ordering::SeqCst), "old daemon should still be connected");
 
         drop(path_a);
+    }
+
+    #[test]
+    fn reconnect_replays_pump_interval() {
+        let (workspace, _path_a, _disconnected_a) = make_workspace("cpu.util");
+        let rx = workspace.take_sample_rx().expect("take sample rx");
+
+        workspace.subscribe(vec![SensorId::new("cpu.util")]).expect("subscribe");
+        let _ = recv_sample(&rx, "cpu.util");
+
+        workspace
+            .set_pump_interval_ms(200, Duration::from_secs(3))
+            .expect("set non-default pump interval");
+
+        let dir_b = tempfile::tempdir().expect("tempdir");
+        let path_b = dir_b.path().join("linsight.sock");
+        let listener_b = UnixListener::bind(&path_b).expect("bind");
+        let disconnected_b = Arc::new(AtomicBool::new(false));
+        let pump_seen_b = Arc::new(AtomicU32::new(0));
+        spawn_fake_daemon_with_pump_recorder(
+            listener_b,
+            "cpu.util",
+            Arc::clone(&disconnected_b),
+            Some(Arc::clone(&pump_seen_b)),
+        );
+        std::thread::sleep(Duration::from_millis(50));
+
+        workspace.reconnect_to_path(&path_b).expect("reconnect");
+
+        assert_eq!(
+            pump_seen_b.load(Ordering::SeqCst),
+            200,
+            "new daemon should receive the stored pump interval"
+        );
+        assert!(!disconnected_b.load(Ordering::SeqCst), "new daemon should still be connected");
     }
 }
