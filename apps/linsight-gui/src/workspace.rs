@@ -479,12 +479,16 @@ mod tests {
     }
 
     fn recv_sample(rx: &Receiver<SampleBridge>, sensor_id: &str) -> Sample {
+        recv_sample_with_gen(rx, sensor_id).1
+    }
+
+    fn recv_sample_with_gen(rx: &Receiver<SampleBridge>, sensor_id: &str) -> (u64, Sample) {
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
-            if let Ok((_gen, s)) = rx.recv_timeout(Duration::from_millis(100))
+            if let Ok((g, s)) = rx.recv_timeout(Duration::from_millis(100))
                 && s.sensor.as_str() == sensor_id
             {
-                return s;
+                return (g, s);
             }
         }
         panic!("timed out waiting for sample from {sensor_id}");
@@ -651,6 +655,39 @@ mod tests {
         assert!(!disconnected_a.load(Ordering::SeqCst), "old daemon should still be connected");
 
         drop(path_a);
+    }
+
+    #[test]
+    fn reconnect_tags_new_samples_with_higher_generation() {
+        // Regression guard for the pump-loop race fixed in the host-switching
+        // follow-up: if a reconnect happens while the pump is idle between
+        // ticks (recv_timeout), the next sample from the new daemon must
+        // arrive with a higher generation than the previous connection's
+        // samples. That generation jump is what triggers the tile-catalogue
+        // rebuild for the new host.
+        let (workspace, _path_a, _disconnected_a) = make_workspace("cpu.util");
+        let rx = workspace.take_sample_rx().expect("take sample rx");
+
+        workspace.subscribe(vec![SensorId::new("cpu.util")]).expect("subscribe");
+        let (gen_before, _) = recv_sample_with_gen(&rx, "cpu.util");
+
+        let dir_b = tempfile::tempdir().expect("tempdir");
+        let path_b = dir_b.path().join("linsight.sock");
+        let listener_b = UnixListener::bind(&path_b).expect("bind");
+        let disconnected_b = Arc::new(AtomicBool::new(false));
+        spawn_fake_daemon(listener_b, "cpu.util", Arc::clone(&disconnected_b));
+        std::thread::sleep(Duration::from_millis(50));
+
+        workspace.reconnect_to_path(&path_b).expect("reconnect");
+
+        workspace.subscribe(vec![SensorId::new("cpu.util")]).expect("subscribe");
+        let (gen_after, sample) = recv_sample_with_gen(&rx, "cpu.util");
+        assert!(
+            gen_after > gen_before,
+            "post-reconnect sample generation ({gen_after}) must exceed pre-reconnect ({gen_before})"
+        );
+        assert!(matches!(sample.reading, Reading::Scalar(42.0)));
+        assert!(!disconnected_b.load(Ordering::SeqCst), "new daemon dropped unexpectedly");
     }
 
     #[test]

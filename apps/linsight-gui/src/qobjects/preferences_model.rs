@@ -406,7 +406,8 @@ impl Default for PreferencesModelRust {
 /// Workspace keys that `start_page` may name. Anything outside this
 /// set (or the `dashboard:<slug>` form) is treated as invalid by
 /// `apply_start_page`.
-const VALID_START_WORKSPACES: &[&str] = &["overview", "gpus", "storage", "network", "hardware"];
+const VALID_START_WORKSPACES: &[&str] =
+    &["overview", "gpus", "storage", "network", "hardware", "processes", "alerts"];
 
 /// True iff `key` is a syntactically valid start_page value.
 /// Whether the named dashboard actually exists on disk is the
@@ -618,6 +619,8 @@ pub(crate) mod tests {
         assert!(is_valid_start_page("storage"));
         assert!(is_valid_start_page("network"));
         assert!(is_valid_start_page("hardware"));
+        assert!(is_valid_start_page("processes"));
+        assert!(is_valid_start_page("alerts"));
         assert!(is_valid_start_page("dashboard:default"));
         assert!(is_valid_start_page("dashboard:my-rig"));
     }
