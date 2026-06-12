@@ -99,17 +99,17 @@ fn main() -> anyhow::Result<()> {
     cxx_qt::init_crate!(linsight);
     cxx_qt::init_qml_module!("com.visorcraft.LinSight");
 
-    let client = match remote_url {
+    let (client, initial_target) = match remote_url {
         Some(url) => {
             tracing::info!(url = %url, "connecting to remote daemon over SSH");
-            Client::connect_ssh(&url)?
+            (Client::connect_ssh(&url)?, url)
         }
         None => {
             let socket = default_socket_path()?;
-            Client::connect_or_spawn(&socket)?
+            (Client::connect_or_spawn(&socket)?, "local".to_string())
         }
     };
-    qobjects::install_workspace(Arc::new(Workspace::new(client)?));
+    qobjects::install_workspace(Arc::new(Workspace::new(client, &initial_target)?));
 
     let mut app = QGuiApplication::new();
     if app.is_null() {

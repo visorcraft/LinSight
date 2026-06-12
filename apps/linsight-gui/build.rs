@@ -56,6 +56,7 @@ fn main() {
     .file("src/qobjects/dashboards_model.rs")
     .file("src/qobjects/hardware_model.rs")
     .file("src/qobjects/history_model.rs")
+    .file("src/qobjects/hosts_model.rs")
     .file("src/qobjects/alert_model.rs")
     .qrc_resources(
         QResources::new().resource(

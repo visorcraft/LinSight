@@ -50,6 +50,10 @@ pub struct Workspace {
     subscriptions: Mutex<Vec<SensorId>>,
     /// Last pump-interval value successfully applied. Replayed on reconnect.
     pump_interval_ms: Mutex<u32>,
+    /// The currently connected target (`"local"` or an `ssh://...` URL).
+    /// Mirrored into `HostsModel.active_host` so the UI shows the right
+    /// label after a CLI `--connect` launch or an in-app reconnect.
+    active_target: Mutex<String>,
     /// Monotonically incremented on each reconnect so a forwarder from a
     /// defunct client does not clear the connection-alive flag of a newer
     /// connection.
@@ -63,7 +67,7 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new(client: ClientHandle) -> anyhow::Result<Self> {
+    pub fn new(client: ClientHandle, initial_target: &str) -> anyhow::Result<Self> {
         let client_rx = client
             .take_sample_rx()
             .ok_or_else(|| anyhow::anyhow!("client sample receiver already taken"))?;
@@ -88,6 +92,7 @@ impl Workspace {
             catalogue_rx: Mutex::new(Some(catalogue_rx)),
             subscriptions: Mutex::new(Vec::new()),
             pump_interval_ms: Mutex::new(linsight_protocol::PUMP_INTERVAL_DEFAULT_MS),
+            active_target: Mutex::new(initial_target.to_string()),
             connection_generation,
             connection_alive,
             reconnect_lock: Mutex::new(()),
@@ -135,6 +140,11 @@ impl Workspace {
     /// connection that was replaced.
     pub fn connection_generation(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.connection_generation)
+    }
+
+    /// The currently connected target (`"local"` or the `ssh://...` URL).
+    pub fn active_target(&self) -> String {
+        self.active_target.lock().expect("active_target poisoned").clone()
     }
 
     /// Subscribe `sensors` on the current client and remember them for
@@ -190,10 +200,10 @@ impl Workspace {
         }
         .map_err(|e| e.to_string())?;
 
-        self.reconnect_with_client(new_client)
+        self.reconnect_with_client(new_client, target)
     }
 
-    fn reconnect_with_client(&self, new_client: ClientHandle) -> Result<(), String> {
+    fn reconnect_with_client(&self, new_client: ClientHandle, target: &str) -> Result<(), String> {
         // Serialize the whole reconnect so two overlapping attempts cannot
         // advance the generation and swap the client out of order.
         let _guard = self.reconnect_lock.lock().expect("reconnect_lock poisoned");
@@ -203,17 +213,19 @@ impl Workspace {
             .ok_or_else(|| "new client's sample receiver already taken".to_string())?;
         let new_cat_rx = new_client.subscribe_catalogue();
 
-        // Advance the generation and mark the new connection alive *before*
-        // dropping the old client, so a stale forwarder cannot clear the
-        // flag of the new connection.
-        let new_generation =
-            self.connection_generation.fetch_add(1, Ordering::SeqCst).saturating_add(1);
-        self.connection_alive.store(true, Ordering::SeqCst);
+        // Compute the generation we will use if the replay succeeds, but do
+        // not publish it yet. The forwarders below tag their samples with
+        // this future generation; if the subscription replay fails and we
+        // return early, the new client is dropped, the forwarders exit, and
+        // the generation never becomes current, so the old connection keeps
+        // working unchanged.
+        let new_generation = self.connection_generation.load(Ordering::SeqCst).saturating_add(1);
 
         // Bridge the new client's samples/catalogue into the same stable
         // receivers *before* replaying subscriptions. The replay may cause
         // the daemon to emit a SensorListBroadcast (e.g. nickname refresh),
-        // so the catalogue forwarder must already be listening.
+        // so the catalogue forwarder must already be listening. Samples sent
+        // before the generation is published are ignored by the pump.
         spawn_sample_forwarder(
             new_rx,
             self.sample_tx.clone(),
@@ -224,8 +236,8 @@ impl Workspace {
         spawn_catalogue_forwarder(new_cat_rx, self.catalogue_tx.clone(), new_generation);
 
         // Apply stored state to the new client *before* swapping. If this
-        // fails we can still return the error without losing the old
-        // connection.
+        // fails we return the error without publishing the generation, so
+        // the old connection stays alive.
         let subs = self.subscriptions.lock().expect("subscriptions poisoned").clone();
         let pump_ms = *self.pump_interval_ms.lock().expect("pump_interval poisoned");
         if !subs.is_empty() {
@@ -237,14 +249,18 @@ impl Workspace {
                 .map_err(|e| e.to_string())?;
         }
 
-        // Swap in the new client. The old one drops, killing its dispatch
-        // thread and therefore its sample/catalogue forwarders.
+        // Commit the new connection: publish the generation, mark it alive,
+        // and swap out the old client.
+        self.connection_generation.store(new_generation, Ordering::SeqCst);
+        self.connection_alive.store(true, Ordering::SeqCst);
+
         let old_client = {
             let mut guard = self.client.lock().expect("client poisoned");
             std::mem::replace(&mut *guard, new_client)
         };
         drop(old_client);
 
+        *self.active_target.lock().expect("active_target poisoned") = target.to_string();
         Ok(())
     }
 
@@ -252,7 +268,8 @@ impl Workspace {
     #[cfg(test)]
     pub fn reconnect_to_path(&self, path: &std::path::Path) -> Result<(), String> {
         let new_client = Client::connect_or_spawn(path).map_err(|e| e.to_string())?;
-        self.reconnect_with_client(new_client)
+        let target = path.to_string_lossy().to_string();
+        self.reconnect_with_client(new_client, &target)
     }
 }
 
@@ -384,7 +401,7 @@ mod tests {
         // Give the listener thread a moment to start accepting.
         std::thread::sleep(Duration::from_millis(50));
         let client = Client::connect_or_spawn(&path).expect("connect");
-        let workspace = Workspace::new(client).expect("workspace");
+        let workspace = Workspace::new(client, "local").expect("workspace");
         (workspace, path, disconnected)
     }
 

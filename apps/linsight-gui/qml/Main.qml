@@ -86,6 +86,16 @@ Kirigami.ApplicationWindow {
         id: theAlerts
     }
 
+    // HostsModel — persisted saved remote hosts + connection switching.
+    property var hostsModel: theHostsModel
+    HostsModel {
+        id: theHostsModel
+        Component.onCompleted: {
+            theHostsModel.reload()
+            theHostsModel.sync_active_host()
+        }
+    }
+
     // HistoryModel — shared instance for the per-sensor history dialog.
     // A single instance is intentional: only one sensor's history is shown
     // at a time. QML reaches it via `app.historyModel`.

@@ -97,6 +97,27 @@ pub struct Client {
     ssh_socket_path: Mutex<Option<PathBuf>>,
 }
 
+/// Validate the SSH target portion of a `ssh://[user@]host[:port]` URL.
+/// Rejects option-injection attempts (leading `-` on the whole target or on
+/// the host part) and control characters.
+pub fn validate_ssh_target(target: &str) -> Result<()> {
+    if target.is_empty() {
+        anyhow::bail!("empty SSH target");
+    }
+    if target.starts_with('-') {
+        anyhow::bail!("invalid SSH target: {target:?} starts with '-'; possible option injection");
+    }
+    let host_part = target.rsplit_once('@').map(|(_, h)| h).unwrap_or(target);
+    let host = host_part.split_once(':').map(|(h, _)| h).unwrap_or(host_part);
+    if host.starts_with('-') {
+        anyhow::bail!("invalid SSH host: {host:?} starts with '-'; possible option injection");
+    }
+    if target.chars().any(|c| c.is_control()) {
+        anyhow::bail!("invalid SSH target: contains control characters");
+    }
+    Ok(())
+}
+
 impl Client {
     /// Connect to a remote `linsightd` over SSH. The URL is
     /// `ssh://[user@]host[:port]`. The remote socket path is discovered by
@@ -108,11 +129,7 @@ impl Client {
         let target = url
             .strip_prefix("ssh://")
             .ok_or_else(|| anyhow::anyhow!("expected ssh:// prefix, got {url}"))?;
-        if target.starts_with('-') {
-            anyhow::bail!(
-                "invalid SSH target: {target:?} starts with '-'; possible option injection"
-            );
-        }
+        validate_ssh_target(target)?;
         let remote_socket = discover_remote_socket(target)?;
         let local_socket =
             std::env::temp_dir().join(format!("linsight-remote-{}.sock", std::process::id()));
