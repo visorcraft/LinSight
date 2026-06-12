@@ -343,6 +343,7 @@ Kirigami.Page {
                                 item.tileKind = modelData.kind || "scalar"
                                 item.tileRows = modelData.rows || []
                                 item.tileSensorId = (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
+                                item.tileCopyableSensorId = modelData.id || ""
                                 item.tileUnit = modelData.unit || ""
                                 item.tileSparkline = modelData.sparkline || []
                                 // sparklinesEnabled is kept in sync reactively by the Binding

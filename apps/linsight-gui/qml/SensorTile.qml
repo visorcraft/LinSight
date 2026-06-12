@@ -24,6 +24,10 @@ Rectangle {
     // Sensor id passed through to the history dialog. When empty no click
     // handler is active (e.g. static/table tiles without a scalar history).
     property string tileSensorId: ""
+    // Raw sensor id for the clipboard copy action; set independently from
+    // tileSensorId so table/state tiles can still be copied even though they
+    // have no scalar history dialog.
+    property string tileCopyableSensorId: ""
     // Short unit suffix forwarded to HistoryDialog (e.g. "°C", "%").
     property string tileUnit: ""
 
@@ -32,6 +36,17 @@ Rectangle {
 
     color: app.tokens.surface1
     radius: app.tokens.radiusCard
+
+    TextEdit {
+        id: clipboardProxy
+        visible: false
+        text: ""
+        function copySensorId(sensorId) {
+            clipboardProxy.text = sensorId
+            clipboardProxy.selectAll()
+            clipboardProxy.copy()
+        }
+    }
 
     // Border: static width + color by default, but threshold-based when
     // the tile's options enable it. Binding to a function keeps QML from
@@ -243,6 +258,12 @@ Rectangle {
         return b + " B";
     }
 
+    function copySensorIdToClipboard() {
+        if (root.tileCopyableSensorId.length === 0) return
+        clipboardProxy.copySensorId(root.tileCopyableSensorId)
+        app.showPassiveNotification(qsTr("Copied %1").arg(root.tileCopyableSensorId), 2000)
+    }
+
     // Hover highlight: a subtle overlay that appears when the tile has a
     // sensor id wired and the user can click to open the history dialog.
     Rectangle {
@@ -270,5 +291,32 @@ Rectangle {
         id: tileHover
         enabled: root.tileSensorId.length > 0
         cursorShape: root.tileSensorId.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+
+    Menu {
+        id: tileContextMenu
+        MenuItem {
+            text: qsTr("Copy sensor ID")
+            enabled: root.tileCopyableSensorId.length > 0
+            onTriggered: root.copySensorIdToClipboard()
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.RightButton
+        onClicked: {
+            if (root.tileCopyableSensorId.length > 0) {
+                tileContextMenu.popup()
+            }
+        }
+    }
+
+    TapHandler {
+        enabled: root.tileCopyableSensorId.length > 0
+        onLongPressed: {
+            root.copySensorIdToClipboard()
+            app.showPassiveNotification(qsTr("Copied sensor ID"), 2000)
+        }
     }
 }
