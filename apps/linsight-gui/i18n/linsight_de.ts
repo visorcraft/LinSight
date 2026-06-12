@@ -627,7 +627,7 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/CategoryPage.qml" line="404"/>
+        <location filename="../qml/CategoryPage.qml" line="405"/>
         <source>No %1 sensors detected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -728,7 +728,7 @@ Add one using the button above.</source>
         <location filename="../qml/DashWindow.qml" line="42"/>
         <location filename="../qml/DashWindow.qml" line="53"/>
         <source>Network</source>
-        <translation type="unfinished"></translation>
+        <translation>Netzwerk</translation>
     </message>
 </context>
 <context>
@@ -1104,9 +1104,8 @@ Add one using the button above.</source>
     </message>
     <message>
         <location filename="../qml/Main.qml" line="533"/>
-        <location filename="../qml/Main.qml" line="740"/>
         <source>Network</source>
-        <translation type="unfinished"></translation>
+        <translation>Netzwerk</translation>
     </message>
     <message>
         <location filename="../qml/Main.qml" line="541"/>
@@ -1157,6 +1156,73 @@ Add one using the button above.</source>
         <location filename="../qml/Main.qml" line="731"/>
         <source>Disconnected from linsightd — values shown are last known.</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>NetworkCard</name>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="49"/>
+        <source>%1 Mbps</source>
+        <translation>%1 Mbps</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="50"/>
+        <source>Speed unknown</source>
+        <translation>Geschwindigkeit unbekannt</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="64"/>
+        <source>RX</source>
+        <translation>RX</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="65"/>
+        <source>TX</source>
+        <translation>TX</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="66"/>
+        <source>RX pkt/s</source>
+        <translation>RX Pkt./s</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="67"/>
+        <source>TX pkt/s</source>
+        <translation>TX Pkt./s</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="68"/>
+        <source>Errors</source>
+        <translation>Fehler</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="69"/>
+        <source>Drops</source>
+        <translation>Verluste</translation>
+    </message>
+</context>
+<context>
+    <name>NetworkPage</name>
+    <message>
+        <location filename="../qml/NetworkPage.qml" line="11"/>
+        <location filename="../qml/NetworkPage.qml" line="45"/>
+        <source>Network</source>
+        <translation>Netzwerk</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkPage.qml" line="53"/>
+        <source>%1 interface</source>
+        <translation>%1 Schnittstelle</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkPage.qml" line="54"/>
+        <source>%1 interfaces</source>
+        <translation>%1 Schnittstellen</translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkPage.qml" line="90"/>
+        <source>No network interfaces detected</source>
+        <translation>Keine Netzwerkschnittstellen erkannt</translation>
     </message>
 </context>
 <context>
@@ -1227,69 +1293,97 @@ Add one using the button above.</source>
     <message>
         <location filename="../qml/ProcessesPage.qml" line="16"/>
         <location filename="../qml/ProcessesPage.qml" line="22"/>
-        <location filename="../qml/ProcessesPage.qml" line="110"/>
+        <location filename="../qml/ProcessesPage.qml" line="113"/>
         <source>Processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="121"/>
+        <location filename="../qml/ProcessesPage.qml" line="124"/>
         <source>Filter by name or PID…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="123"/>
+        <location filename="../qml/ProcessesPage.qml" line="126"/>
         <source>Filter processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="139"/>
+        <location filename="../qml/ProcessesPage.qml" line="151"/>
+        <source>Clear filter</source>
+        <translation>Filter löschen</translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="161"/>
+        <source>Filtering by: %1</source>
+        <translation>Gefiltert nach: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/ProcessesPage.qml" line="180"/>
         <source>PID</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="140"/>
+        <location filename="../qml/ProcessesPage.qml" line="181"/>
         <source>Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="141"/>
+        <location filename="../qml/ProcessesPage.qml" line="182"/>
         <source>CPU %</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="142"/>
+        <location filename="../qml/ProcessesPage.qml" line="183"/>
         <source>Mem %</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="143"/>
+        <location filename="../qml/ProcessesPage.qml" line="184"/>
         <source>RSS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="144"/>
+        <location filename="../qml/ProcessesPage.qml" line="185"/>
         <source>Threads</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="145"/>
+        <location filename="../qml/ProcessesPage.qml" line="186"/>
         <source>State</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="192"/>
+        <location filename="../qml/ProcessesPage.qml" line="233"/>
         <source>No processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="192"/>
+        <location filename="../qml/ProcessesPage.qml" line="233"/>
         <source>No matching processes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/ProcessesPage.qml" line="198"/>
+        <location filename="../qml/ProcessesPage.qml" line="239"/>
         <source>Waiting for proc.list samples…</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SensorTile</name>
+    <message>
+        <location filename="../qml/SensorTile.qml" line="264"/>
+        <source>Copied %1</source>
+        <translation>%1 kopiert</translation>
+    </message>
+    <message>
+        <location filename="../qml/SensorTile.qml" line="299"/>
+        <source>Copy sensor ID</source>
+        <translation>Sensor-ID kopieren</translation>
+    </message>
+    <message>
+        <location filename="../qml/SensorTile.qml" line="319"/>
+        <source>Copied sensor ID</source>
+        <translation>Sensor-ID kopiert</translation>
     </message>
 </context>
 <context>
@@ -1430,17 +1524,27 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="348"/>
+        <location filename="../qml/SettingsPage.qml" line="346"/>
+        <source>Prometheus exporter is bound to %1. To change the bind address, set LINSIGHT_PROM_BIND and restart the daemon.</source>
+        <translation>Prometheus-Exporter ist an %1 gebunden. Ändere die Bind-Adresse mit LINSIGHT_PROM_BIND und starte den Daemon neu.</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="347"/>
+        <source>Prometheus exporter is not configured. Set LINSIGHT_PROM_BIND and restart the daemon to enable it.</source>
+        <translation>Prometheus-Exporter ist nicht konfiguriert. Setze LINSIGHT_PROM_BIND und starte den Daemon neu, um ihn zu aktivieren.</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="359"/>
         <source>Command-line tools</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="349"/>
+        <location filename="../qml/SettingsPage.qml" line="360"/>
         <source>The CLI and daemon ship alongside the GUI.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="353"/>
+        <location filename="../qml/SettingsPage.qml" line="364"/>
         <source>&lt;code&gt;linsight-cli list&lt;/code&gt; shows every sensor the daemon advertises.&lt;br&gt;&lt;code&gt;linsight-cli read &amp;lt;sensor&amp;gt; --count N&lt;/code&gt; streams live values.&lt;br&gt;&lt;code&gt;linsight-cli plugin new &amp;lt;name&amp;gt;&lt;/code&gt; scaffolds a third-party plugin crate.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1475,7 +1579,7 @@ Add one using the button above.</source>
     <message>
         <location filename="../qml/StartPagePicker.qml" line="28"/>
         <source>Network</source>
-        <translation type="unfinished"></translation>
+        <translation>Netzwerk</translation>
     </message>
     <message>
         <location filename="../qml/StartPagePicker.qml" line="29"/>
