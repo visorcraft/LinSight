@@ -537,7 +537,9 @@ impl ffi::PreferencesModel {
     }
 
     pub fn apply_process_table_sort(mut self: Pin<&mut Self>, column: &QString, descending: bool) {
-        self.as_mut().set_process_table_sort_column(column.clone());
+        let requested = column.to_string();
+        let resolved = validated_process_sort_column(Some(&requested));
+        self.as_mut().set_process_table_sort_column(QString::from(resolved));
         self.as_mut().set_process_table_sort_descending(descending);
         let _ = save_prefs(&self.snapshot());
     }
@@ -870,5 +872,12 @@ pub(crate) mod tests {
         // The model exposes the validated column, not the raw persisted value.
         let model = PreferencesModelRust::default();
         assert_eq!(model.process_table_sort_column.to_string(), "cpu");
+    }
+
+    #[test]
+    fn process_table_sort_validation_rejects_invalid_column() {
+        assert_eq!(validated_process_sort_column(Some("not_a_column")), "cpu");
+        assert_eq!(validated_process_sort_column(Some("mem")), "mem");
+        assert_eq!(validated_process_sort_column(None), "cpu");
     }
 }

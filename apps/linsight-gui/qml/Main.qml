@@ -556,7 +556,7 @@ Kirigami.ApplicationWindow {
             // specific dashboard: clicking a DASHBOARDS row opens its
             // read-only view, which has an "Edit" affordance; the New
             // Dashboard flow opens the editor on the freshly-created
-            // file. Ctrl+5 still works (resolves to the active slug).
+            // file. Ctrl+6 still works (resolves to the active slug).
             NavItem {
                 Layout.fillWidth: true
                 label: qsTr("New Window")

@@ -258,10 +258,10 @@ Rectangle {
         return b + " B";
     }
 
-    function copySensorIdToClipboard() {
+    function copySensorIdToClipboard(message) {
         if (root.tileCopyableSensorId.length === 0) return
         clipboardProxy.copySensorId(root.tileCopyableSensorId)
-        app.showPassiveNotification(qsTr("Copied %1").arg(root.tileCopyableSensorId), 2000)
+        app.showPassiveNotification(message || qsTr("Copied %1").arg(root.tileCopyableSensorId), 2000)
     }
 
     // Hover highlight: a subtle overlay that appears when the tile has a
@@ -315,8 +315,7 @@ Rectangle {
     TapHandler {
         enabled: root.tileCopyableSensorId.length > 0
         onLongPressed: {
-            root.copySensorIdToClipboard()
-            app.showPassiveNotification(qsTr("Copied sensor ID"), 2000)
+            root.copySensorIdToClipboard(qsTr("Copied sensor ID"))
         }
     }
 }

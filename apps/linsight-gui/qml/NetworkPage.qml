@@ -62,14 +62,14 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            leftPadding: app.tokens.spaceXL
+            rightPadding: app.tokens.spaceXL
+            topPadding: app.tokens.spaceL
+            bottomPadding: app.tokens.spaceL
             contentWidth: availableWidth
 
             GridLayout {
                 width: parent.width
-                anchors.leftMargin: app.tokens.spaceXL
-                anchors.rightMargin: app.tokens.spaceXL
-                anchors.topMargin: app.tokens.spaceL
-                anchors.bottomMargin: app.tokens.spaceL
                 columns: Math.max(1, Math.floor(parent.width / 320))
                 rowSpacing: app.tokens.spaceM
                 columnSpacing: app.tokens.spaceM
