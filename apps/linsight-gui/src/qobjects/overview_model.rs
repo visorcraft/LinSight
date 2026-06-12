@@ -919,28 +919,31 @@ fn compute_network_rates(state: &mut SampleState) -> String {
         state.tiles.keys().filter(|id| id.starts_with("net.")).cloned().collect();
 
     for id in ids {
-        let parts: Vec<&str> = id.split('.').collect();
-        if parts.len() != 3 {
-            continue;
-        }
-        let iface = parts[1].to_string();
-        let metric = parts[2].to_string();
-        drop(parts);
-        let tile = match state.tiles.get(&id) {
-            Some(t) => t.clone(),
+        let rest = match id.strip_prefix("net.") {
+            Some(r) => r,
             None => continue,
         };
+        let (iface, metric) = match rest.rsplit_once('.') {
+            Some((iface, metric)) => (iface.to_string(), metric.to_string()),
+            None => continue,
+        };
+        let tile = match state.tiles.get(&id) {
+            Some(t) => t,
+            None => continue,
+        };
+        let ts = tile.last_ts_micros;
+        let raw = tile.last_raw_value;
 
         let entry = by_iface
             .entry(iface.clone())
             .or_insert_with(|| NetworkInterfaceJson { iface: iface.clone(), ..Default::default() });
 
         if METRICS.contains(&metric.as_str()) {
-            let rate = if tile.last_ts_micros == 0 {
+            let rate = if ts == 0 {
                 0.0
             } else if let Some((prev_ts, prev_val)) = state.net_prev.get(&id) {
-                let delta_val = tile.last_raw_value.saturating_sub(*prev_val);
-                let delta_us = tile.last_ts_micros.saturating_sub(*prev_ts);
+                let delta_val = raw.saturating_sub(*prev_val);
+                let delta_us = ts.saturating_sub(*prev_ts);
                 if delta_us > 0 {
                     (delta_val as f64) / (delta_us as f64 / 1_000_000.0)
                 } else {
@@ -960,9 +963,9 @@ fn compute_network_rates(state: &mut SampleState) -> String {
                 "tx_dropped" => entry.tx_dropped_per_sec = rate,
                 _ => {}
             }
-            state.net_prev.insert(id, (tile.last_ts_micros, tile.last_raw_value));
+            state.net_prev.insert(id, (ts, raw));
         } else if metric == "link_state" {
-            entry.link_state = tile.value;
+            entry.link_state = tile.value.clone();
         } else if metric == "speed_mbps" {
             entry.speed_mbps = tile
                 .value
@@ -1194,6 +1197,23 @@ mod tests {
         }
     }
 
+    fn state_sample(id: &str, state: &str) -> linsight_core::Sample {
+        linsight_core::Sample {
+            sensor: SensorId::new(id),
+            ts_micros: 0,
+            reading: linsight_core::Reading::State(state.into()),
+        }
+    }
+
+    fn net_array(state: &mut SampleState) -> Vec<serde_json::Value> {
+        let json = compute_network_rates(state);
+        serde_json::from_str::<serde_json::Value>(&json).unwrap().as_array().unwrap().clone()
+    }
+
+    fn net_entry<'a>(arr: &'a [serde_json::Value], iface: &str) -> &'a serde_json::Value {
+        arr.iter().find(|v| v["iface"] == iface).expect("iface in network_json")
+    }
+
     #[test]
     fn tile_json_carries_device_label_as_separate_line_not_concatenated() {
         // Regression: a hardware nickname used to be *appended* to the
@@ -1320,6 +1340,98 @@ mod tests {
         let iface = &arr[0];
         assert_eq!(iface["iface"], "eth0");
         assert_eq!(iface["rx_bytes_per_sec"], 1_500_000.0);
+    }
+
+    #[test]
+    fn network_rate_first_sample_populates_prev_without_rate() {
+        // No prior entry → rate must be 0.0 and net_prev must capture the
+        // sample so the next tick can compute a delta.
+        let mut state = empty_state_with_tiles(&["net.eth0.rx_bytes"]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 5_000_000));
+        let arr = net_array(&mut state);
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["rx_bytes_per_sec"], 0.0);
+        assert_eq!(state.net_prev.get("net.eth0.rx_bytes"), Some(&(1_000_000, 5_000_000)));
+    }
+
+    #[test]
+    fn network_rate_zero_delta_returns_zero() {
+        // A repeated timestamp must not divide by zero.
+        let mut state = empty_state_with_tiles(&["net.eth0.rx_bytes"]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 1_000_000));
+        let _ = compute_network_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 2_000_000));
+        let arr = net_array(&mut state);
+        assert_eq!(arr[0]["rx_bytes_per_sec"], 0.0);
+    }
+
+    #[test]
+    fn network_rate_decreasing_counter_saturates_to_zero() {
+        // Counter wrap/reset must not produce a negative rate.
+        let mut state = empty_state_with_tiles(&["net.eth0.rx_bytes"]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 0, 1_000_000));
+        let _ = compute_network_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 500_000));
+        let arr = net_array(&mut state);
+        assert_eq!(arr[0]["rx_bytes_per_sec"], 0.0);
+    }
+
+    #[test]
+    fn network_rate_aggregates_multiple_interfaces_and_metrics() {
+        let mut state = empty_state_with_tiles(&[
+            "net.eth0.rx_bytes",
+            "net.eth0.tx_bytes",
+            "net.eth1.rx_bytes",
+        ]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 0, 1_000_000));
+        apply_sample(&mut state, &counter_sample("net.eth0.tx_bytes", 0, 2_000_000));
+        apply_sample(&mut state, &counter_sample("net.eth1.rx_bytes", 0, 3_000_000));
+        let _ = compute_network_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 4_000_000));
+        apply_sample(&mut state, &counter_sample("net.eth0.tx_bytes", 1_000_000, 8_000_000));
+        apply_sample(&mut state, &counter_sample("net.eth1.rx_bytes", 1_000_000, 9_000_000));
+        let arr = net_array(&mut state);
+
+        let eth0 = net_entry(&arr, "eth0");
+        assert_eq!(eth0["rx_bytes_per_sec"], 3_000_000.0);
+        assert_eq!(eth0["tx_bytes_per_sec"], 6_000_000.0);
+
+        let eth1 = net_entry(&arr, "eth1");
+        assert_eq!(eth1["rx_bytes_per_sec"], 6_000_000.0);
+    }
+
+    #[test]
+    fn network_rate_handles_dotted_interface_name() {
+        // Interface names can contain dots (e.g. VLAN subinterfaces). The
+        // metric is the final segment; everything after "net." before the
+        // last dot is the interface name.
+        let mut state = empty_state_with_tiles(&["net.eth0.100.rx_bytes"]);
+        apply_sample(&mut state, &counter_sample("net.eth0.100.rx_bytes", 0, 1_000_000));
+        let _ = compute_network_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("net.eth0.100.rx_bytes", 1_000_000, 2_500_000));
+        let arr = net_array(&mut state);
+        let iface = net_entry(&arr, "eth0.100");
+        assert_eq!(iface["rx_bytes_per_sec"], 1_500_000.0);
+    }
+
+    #[test]
+    fn network_rate_reads_link_state_and_speed() {
+        let mut state = empty_state_with_tiles(&[
+            "net.eth0.rx_bytes",
+            "net.eth0.link_state",
+            "net.eth0.speed_mbps",
+        ]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 0, 1_000_000));
+        apply_sample(&mut state, &state_sample("net.eth0.link_state", "up"));
+        apply_sample(&mut state, &scalar_sample("net.eth0.speed_mbps", 1000.0));
+        let _ = compute_network_rates(&mut state);
+
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 1_000_000, 2_000_000));
+        let arr = net_array(&mut state);
+        let iface = net_entry(&arr, "eth0");
+        assert_eq!(iface["link_state"], "up");
+        assert_eq!(iface["speed_mbps"], 1000.0);
+        assert_eq!(iface["rx_bytes_per_sec"], 1_000_000.0);
     }
 
     #[test]
