@@ -1,3 +1,10 @@
+linsight (1.14.1-1) unstable; urgency=medium
+
+  * v1.14.1 release. Release artifact race fix, GUI client dispatch tests,
+    daemon XDG path helper refactor, and deterministic wire-size budget guard.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 12 Jun 2026 12:00:00 +0000
+
 linsight (1.14.0-1) unstable; urgency=medium
 
   * v1.14.0 release. UI polish batch: dedicated Network page with

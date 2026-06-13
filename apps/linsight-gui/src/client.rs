@@ -627,3 +627,255 @@ fn dispatch(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::thread;
+    use std::time::Duration;
+
+    use linsight_core::{Reading, Sample, SensorId};
+    use linsight_protocol::{ResponsePayload, SensorInfo};
+    use tracing_subscriber::fmt::writer::MakeWriter;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use super::*;
+
+    fn sensor_info(id: &str) -> SensorInfo {
+        SensorInfo {
+            id: SensorId::new(id),
+            display_name: id.into(),
+            unit: linsight_core::Unit::Percent,
+            kind: linsight_core::SensorKind::Scalar,
+            category: linsight_core::Category::Cpu,
+            native_rate_hz: 1.0,
+            min: None,
+            max: None,
+            device_id: None,
+            plugin_id: "test".into(),
+            device_key: None,
+            device_label: None,
+            tags: vec![],
+        }
+    }
+
+    /// Shared state + writer handle for a single `dispatch` test.
+    struct DispatchRunner {
+        writer: FrameWriter<UnixStream>,
+        handle: thread::JoinHandle<()>,
+        catalogue: Arc<Mutex<Vec<SensorInfo>>>,
+        inflight: Arc<Mutex<HashMap<u32, ResponseSender>>>,
+        listeners: Arc<Mutex<Vec<Sender<Vec<SensorInfo>>>>>,
+    }
+
+    impl DispatchRunner {
+        /// Spawn `dispatch` on a fake Unix socket pair and return the test-side
+        /// writer plus all shared state.
+        fn spawn(sample_tx: Sender<Sample>) -> Self {
+            let (client_sock, server_sock) = UnixStream::pair().unwrap();
+            let catalogue = Arc::new(Mutex::new(vec![]));
+            let inflight = Arc::new(Mutex::new(HashMap::new()));
+            let listeners = Arc::new(Mutex::new(vec![]));
+            let reader = FrameReader::new(client_sock);
+            let handle = thread::spawn({
+                let catalogue = Arc::clone(&catalogue);
+                let inflight = Arc::clone(&inflight);
+                let listeners = Arc::clone(&listeners);
+                move || dispatch(reader, sample_tx, catalogue, inflight, listeners)
+            });
+            Self { writer: FrameWriter::new(server_sock), handle, catalogue, inflight, listeners }
+        }
+
+        fn send(&mut self, msg: &ServerMsg) {
+            self.writer.write_server(msg).unwrap();
+        }
+
+        fn join(self) {
+            drop(self.writer);
+            self.handle.join().unwrap();
+        }
+    }
+
+    /// In-memory writer shared with a `tracing_subscriber::fmt` layer so tests
+    /// can assert that `dispatch` logs the expected warnings.
+    #[derive(Clone)]
+    struct LogWriter {
+        buf: Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl LogWriter {
+        fn new() -> Self {
+            Self { buf: Arc::new(std::sync::Mutex::new(Vec::new())) }
+        }
+
+        fn string(&self) -> String {
+            String::from_utf8(self.buf.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl MakeWriter<'_> for LogWriter {
+        type Writer = LogWriterHandle;
+
+        fn make_writer(&self) -> Self::Writer {
+            LogWriterHandle { buf: Arc::clone(&self.buf) }
+        }
+    }
+
+    struct LogWriterHandle {
+        buf: Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl Write for LogWriterHandle {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.buf.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Capture tracing events to a string for the duration of `f`.
+    fn capture_logs<F>(f: F) -> String
+    where
+        F: FnOnce(),
+    {
+        let writer = LogWriter::new();
+        let layer = tracing_subscriber::fmt::layer()
+            .with_writer(writer.clone())
+            .with_level(false)
+            .with_target(false)
+            .without_time();
+        let subscriber = tracing_subscriber::Registry::default().with(layer);
+        tracing::subscriber::with_default(subscriber, f);
+        writer.string()
+    }
+
+    #[test]
+    fn dispatch_forwards_samples() {
+        let (sample_tx, sample_rx) = channel::<Sample>();
+        let mut runner = DispatchRunner::spawn(sample_tx);
+
+        let sample = Sample {
+            sensor: SensorId::new("cpu.util"),
+            ts_micros: 1,
+            reading: Reading::Scalar(42.0),
+        };
+        runner.send(&ServerMsg::Sample(sample.clone()));
+        runner.send(&ServerMsg::Bye { reason: "test".into() });
+
+        let got = sample_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(got.sensor, sample.sensor);
+        assert_eq!(got.ts_micros, sample.ts_micros);
+        assert_eq!(got.reading, sample.reading);
+        runner.join();
+    }
+
+    #[test]
+    fn dispatch_routes_response_by_req_id() {
+        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let mut runner = DispatchRunner::spawn(sample_tx);
+
+        let (resp_tx, resp_rx) = channel::<Result<ResponsePayload, ProtoError>>();
+        runner.inflight.lock().unwrap().insert(7, resp_tx);
+
+        runner.send(&ServerMsg::Response {
+            req_id: 7,
+            result: Ok(ResponsePayload::PumpIntervalSet { ms: 150 }),
+        });
+
+        let result = resp_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(matches!(result, Ok(ResponsePayload::PumpIntervalSet { ms: 150 })));
+        runner.join();
+    }
+
+    #[test]
+    fn dispatch_warns_on_unknown_req_id() {
+        // Run dispatch in the test thread so `capture_logs` captures the warning;
+        // spawned threads do not inherit the per-thread default subscriber.
+        let logs = capture_logs(|| {
+            let (client_sock, server_sock) = UnixStream::pair().unwrap();
+            let (sample_tx, _sample_rx) = channel::<Sample>();
+            let catalogue = Arc::new(Mutex::new(vec![]));
+            let inflight = Arc::new(Mutex::new(HashMap::new()));
+            let listeners = Arc::new(Mutex::new(vec![]));
+
+            let mut writer = FrameWriter::new(server_sock);
+            thread::spawn(move || {
+                writer
+                    .write_server(&ServerMsg::Response {
+                        req_id: 999,
+                        result: Ok(ResponsePayload::PumpIntervalSet { ms: 150 }),
+                    })
+                    .unwrap();
+                writer.write_server(&ServerMsg::Bye { reason: "test".into() }).unwrap();
+            });
+
+            dispatch(FrameReader::new(client_sock), sample_tx, catalogue, inflight, listeners);
+        });
+        assert!(logs.contains("response for unknown req_id"), "logs: {logs}");
+    }
+
+    #[test]
+    fn dispatch_broadcasts_catalogue_to_listeners() {
+        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let mut runner = DispatchRunner::spawn(sample_tx);
+
+        let (cat_tx, cat_rx) = channel::<Vec<SensorInfo>>();
+        runner.listeners.lock().unwrap().push(cat_tx);
+
+        let infos = vec![sensor_info("cpu.util")];
+        runner.send(&ServerMsg::SensorListBroadcast(infos.clone()));
+        runner.send(&ServerMsg::Bye { reason: "test".into() });
+
+        let got = cat_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, SensorId::new("cpu.util"));
+
+        let cached = runner.catalogue.lock().unwrap().clone();
+        assert_eq!(cached.len(), 1);
+        runner.join();
+    }
+
+    #[test]
+    fn dispatch_prunes_dropped_catalogue_listeners() {
+        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let mut runner = DispatchRunner::spawn(sample_tx);
+
+        let (cat_tx, cat_rx) = channel::<Vec<SensorInfo>>();
+        runner.listeners.lock().unwrap().push(cat_tx);
+        // Drop the receiver before the broadcast so the listener is dead.
+        drop(cat_rx);
+
+        runner.send(&ServerMsg::SensorListBroadcast(vec![sensor_info("cpu.util")]));
+        runner.send(&ServerMsg::Bye { reason: "test".into() });
+
+        // Wait for the dispatch thread to process the broadcast and prune the
+        // dead listener before join() consumes the runner.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !runner.listeners.lock().unwrap().is_empty() {
+            if Instant::now() > deadline {
+                panic!("dead listener was not pruned within 1s");
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        runner.join();
+    }
+
+    #[test]
+    fn dispatch_exits_on_bye() {
+        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let mut runner = DispatchRunner::spawn(sample_tx);
+        runner.send(&ServerMsg::Bye { reason: "shutdown".into() });
+        runner.join();
+    }
+
+    #[test]
+    fn dispatch_exits_on_eof() {
+        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let runner = DispatchRunner::spawn(sample_tx);
+        // Dropping the runner closes the server-side socket, producing EOF.
+        runner.join();
+    }
+}

@@ -552,7 +552,7 @@ jobs:
   publish:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg, rpm-pkg, opensuse-pkg]
+    needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg, rpm-pkg, opensuse-pkg, appimage, flatpak]
     steps:
       - uses: actions/checkout@v5
 

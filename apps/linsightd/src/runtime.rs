@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::ffi::OsStr;
 use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -144,38 +145,48 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     transport::unix::accept_loop(listener, scheduler, registry, store_path, shutdown)
 }
 
-/// Resolve `$XDG_CONFIG_HOME/linsight/hardware.json`, falling back to
-/// `~/.config/linsight/hardware.json` if XDG isn't set. Mirrors the path
-/// helpers above (`history_db_path`, `alerts_config_path`); kept here
-/// rather than in `nickname_store` so the store stays a pure file API.
-pub fn nickname_store_path() -> PathBuf {
-    if let Some(d) = std::env::var_os("XDG_CONFIG_HOME") {
-        PathBuf::from(d).join("linsight/hardware.json")
-    } else if let Some(h) = std::env::var_os("HOME") {
-        PathBuf::from(h).join(".config/linsight/hardware.json")
+/// Resolve a config file path under `$XDG_CONFIG_HOME/linsight/` or
+/// `~/.config/linsight/`, falling back to `fallback` when neither env var is
+/// set. The three public helpers below are thin wrappers over this function.
+fn config_path_from(
+    xdg: Option<&OsStr>,
+    home: Option<&OsStr>,
+    relative: impl AsRef<Path>,
+    fallback: impl AsRef<Path>,
+) -> PathBuf {
+    let relative = relative.as_ref();
+    if let Some(d) = xdg {
+        PathBuf::from(d).join("linsight").join(relative)
+    } else if let Some(h) = home {
+        PathBuf::from(h).join(".config").join("linsight").join(relative)
     } else {
-        PathBuf::from("/tmp/linsight-hardware.json")
+        fallback.as_ref().to_path_buf()
     }
+}
+
+fn config_path(relative: impl AsRef<Path>, fallback: impl AsRef<Path>) -> PathBuf {
+    config_path_from(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+        relative,
+        fallback,
+    )
+}
+
+/// Resolve `$XDG_CONFIG_HOME/linsight/hardware.json`, falling back to
+/// `~/.config/linsight/hardware.json` if XDG isn't set, or finally
+/// `/tmp/linsight-hardware.json`. Kept here rather than in `nickname_store`
+/// so the store stays a pure file API.
+pub fn nickname_store_path() -> PathBuf {
+    config_path("hardware.json", "/tmp/linsight-hardware.json")
 }
 
 pub(crate) fn alerts_config_path() -> PathBuf {
-    if let Some(d) = std::env::var_os("XDG_CONFIG_HOME") {
-        PathBuf::from(d).join("linsight/alerts.toml")
-    } else if let Some(h) = std::env::var_os("HOME") {
-        PathBuf::from(h).join(".config/linsight/alerts.toml")
-    } else {
-        PathBuf::from("/etc/linsight/alerts.toml")
-    }
+    config_path("alerts.toml", "/etc/linsight/alerts.toml")
 }
 
 fn plugins_config_path() -> PathBuf {
-    if let Some(d) = std::env::var_os("XDG_CONFIG_HOME") {
-        PathBuf::from(d).join("linsight/plugins.toml")
-    } else if let Some(h) = std::env::var_os("HOME") {
-        PathBuf::from(h).join(".config/linsight/plugins.toml")
-    } else {
-        PathBuf::from("/etc/linsight/plugins.toml")
-    }
+    config_path("plugins.toml", "/etc/linsight/plugins.toml")
 }
 
 const MAX_PLUGINS_CONFIG_BYTES: u64 = 1 << 20;
@@ -232,5 +243,44 @@ struct SocketGuard(PathBuf);
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_path_uses_xdg_when_set() {
+        let got = config_path_from(
+            Some(OsStr::new("/xdg")),
+            Some(OsStr::new("/home/user")),
+            "hardware.json",
+            "/tmp/linsight-hardware.json",
+        );
+        assert_eq!(got, PathBuf::from("/xdg/linsight/hardware.json"));
+    }
+
+    #[test]
+    fn config_path_falls_back_to_home_when_xdg_missing() {
+        let got = config_path_from(
+            None,
+            Some(OsStr::new("/home/user")),
+            "alerts.toml",
+            "/etc/linsight/alerts.toml",
+        );
+        assert_eq!(got, PathBuf::from("/home/user/.config/linsight/alerts.toml"));
+    }
+
+    #[test]
+    fn config_path_uses_fallback_when_both_missing() {
+        let got = config_path_from(None, None, "plugins.toml", "/etc/linsight/plugins.toml");
+        assert_eq!(got, PathBuf::from("/etc/linsight/plugins.toml"));
+    }
+
+    #[test]
+    fn nickname_store_path_matches_xdg() {
+        let got = nickname_store_path();
+        assert!(got.as_path().ends_with("linsight/hardware.json"));
     }
 }

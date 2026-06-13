@@ -33,9 +33,9 @@ perf bug, not just slow code.
 
 | Metric | Budget | Notes |
 |---|---|---|
-| Per-sample serialized size | ≤ 64 B | `postcard` varint encoding |
-| Per-sample encode cost | ≤ 5 µs | `postcard::to_allocvec` |
-| Per-sample decode cost | ≤ 5 µs | `postcard::from_bytes` |
+| Per-sample serialized size | ≤ 64 B | `postcard` varint encoding; gated by `sample_wire_size_within_budget` in `cargo test` |
+| Per-sample encode cost | ≤ 5 µs | `postcard::to_allocvec` (spot-check, not CI-gated) |
+| Per-sample decode cost | ≤ 5 µs | `postcard::from_bytes` (spot-check, not CI-gated) |
 
 ## Release binary sizes
 

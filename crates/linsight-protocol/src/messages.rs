@@ -616,4 +616,21 @@ mod tests {
             }),
         });
     }
+
+    #[test]
+    fn sample_wire_size_within_budget() {
+        // The perf budget guarantees a serialized ServerMsg::Sample is <= 64 B.
+        // This assertion is deterministic and runs in the normal test job.
+        let sample = Sample {
+            sensor: SensorId::new("cpu.util"),
+            ts_micros: 1_700_000_000_000_000,
+            reading: Reading::Scalar(42.0),
+        };
+        let bytes = postcard::to_allocvec(&ServerMsg::Sample(sample)).unwrap();
+        assert!(
+            bytes.len() <= 64,
+            "ServerMsg::Sample serialized to {} bytes, budget is 64",
+            bytes.len()
+        );
+    }
 }

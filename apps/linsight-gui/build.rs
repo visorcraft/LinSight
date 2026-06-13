@@ -7,6 +7,7 @@ use qt_build_utils::{QResource, QResourceFile, QResources};
 fn main() {
     println!("cargo:rerun-if-changed=src/translator.cpp");
     println!("cargo:rerun-if-changed=src/screenshot.cpp");
+    println!("cargo:rerun-if-changed=src/icon_theme.cpp");
     println!("cargo:rerun-if-changed=i18n/linsight_en.qm");
     println!("cargo:rerun-if-changed=i18n/linsight_de.qm");
     println!("cargo:rerun-if-changed=i18n/linsight_ja.qm");
@@ -110,6 +111,7 @@ fn main() {
         builder.cc_builder(|cc| {
             cc.file("src/translator.cpp");
             cc.file("src/screenshot.cpp");
+            cc.file("src/icon_theme.cpp");
             // GCC 16 added `-Wsfinae-incomplete`, which fires whenever a
             // class is defined after having previously appeared in a
             // SFINAE context as incomplete. Qt 6's `QChar` trips it via

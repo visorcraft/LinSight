@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.14.1" date="2026-06-12">
+      <description>
+        <p>Bugfix release: fixed a GitHub release race that could drop
+        AppImage and Flatpak artifacts; added GUI client dispatch tests;
+        refactored daemon XDG path helpers; and added a deterministic
+        wire-size budget guard.</p>
+      </description>
+    </release>
     <release version="1.14.0" date="2026-06-12">
       <description>
         <p>UI polish batch: dedicated Network page with per-interface

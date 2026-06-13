@@ -26,7 +26,7 @@ AppDir:
     id: com.visorcraft.LinSight
     name: LinSight
     icon: com.visorcraft.LinSight
-    version: 1.14.0
+    version: 1.14.1
     exec: usr/bin/linsight
     exec_args: $@
   apt:
@@ -42,6 +42,9 @@ AppDir:
       - qml6-module-qtquick-dialogs
       - qml6-module-qtquick-layouts
       - qml6-module-org-kde-kirigami
+      - libqt6svg6
+      - qt6-svg-plugins
+      - breeze-icon-theme
       - libsqlite3-0
     exclude: []
   runtime:

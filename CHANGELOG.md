@@ -7,6 +7,20 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.14.1] — 2026-06-12
+
+- **Fixed release artifact race.** The GitHub release `publish` job now
+  waits for the `appimage` and `flatpak` jobs, preventing those artifacts
+  from being omitted when the release was created before they finished.
+- **Added GUI client dispatch tests.** `apps/linsight-gui/src/client.rs`
+  now has unit tests for sample forwarding, response routing, catalogue
+  broadcasts, and clean shutdown on `Bye` / EOF.
+- **Refactored daemon XDG path helpers.** `apps/linsightd/src/runtime.rs`
+  deduplicates `nickname_store_path`, `alerts_config_path`, and
+  `plugins_config_path` through a shared helper and covers them with tests.
+- **CI-gated wire-size budget.** Added a deterministic assertion that
+  `ServerMsg::Sample` serializes to ≤ 64 bytes.
+
 ## [1.14.0] — 2026-06-12
 
 - **Dedicated Network page.** Shows one card per interface with live

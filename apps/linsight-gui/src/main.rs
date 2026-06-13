@@ -7,6 +7,7 @@
 //! `build.rs`.
 
 mod client;
+mod icon_theme;
 mod qobjects;
 mod screenshot;
 mod translator;
@@ -120,6 +121,9 @@ fn main() -> anyhow::Result<()> {
         app.as_mut().set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
         app.as_mut().set_organization_name(&QString::from("VisorCraft"));
         app.as_mut().set_organization_domain(&QString::from("visorcraft.com"));
+        // The AppImage does not inherit the host's Breeze theme, so force it
+        // explicitly. The theme files are bundled via breeze-icon-theme.
+        icon_theme::set_icon_theme("breeze");
     }
     cxx_qt_lib::QGuiApplication::set_desktop_file_name(&QString::from("com.visorcraft.LinSight"));
 
