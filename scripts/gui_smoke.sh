@@ -13,9 +13,9 @@
 #   77  skip — xvfb-run not installed; not a regression
 #   99  fail — hard error (build failed, binary missing)
 #
-# This script is NOT part of `just ci` — Qt + Mesa want a real GPU
-# even for the offscreen platform, so it runs locally / from a
-# GPU-equipped runner only. Run from the repository root.
+# This script is NOT part of `just ci` — it needs a display surface.
+# It runs locally on a GPU-equipped host or in CI under `xvfb-run` with
+# llvmpipe software OpenGL. Run from the repository root.
 
 set -euo pipefail
 
@@ -49,7 +49,7 @@ echo "[gui-smoke] launching under xvfb-run (12s window)"
 # running so the log accumulates — but we still record it.
 TIMEOUT_RC=0
 timeout --preserve-status 12 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
-    env LINSIGHT_LOG=info "$BIN" >"$LOG" 2>&1 || TIMEOUT_RC=$?
+    env LINSIGHT_LOG=info LIBGL_ALWAYS_SOFTWARE=1 "$BIN" >"$LOG" 2>&1 || TIMEOUT_RC=$?
 
 # Read the log first regardless of how the binary exited.
 if grep -q "sensor catalogue cached" "$LOG"; then

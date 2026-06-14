@@ -7,6 +7,27 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.15.0] — 2026-06-14
+
+- **Criterion benchmarks.** Added `just bench` with benchmarks for
+  `ServerMsg`/`ClientMsg` postcard encode/decode and core type JSON
+  serialization. The performance budgets in `docs/perf-budgets.md` now
+  have a reproducible baseline.
+- **Property-based tests.** Activated the previously-unused `proptest`
+  dependency with round-trip tests for `SensorId`, `Reading`, and
+  `Sample` JSON serialization in `linsight-core`, and postcard round-trips
+  for `Hello`, `Subscribe`, `Sample`, and `SensorList` in `linsight-protocol`.
+- **Release-mode test target.** Added `just test-release` and verified the
+  full workspace test suite passes in release builds.
+- **Daemon transport unit tests.** Added tests for `apps/linsightd/src/transport/unix.rs`
+  covering the accept-loop rate limiter, `SessionGuard`, constant-time auth
+  token comparison, clock sentinel, and `SensorListBroadcast` fan-out.
+- **GUI smoke in CI.** Added a separate `gui-smoke` job to `.github/workflows/ci.yml`
+  that runs `scripts/gui_smoke.sh` under `xvfb-run` with `LIBGL_ALWAYS_SOFTWARE=1`.
+- **Plugin sandbox design.** Added `docs/plugin-sandbox.md`, a concrete
+  design for running third-party dynamic plugins in a seccomp-filtered
+  worker process.
+
 ## [1.14.1] — 2026-06-12
 
 - **Fixed release artifact race.** The GitHub release `publish` job now

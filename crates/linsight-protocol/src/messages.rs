@@ -634,3 +634,97 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use linsight_core::{Reading, Sample, SensorId};
+    use proptest::prelude::*;
+
+    use super::*;
+
+    #[allow(dead_code)]
+    fn sensor_id_strategy() -> impl Strategy<Value = SensorId> {
+        "[a-z0-9_][a-z0-9_.]*"
+            .prop_filter("non-empty", |s: &String| !s.is_empty())
+            .prop_map(SensorId::new)
+    }
+
+    #[allow(dead_code)]
+    fn sensor_info_strategy() -> impl Strategy<Value = SensorInfo> {
+        (
+            sensor_id_strategy(),
+            "[a-zA-Z0-9_ ]*",
+            any::<f32>(),
+            any::<Option<f64>>(),
+            any::<Option<f64>>(),
+            any::<Option<String>>(),
+            "[a-z.]*",
+            any::<Option<String>>(),
+            any::<Option<String>>(),
+            proptest::collection::vec("[a-z]*", 0..4),
+        )
+            .prop_map(
+                |(
+                    id,
+                    display_name,
+                    native_rate_hz,
+                    min,
+                    max,
+                    device_id,
+                    plugin_id,
+                    device_key,
+                    device_label,
+                    tags,
+                )| {
+                    SensorInfo {
+                        id,
+                        display_name,
+                        unit: Unit::Percent,
+                        kind: SensorKind::Scalar,
+                        category: Category::Cpu,
+                        native_rate_hz,
+                        min,
+                        max,
+                        device_id,
+                        plugin_id,
+                        device_key,
+                        device_label,
+                        tags,
+                    }
+                },
+            )
+    }
+
+    #[allow(dead_code)]
+    fn round_trip<T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug>(v: &T) {
+        let bytes = postcard::to_allocvec(v).unwrap();
+        let back: T = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(back, *v);
+    }
+
+    proptest! {
+        fn hello_round_trips(name in "[a-zA-Z0-9_ -]{1,40}", token in any::<Option<String>>()) {
+            round_trip(&ClientMsg::Hello {
+                protocol_version: crate::PROTOCOL_VERSION,
+                client_name: name,
+                auth_token: token,
+            });
+        }
+
+        fn subscribe_round_trips(ids in proptest::collection::vec(sensor_id_strategy(), 0..8)) {
+            round_trip(&ClientMsg::Subscribe { sensors: ids, rate_hz: Some(2.0) });
+        }
+
+        fn sample_round_trips(sensor in sensor_id_strategy(), ts in any::<u64>(), value in any::<f64>()) {
+            round_trip(&ServerMsg::Sample(Sample {
+                sensor,
+                ts_micros: ts,
+                reading: Reading::Scalar(value),
+            }));
+        }
+
+        fn sensor_list_round_trips(infos in proptest::collection::vec(sensor_info_strategy(), 0..4)) {
+            round_trip(&ServerMsg::SensorList(infos));
+        }
+    }
+}

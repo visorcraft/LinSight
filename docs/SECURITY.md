@@ -57,7 +57,8 @@ daemon down — robustness hardening, still not a security sandbox.
 A future sandbox pass will run each plugin in a seccomp-filtered
 worker process with read-only `/sys` and `/proc` mounts. The trait
 + wire protocol stay the same; the trust boundary moves from
-in-process to inter-process.
+in-process to inter-process. See [`docs/plugin-sandbox.md`](docs/plugin-sandbox.md)
+for the concrete design and rollout plan.
 
 ## Network surface
 
@@ -85,11 +86,12 @@ in-process to inter-process.
   users beyond the cert chain you configure; treat it like a
   system-level secret-channel where presence of a valid client
   cert is the access decision. **Important:** the
-  `WebPkiClientVerifier` enforces CA-chain validity only — there is
-  no per-cert CN/SAN/OID filter today. The configured CA bundle is
-  therefore a full-daemon-access trust boundary; rotate or
-  constrain it carefully. An `--allowed-cn <pattern>` flag is on
-  the follow-up list.
+  `WebPkiClientVerifier` enforces CA-chain validity. The server can
+  also apply per-client-cert filters with `--allow-cn <pattern>` and
+  `--allow-san <pattern>`; if neither is supplied, any client certificate
+  chained to the configured CA is accepted. The configured CA bundle is
+  therefore a full-daemon-access trust boundary unless you add CN/SAN
+  filters; rotate or constrain it carefully.
 
 ## Sensor surface
 

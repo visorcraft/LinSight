@@ -170,9 +170,17 @@ direct `cargo` invocations are equivalent if `just` isn't installed.
 
 ```bash
 just ci              # fmt-check + clippy -D warnings + tests (the CI gate)
+just test-release    # same tests in release mode (catches opt-level bugs)
+just bench           # Criterion benchmarks for protocol/core hot paths
 just build           # debug
 just build-release   # release: lto=fat, codegen-units=1, strip
 just build-release-v3   # x86_64-v3 tuned (CachyOS / modern systems)
+```
+
+GUI smoke (headless, requires `xvfb-run`):
+
+```bash
+just gui-smoke       # builds release GUI and runs under xvfb + llvmpipe
 ```
 
 Optional preflight (install with
@@ -248,7 +256,7 @@ shrink after pruning — freed pages are reused; use
   [`docs/adr/0001-plugin-abi-stabby-deferral.md`](docs/adr/0001-plugin-abi-stabby-deferral.md).
 - **`crates/linsight-sensors/*`** — one in-tree plugin per hardware
   family / metric source (cpu, mem, net, nvme, nvml, xe, amdgpu, i915,
-  disk, fs, hwmon, proc, system, systemd, zram).
+  disk, fs, hwmon, proc, system, systemd, zram, smart, sock).
 - **`crates/linsight-cli/`** — `list` / `read` / `plugin {new, install,
   ls, remove}` / `db {stats, prune}` (offline history-DB inspection and
   maintenance; works without a running daemon).

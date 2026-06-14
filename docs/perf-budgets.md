@@ -5,10 +5,14 @@
 
 Design targets the architecture is built to hit (subscription-driven
 sampling, no async runtime in the daemon hot path, `lto=fat` +
-`codegen-units=1` + `panic=unwind` + stripped). These are goals and
-periodic by-hand spot-checks, not yet gated by an automated benchmark
-suite; a regression worse than ~20% on any of them is treated as a
-perf bug, not just slow code.
+`codegen-units=1` + `panic=unwind` + stripped). A regression worse than
+~20% on any of them is treated as a perf bug, not just slow code.
+
+Criterion benchmarks for the protocol encode/decode hot path live in
+`crates/linsight-protocol/benches/encode_decode.rs` and
+`crates/linsight-core/benches/types.rs`; run them with `just bench`.
+They are spot-checks today, not CI-gated hard limits, but they give a
+reproducible baseline for the budgets below.
 
 ## Daemon
 

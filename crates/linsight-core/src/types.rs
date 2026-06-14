@@ -282,3 +282,78 @@ mod snapshot_cache_tests {
         assert_eq!(cache.get(Duration::from_millis(50)), None);
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[allow(dead_code)]
+    fn sensor_id_strategy() -> impl Strategy<Value = SensorId> {
+        "[a-z0-9_][a-z0-9_.]*"
+            .prop_filter("non-empty", |s: &String| !s.is_empty())
+            .prop_map(SensorId::new)
+    }
+
+    #[allow(dead_code)]
+    fn cell_strategy() -> impl Strategy<Value = Cell> {
+        prop_oneof![
+            "[a-zA-Z0-9_ ]*".prop_map(Cell::Text),
+            any::<f64>().prop_map(Cell::Number),
+            any::<u64>().prop_map(Cell::Bytes),
+        ]
+    }
+
+    #[allow(dead_code)]
+    fn reading_strategy() -> impl Strategy<Value = Reading> {
+        prop_oneof![
+            any::<f64>().prop_map(Reading::Scalar),
+            any::<u64>().prop_map(Reading::Counter),
+            "[a-zA-Z0-9_ ]*".prop_map(Reading::State),
+            proptest::collection::vec(
+                proptest::collection::vec(cell_strategy(), 0..8)
+                    .prop_map(|cells| TableRow { cells }),
+                0..8,
+            )
+            .prop_map(Reading::Table),
+        ]
+    }
+
+    #[allow(dead_code)]
+    fn sample_strategy() -> impl Strategy<Value = Sample> {
+        (sensor_id_strategy(), any::<u64>(), reading_strategy())
+            .prop_map(|(sensor, ts_micros, reading)| Sample { sensor, ts_micros, reading })
+    }
+
+    proptest! {
+        fn sensor_id_try_new_accepts_valid_ids(id in sensor_id_strategy()) {
+            prop_assert!(SensorId::try_new(id.as_str()).is_ok());
+        }
+
+        fn sensor_id_try_new_rejects_whitespace(
+            prefix in "[a-z0-9.]*",
+            ws in "[ \t\n]+",
+            suffix in "[a-z0-9.]*",
+        ) {
+            let bad = format!("{prefix}{ws}{suffix}");
+            prop_assert!(SensorId::try_new(bad).is_err());
+        }
+
+        fn reading_json_round_trips(reading in reading_strategy()) {
+            let json = serde_json::to_string(&reading).unwrap();
+            let back: Reading = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(reading, back);
+        }
+
+        fn sample_json_round_trips(sample in sample_strategy()) {
+            let json = serde_json::to_string(&sample).unwrap();
+            let back: Sample = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(sample, back);
+        }
+    }
+
+    #[test]
+    fn sensor_id_try_new_rejects_empty() {
+        assert!(SensorId::try_new("").is_err());
+    }
+}

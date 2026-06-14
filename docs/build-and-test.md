@@ -29,10 +29,12 @@ Distro packages:
 
 ```
 just ci                  # fmt-check + clippy -D warnings + cargo test --workspace
+just test                # cargo test --workspace
+just test-release        # cargo test --workspace --release
+just bench               # Criterion benchmarks for protocol/core hot paths
 just build               # debug
 just build-release       # release with lto=fat, codegen-units=1, strip
 just build-release-v3    # x86_64-v3 tuned release (CachyOS-friendly)
-just test                # cargo test --workspace
 just lint                # cargo clippy --workspace --all-targets -- -D warnings
 just fmt                 # cargo fmt --all
 just credits             # cargo about generate → docs/third-party-notices.md
@@ -43,6 +45,10 @@ just run-cli ARGS        # cargo run -p linsight-cli -- ARGS
 CI parity: `just ci` runs `fmt --check`, `clippy -D warnings`, and
 `cargo test --workspace` in that order. A red local `just ci` is a
 red CI run.
+
+Release-mode tests (`just test-release`) are worth running before
+shipping: the v0.3.0 ABI v2→v3 migration was caused by a stabby
+`match_owned` misdispatch that only surfaced at `opt-level >= 1`.
 
 ## Workspace map
 
@@ -102,11 +108,12 @@ A GUI boot-smoke test (`scripts/gui_smoke.sh`, invoked via
 `just gui-smoke`) wraps `xvfb-run` and asserts the daemon
 handshake log line within 12 s. It distinguishes timeout (exit
 124) from clean exit, uses GNU automake's exit-77 skip
-convention when `xvfb-run` is missing, and is **not** part of
-`just ci` or the GitHub Actions CI — it's a local dev tool, since the
-offscreen platform still wants Qt + Mesa / a GPU that the CI runner
-doesn't provide. Run `just gui-smoke` manually before shipping QML
-changes.
+convention when `xvfb-run` is missing, and forces software OpenGL
+with `LIBGL_ALWAYS_SOFTWARE=1` so it runs reliably on GPU-less
+runners. It is **not** part of `just ci` — it needs a display
+surface — but it does run as a separate `gui-smoke` job in the
+GitHub Actions CI on `ubuntu-latest`. Run `just gui-smoke`
+manually before shipping QML changes.
 
 For visual iteration, `scripts/dev_screenshot.sh <page> [out.png]`
 kills any running GUI, makes sure the daemon is up, launches

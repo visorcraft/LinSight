@@ -15,3 +15,11 @@ linsight-core = { path = "../linsight-core", version = "1.4.0" }
 postcard = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+
+[[bench]]
+name = "encode_decode"
+harness = false

@@ -91,8 +91,8 @@ without subscribing.
   `StabbyLibrary::get_stabbied` path the daemon uses and asserts
   the full handshake works. Also the canonical reference for
   third-party plugin authors.
-- `linsight-sensors/{cpu,mem,net,nvme,nvml,xe,i915,amdgpu,disk,fs,hwmon,zram,proc,system,systemd,containers,sock}`
-  — one in-tree plugin per hardware family (17 at present). All are
+- `linsight-sensors/{cpu,mem,net,nvme,nvml,xe,i915,amdgpu,disk,fs,hwmon,zram,proc,system,systemd,containers,sock,smart}`
+  — one in-tree plugin per hardware family (18 at present). All are
   statically linked into `linsightd`;
   same code path as a runtime-loaded `.so`.
 - `linsight-cli` — thin CLI: `list`, `read`, `plugin {new,install,

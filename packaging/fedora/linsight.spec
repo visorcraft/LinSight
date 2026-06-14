@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.14.1
+Version:        1.15.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,10 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sun Jun 14 2026 VisorCraft LLC <support@visorcraft.com> - 1.15.0-1
+- v1.15.0 release. Criterion benchmarks, proptest round-trips, daemon transport
+  unit tests, GUI smoke in CI, plugin sandbox design groundwork.
+
 * Fri Jun 12 2026 VisorCraft LLC <support@visorcraft.com> - 1.14.1-1
 - v1.14.1 release. Release artifact race fix, GUI client dispatch tests,
   daemon XDG path helper refactor, and deterministic wire-size budget guard.

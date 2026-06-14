@@ -115,6 +115,16 @@ fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     if ret == -1 { Err(io::Error::last_os_error()) } else { Ok(cred.uid) }
 }
 
+/// Constant-time auth-token comparison. `expected = None` means no token
+/// is required and any provided token is accepted.
+fn auth_token_ok(expected: Option<&str>, provided: Option<&str>) -> bool {
+    match (expected, provided) {
+        (Some(expected), Some(provided)) => provided.as_bytes().ct_eq(expected.as_bytes()).into(),
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
 /// Simple token-bucket rate limiter for the accept loop.
 /// Refills one token per `interval` up to `capacity`. Enabled at 20/s
 /// by default; configurable via `LINSIGHT_ACCEPT_RATE` env var.
@@ -126,18 +136,23 @@ struct AcceptRateLimiter {
 }
 
 impl AcceptRateLimiter {
-    fn from_env() -> Self {
-        let rate: f64 = std::env::var("LINSIGHT_ACCEPT_RATE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(20.0_f64)
-            .clamp(1.0, 200.0);
+    fn new(rate: f64) -> Self {
+        let rate = rate.clamp(1.0, 200.0);
         Self {
             tokens: rate,
             capacity: rate,
             refill_per_sec: rate,
             last_refill: std::time::Instant::now(),
         }
+    }
+
+    fn from_env() -> Self {
+        let rate: f64 = std::env::var("LINSIGHT_ACCEPT_RATE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20.0_f64)
+            .clamp(1.0, 200.0);
+        Self::new(rate)
     }
 
     fn acquire(&mut self) -> bool {
@@ -372,7 +387,7 @@ fn serve(
 
     // Optional auth check: if LINSIGHT_AUTH_TOKEN is set, verify token match.
     if let Some(ref expected) = *AUTH_TOKEN
-        && !auth_token.as_deref().is_some_and(|t| t.as_bytes().ct_eq(expected.as_bytes()).into())
+        && !auth_token_ok(Some(expected.as_str()), auth_token.as_deref())
     {
         let _ = writer
             .lock()
@@ -983,4 +998,128 @@ fn broadcast_sensor_list(clients: &ClientMap, infos: Vec<linsight_protocol::Sens
     let msg = ServerMsg::SensorListBroadcast(infos);
     let mut map = clients.lock().unwrap();
     map.retain(|_id, sink| sink.tx.send(msg.clone()).is_ok());
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
+
+    use linsight_core::{Category, SensorId, SensorKind, Unit};
+
+    use super::*;
+
+    #[test]
+    fn rate_limiter_allows_burst_up_to_capacity() {
+        let mut lim = AcceptRateLimiter::new(10.0);
+        for _ in 0..10 {
+            assert!(lim.acquire(), "should consume token from full bucket");
+        }
+        assert!(!lim.acquire(), "bucket should be empty after burst");
+    }
+
+    #[test]
+    fn rate_limiter_refills_over_time() {
+        let mut lim = AcceptRateLimiter::new(100.0);
+        // Drain.
+        while lim.acquire() {}
+        assert!(!lim.acquire());
+        // Wait for one token.
+        thread::sleep(Duration::from_millis(15));
+        assert!(lim.acquire(), "token should refill");
+    }
+
+    #[test]
+    fn rate_limiter_clamps_rate() {
+        let lim = AcceptRateLimiter::new(0.5);
+        assert_eq!(lim.capacity, 1.0);
+        let lim = AcceptRateLimiter::new(500.0);
+        assert_eq!(lim.capacity, 200.0);
+    }
+
+    #[test]
+    fn session_guard_decrements_on_drop() {
+        let count = Arc::new(AtomicUsize::new(5));
+        let guard = SessionGuard(Arc::clone(&count));
+        drop(guard);
+        assert_eq!(count.load(Ordering::Acquire), 4);
+    }
+
+    #[test]
+    fn auth_token_ok_with_no_required_token() {
+        assert!(auth_token_ok(None, None));
+        assert!(auth_token_ok(None, Some("anything")));
+    }
+
+    #[test]
+    fn auth_token_ok_requires_exact_match() {
+        assert!(auth_token_ok(Some("secret"), Some("secret")));
+        assert!(!auth_token_ok(Some("secret"), Some("wrong")));
+        assert!(!auth_token_ok(Some("secret"), None));
+    }
+
+    #[test]
+    fn auth_token_ok_rejects_different_length() {
+        // A different-length token must be rejected (ct_eq still returns
+        // false for different lengths without short-circuiting).
+        assert!(!auth_token_ok(Some("secret"), Some("secrets")));
+        assert!(!auth_token_ok(Some("secret"), Some("secr")));
+    }
+
+    #[test]
+    fn now_micros_is_monotonic_or_sentinel() {
+        let a = now_micros();
+        thread::sleep(Duration::from_millis(1));
+        let b = now_micros();
+        assert!(b >= a || a == TS_SENTINEL_BAD_CLOCK);
+    }
+
+    #[test]
+    fn broadcast_sensor_list_reaches_subscribed_clients() {
+        let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
+        clients
+            .lock()
+            .unwrap()
+            .insert(1, ClientSink { tx, subscriptions: Arc::clone(&subscriptions) });
+
+        let info = linsight_protocol::SensorInfo {
+            id: SensorId::new("cpu.util"),
+            display_name: "CPU".into(),
+            unit: Unit::Percent,
+            kind: SensorKind::Scalar,
+            category: Category::Cpu,
+            native_rate_hz: 1.0,
+            min: None,
+            max: None,
+            device_id: None,
+            plugin_id: "com.visorcraft.linsight.cpu".into(),
+            device_key: None,
+            device_label: None,
+            tags: vec![],
+        };
+        broadcast_sensor_list(&clients, vec![info.clone()]);
+
+        let msg = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(matches!(msg, ServerMsg::SensorListBroadcast(list) if list.len() == 1));
+    }
+
+    #[test]
+    fn broadcast_sensor_list_drops_disconnected_clients() {
+        let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, rx) = std::sync::mpsc::channel::<ServerMsg>();
+        drop(rx);
+        let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
+        clients
+            .lock()
+            .unwrap()
+            .insert(1, ClientSink { tx, subscriptions: Arc::clone(&subscriptions) });
+
+        broadcast_sensor_list(&clients, vec![]);
+        assert!(clients.lock().unwrap().is_empty(), "dead receiver should be removed");
+    }
 }

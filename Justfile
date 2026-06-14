@@ -26,6 +26,14 @@ build-release-v3:
 test:
     cargo test --workspace
 
+# Run every test in release mode (catches optimizer-dependent bugs).
+test-release:
+    cargo test --workspace --release
+
+# Criterion benchmarks for protocol and core hot paths.
+bench:
+    cargo bench --workspace
+
 # Type-check without producing binaries.
 check:
     cargo check --workspace
