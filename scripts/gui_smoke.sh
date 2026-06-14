@@ -27,8 +27,8 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "[gui-smoke] building release binary"
-if ! cargo build -p linsight --release >/dev/null; then
+echo "[gui-smoke] building release binaries"
+if ! cargo build -p linsight -p linsightd --release >/dev/null; then
     echo "[gui-smoke] HARD FAIL: cargo build failed"
     exit 99
 fi
@@ -41,6 +41,10 @@ fi
 
 LOG=$(mktemp)
 trap 'rm -f "$LOG"' EXIT
+
+# The GUI auto-spawns linsightd from the same release directory; make sure
+# it is on PATH for the xvfb-run launch.
+export PATH="$ROOT/target/release:$PATH"
 
 echo "[gui-smoke] launching under xvfb-run (12s window)"
 # Do NOT swallow the exit code: distinguish a timeout (exit 124) from
