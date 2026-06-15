@@ -18,7 +18,6 @@ tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
 x509-parser = "0.17"
 
 [dev-dependencies]

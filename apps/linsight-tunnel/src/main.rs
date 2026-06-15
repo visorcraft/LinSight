@@ -26,8 +26,6 @@
 //! before TLS auth is even attempted — important because the auth path
 //! allocates and a misbehaving peer could otherwise pre-auth-DoS the daemon.
 
-use std::fs::File;
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,6 +35,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::HandshakeSignatureValid;
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::server::WebPkiClientVerifier;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -221,11 +220,9 @@ async fn drain(mut tasks: JoinSet<()>, timeout: Duration) {
 // ---------------------------------------------------------------------------
 
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let mut reader = BufReader::new(
-        File::open(path).with_context(|| format!("opening cert {}", path.display()))?,
-    );
-    let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
-        .collect::<std::io::Result<Vec<_>>>()
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(path)
+        .with_context(|| format!("opening cert {}", path.display()))?
+        .collect::<Result<Vec<_>, _>>()
         .with_context(|| format!("parsing certs from {}", path.display()))?;
     if certs.is_empty() {
         bail!("no certificates found in {}", path.display());
@@ -234,8 +231,7 @@ fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
 }
 
 fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let file = File::open(path).with_context(|| format!("opening key {}", path.display()))?;
-    let meta = file.metadata().with_context(|| format!("stat {}", path.display()))?;
+    let meta = std::fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
     let mode = std::os::unix::fs::PermissionsExt::mode(&meta.permissions());
     if mode & 0o077 != 0 {
         bail!(
@@ -246,10 +242,8 @@ fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
             path.display(),
         );
     }
-    let mut reader = BufReader::new(file);
-    rustls_pemfile::private_key(&mut reader)
-        .with_context(|| format!("parsing key from {}", path.display()))?
-        .ok_or_else(|| anyhow!("no private key found in {}", path.display()))
+    PrivateKeyDer::from_pem_file(path)
+        .with_context(|| format!("parsing key from {}", path.display()))
 }
 
 fn load_roots(path: &Path) -> Result<RootCertStore> {

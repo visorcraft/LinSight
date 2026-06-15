@@ -17,8 +17,8 @@ If you have questions about license compliance, please contact
 
 ## Licenses in use
 
-- **Apache License 2.0** (256 crates)
-- **MIT License** (53 crates)
+- **Apache License 2.0** (267 crates)
+- **MIT License** (58 crates)
 - **ISC License** (4 crates)
 - **BSD Zero Clause License** (1 crate)
 - **BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License** (1 crate)
@@ -934,6 +934,7 @@ Used by:
 ### Apache License 2.0
 
 Used by:
+- [`zerocopy-derive 0.8.48`](https://github.com/google/zerocopy)
 - [`zerocopy 0.8.48`](https://github.com/google/zerocopy)
 
 ```
@@ -1147,6 +1148,9 @@ Used by:
 ### Apache License 2.0
 
 Used by:
+- [`ciborium-io 0.2.2`](https://github.com/enarx/ciborium)
+- [`ciborium-ll 0.2.2`](https://github.com/enarx/ciborium)
+- [`ciborium 0.2.2`](https://github.com/enarx/ciborium)
 - [`codespan-reporting 0.13.1`](https://github.com/brendanzab/codespan)
 - [`unarray 0.1.4`](https://github.com/cameron1024/unarray)
 - [`ureq 3.3.0`](https://github.com/algesten/ureq)
@@ -3948,14 +3952,18 @@ Used by:
 - [`blocking 1.6.2`](https://github.com/smol-rs/blocking)
 - [`bstr 1.12.1`](https://github.com/BurntSushi/bstr)
 - [`bumpalo 3.20.3`](https://github.com/fitzgen/bumpalo)
+- [`cast 0.3.0`](https://github.com/japaric/cast.rs)
 - [`cc 1.2.62`](https://github.com/rust-lang/cc-rs)
 - [`cfg-if 1.0.4`](https://github.com/rust-lang/cfg-if)
 - [`concurrent-queue 2.5.0`](https://github.com/smol-rs/concurrent-queue)
 - [`core-foundation-sys 0.8.7`](https://github.com/servo/core-foundation-rs)
+- [`criterion-plot 0.5.0`](https://github.com/bheisler/criterion.rs)
+- [`criterion 0.5.1`](https://github.com/bheisler/criterion.rs)
 - [`critical-section 1.2.0`](https://github.com/rust-embedded/critical-section)
 - [`crossbeam-utils 0.8.21`](https://github.com/crossbeam-rs/crossbeam)
 - [`der-parser 10.0.0`](https://github.com/rusticata/der-parser.git)
 - [`displaydoc 0.2.6`](https://github.com/yaahc/displaydoc)
+- [`either 1.16.0`](https://github.com/rayon-rs/either)
 - [`equivalent 1.0.2`](https://github.com/indexmap-rs/equivalent)
 - [`errno 0.3.14`](https://github.com/lambda-fairy/rust-errno)
 - [`event-listener-strategy 0.5.4`](https://github.com/smol-rs/event-listener-strategy)
@@ -3973,6 +3981,7 @@ Used by:
 - [`hermit-abi 0.5.2`](https://github.com/hermit-os/hermit-rs)
 - [`httparse 1.10.1`](https://github.com/seanmonstar/httparse)
 - [`indexmap 2.14.0`](https://github.com/indexmap-rs/indexmap)
+- [`itertools 0.10.5`](https://github.com/rust-itertools/itertools)
 - [`jobserver 0.1.34`](https://github.com/rust-lang/jobserver-rs)
 - [`js-sys 0.3.99`](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
 - [`lazy_static 1.5.0`](https://github.com/rust-lang-nursery/lazy-static.rs)
@@ -3999,7 +4008,6 @@ Used by:
 - [`rustc_version 0.4.1`](https://github.com/djc/rustc-version-rs)
 - [`rusticata-macros 4.1.0`](https://github.com/rusticata/rusticata-macros.git)
 - [`rustix 1.1.4`](https://github.com/bytecodealliance/rustix)
-- [`rustls-pemfile 2.2.0`](https://github.com/rustls/pemfile)
 - [`rustls 0.23.40`](https://github.com/rustls/rustls)
 - [`rusty-fork 0.3.1`](https://github.com/altsysrq/rusty-fork)
 - [`scopeguard 1.2.0`](https://github.com/bluss/scopeguard)
@@ -4011,6 +4019,7 @@ Used by:
 - [`syn 1.0.109`](https://github.com/dtolnay/syn)
 - [`tempfile 3.27.0`](https://github.com/Stebalien/tempfile)
 - [`thread_local 1.1.9`](https://github.com/Amanieu/thread_local-rs)
+- [`tinytemplate 1.2.1`](https://github.com/bheisler/TinyTemplate)
 - [`unicode-segmentation 1.13.2`](https://github.com/unicode-rs/unicode-segmentation)
 - [`unicode-width 0.1.14`](https://github.com/unicode-rs/unicode-width)
 - [`unicode-width 0.2.2`](https://github.com/unicode-rs/unicode-width)
@@ -5661,6 +5670,7 @@ limitations under the License.
 Used by:
 - [`qt-build-utils 0.8.1`](https://github.com/KDAB/cxx-qt/)
 - [`android_system_properties 0.1.5`](https://github.com/nical/android_system_properties)
+- [`anes 0.1.6`](https://github.com/zrzka/anes-rs)
 - [`anyhow 1.0.102`](https://github.com/dtolnay/anyhow)
 - [`asn1-rs-impl 0.2.0`](https://github.com/rusticata/asn1-rs.git)
 - [`async-trait 0.1.89`](https://github.com/dtolnay/async-trait)
@@ -5675,6 +5685,7 @@ Used by:
 - [`cxx 1.0.194`](https://github.com/dtolnay/cxx)
 - [`cxxbridge-flags 1.0.194`](https://github.com/dtolnay/cxx)
 - [`cxxbridge-macro 1.0.194`](https://github.com/dtolnay/cxx)
+- [`half 2.7.1`](https://github.com/VoidStarKat/half-rs)
 - [`ident_case 1.0.1`](https://github.com/TedDriggs/ident_case)
 - [`indoc 2.0.7`](https://github.com/dtolnay/indoc)
 - [`itoa 1.0.18`](https://github.com/dtolnay/itoa)
@@ -6970,6 +6981,7 @@ SOFTWARE.
 
 Used by:
 - [`endi 1.1.1`](https://github.com/zeenix/endi)
+- [`is-terminal 0.4.17`](https://github.com/sunfishcode/is-terminal)
 - [`zmij 1.0.21`](https://github.com/dtolnay/zmij)
 - [`zvariant_utils 3.3.1`](https://github.com/z-galaxy/zbus/)
 
@@ -7070,6 +7082,7 @@ Used by:
 - [`byteorder 1.5.0`](https://github.com/BurntSushi/byteorder)
 - [`memchr 2.8.1`](https://github.com/BurntSushi/memchr)
 - [`termcolor 1.4.1`](https://github.com/BurntSushi/termcolor)
+- [`walkdir 2.5.0`](https://github.com/BurntSushi/walkdir)
 
 ```
 The MIT License (MIT)
@@ -7200,6 +7213,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
+- [`same-file 1.0.6`](https://github.com/BurntSushi/same-file)
 - [`winapi-util 0.1.11`](https://github.com/BurntSushi/winapi-util)
 
 ```
@@ -7224,6 +7238,69 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+```
+
+---
+
+### MIT License
+
+Used by:
+- [`oorandom 11.1.5`](https://hg.sr.ht/~icefox/oorandom)
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2019 Simon Heath
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+### MIT License
+
+Used by:
+- [`crunchy 0.2.4`](https://github.com/eira-fransham/crunchy)
+
+```
+The MIT License (MIT)
+
+Copyright 2017-2023 Eira Fransham.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ```
 

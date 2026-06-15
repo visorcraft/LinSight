@@ -497,7 +497,15 @@ fn fire(name: &str, expr: &str, notify: &[String]) {
                     warn!(target = %target, "exec notify target is empty");
                 }
                 Ok(argv) => {
-                    let result = Command::new(&argv[0]).args(&argv[1..]).status();
+                    // Don't leak the daemon's optional auth token (or any
+                    // other LinSight-specific env) into an external notify
+                    // program. PATH, HOME, etc. are preserved so common
+                    // helpers like `notify-send` still work.
+                    let result = Command::new(&argv[0])
+                        .args(&argv[1..])
+                        .env_remove("LINSIGHT_AUTH_TOKEN")
+                        .env_remove("LINSIGHT_PROM_BIND")
+                        .status();
                     if let Err(e) = result {
                         warn!(target = %target, error = ?e, "exec notify failed");
                     }

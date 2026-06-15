@@ -72,7 +72,7 @@ compatibility on every CI run.
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `tokio`, `tokio-rustls` | MIT | [tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
-| `rustls`, `rustls-pemfile`, `rustls-pki-types` | Apache-2.0 OR ISC OR MIT | [rustls/rustls](https://github.com/rustls/rustls) |
+| `rustls`, `rustls-pki-types` | Apache-2.0 OR ISC OR MIT | [rustls/rustls](https://github.com/rustls/rustls) |
 
 ### Serialization + CLI plumbing
 

@@ -44,6 +44,10 @@ Kirigami.ScrollablePage {
 
     Component.onCompleted: page.refreshDaemonSettings()
 
+    function escapeHtml(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    }
+
     Kirigami.Theme.inherit: false
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.backgroundColor: app.tokens.surface0
@@ -343,7 +347,7 @@ Kirigami.ScrollablePage {
 
                     Controls.Label {
                         text: page.daemonSettings.prom
-                            ? qsTr("Prometheus exporter is bound to %1. To change the bind address, set LINSIGHT_PROM_BIND and restart the daemon.").arg(page.daemonSettings.promBind || "")
+                            ? qsTr("Prometheus exporter is bound to %1. To change the bind address, set LINSIGHT_PROM_BIND and restart the daemon.").arg(page.escapeHtml(page.daemonSettings.promBind || ""))
                             : qsTr("Prometheus exporter is not configured. Set LINSIGHT_PROM_BIND and restart the daemon to enable it.")
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true

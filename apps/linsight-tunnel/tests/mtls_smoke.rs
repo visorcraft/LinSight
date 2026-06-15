@@ -9,7 +9,7 @@
 //!
 //! What this exercises:
 //!  * rcgen produces a self-signed CA + server + client cert chain that
-//!    round-trips through `rustls_pemfile`.
+//!    round-trips through `rustls-pki-types` PEM helpers.
 //!  * `WebPkiServerVerifier` + `WebPkiClientVerifier` (ring provider, TLS
 //!    1.2 + 1.3) successfully complete a mutual handshake with the chain
 //!    above.
@@ -18,11 +18,11 @@
 //!  * An UNTRUSTED client cert (signed by a different CA) is rejected,
 //!    proving the server verifier isn't accidentally accepting anything.
 
-use std::io::Cursor;
 use std::sync::Arc;
 
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rustls::client::WebPkiServerVerifier;
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
@@ -110,15 +110,13 @@ fn make_pki() -> Pki {
 }
 
 fn parse_chain(pem: &str) -> Vec<CertificateDer<'static>> {
-    rustls_pemfile::certs(&mut Cursor::new(pem.as_bytes()))
-        .collect::<std::io::Result<Vec<_>>>()
+    CertificateDer::pem_slice_iter(pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
         .expect("parse cert chain")
 }
 
 fn parse_key(pem: &str) -> PrivateKeyDer<'static> {
-    rustls_pemfile::private_key(&mut Cursor::new(pem.as_bytes()))
-        .expect("read key pem")
-        .expect("no key in pem")
+    PrivateKeyDer::from_pem_slice(pem.as_bytes()).expect("read key pem")
 }
 
 fn build_server_config(server: &GeneratedCert, ca: &GeneratedCert) -> Arc<ServerConfig> {
