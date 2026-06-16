@@ -211,14 +211,7 @@ Kirigami.Page {
                 Controls.Button {
                     icon.name: "list-add-symbolic"
                     text: qsTr("New Dashboard")
-                    onClicked: {
-                        const dlg = Qt.createQmlObject(
-                            'import org.kde.kirigami as Kirigami; Kirigami.PromptDialog {}',
-                            page
-                        )
-                        // Delegate to the NewDashboardDialog
-                        app.goTo("editor:new")
-                    }
+                    onClicked: app.newDashboardDialog.open()
                 }
             }
 

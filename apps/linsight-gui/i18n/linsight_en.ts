@@ -734,7 +734,7 @@ Add one using the button above.</source>
 <context>
     <name>DashboardViewPage</name>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="354"/>
+        <location filename="../qml/DashboardViewPage.qml" line="347"/>
         <source>Dashboard</source>
         <translation type="unfinished"></translation>
     </message>
@@ -784,32 +784,32 @@ Add one using the button above.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="361"/>
+        <location filename="../qml/DashboardViewPage.qml" line="354"/>
         <source>%1 tile(s)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="369"/>
+        <location filename="../qml/DashboardViewPage.qml" line="362"/>
         <source>Export</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="374"/>
+        <location filename="../qml/DashboardViewPage.qml" line="367"/>
         <source>Edit</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="379"/>
+        <location filename="../qml/DashboardViewPage.qml" line="372"/>
         <source>Gallery</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="396"/>
+        <location filename="../qml/DashboardViewPage.qml" line="389"/>
         <source>This dashboard is empty. Open it in the Editor to add sensors.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/DashboardViewPage.qml" line="455"/>
+        <location filename="../qml/DashboardViewPage.qml" line="448"/>
         <source> (hidden)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1161,42 +1161,52 @@ Add one using the button above.</source>
 <context>
     <name>NetworkCard</name>
     <message>
+        <location filename="../qml/NetworkCard.qml" line="40"/>
+        <source>Link up</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../qml/NetworkCard.qml" line="49"/>
+        <source>Link state: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/NetworkCard.qml" line="56"/>
         <source>%1 Mbps</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="50"/>
+        <location filename="../qml/NetworkCard.qml" line="57"/>
         <source>Speed unknown</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="64"/>
+        <location filename="../qml/NetworkCard.qml" line="71"/>
         <source>RX</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="65"/>
+        <location filename="../qml/NetworkCard.qml" line="72"/>
         <source>TX</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="66"/>
+        <location filename="../qml/NetworkCard.qml" line="73"/>
         <source>RX pkt/s</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="67"/>
+        <location filename="../qml/NetworkCard.qml" line="74"/>
         <source>TX pkt/s</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="68"/>
+        <location filename="../qml/NetworkCard.qml" line="75"/>
         <source>Errors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/NetworkCard.qml" line="69"/>
+        <location filename="../qml/NetworkCard.qml" line="76"/>
         <source>Drops</source>
         <translation type="unfinished"></translation>
     </message>

@@ -30,17 +30,24 @@ Rectangle {
             }
             Item { Layout.fillWidth: true }
             Rectangle {
+                id: linkStateDot
                 visible: root.iface && root.iface.link_state === "up"
                 width: 8
                 height: 8
                 radius: 4
                 color: app.tokens.positive
+                Accessible.ignored: true
+                Controls.ToolTip.text: qsTr("Link up")
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.delay: 400
             }
             Controls.Label {
                 text: root.iface ? root.iface.link_state : ""
                 font.pixelSize: app.tokens.textCaption
                 opacity: 0.7
                 color: app.tokens.textPrimary
+                Accessible.name: qsTr("Link state: %1").arg(text)
+                Accessible.role: Accessible.StaticText
             }
         }
 

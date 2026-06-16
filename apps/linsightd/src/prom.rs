@@ -24,6 +24,7 @@
 //! timestamp for consistency, but sample under smaller lock acquisitions so
 //! GUI/CLI subscription work is not blocked behind one full scrape.
 
+use std::fmt::Write as FmtWrite;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -236,11 +237,11 @@ fn serve_one(
     }
 
     let body = render_for_scrape(&scheduler, &registry);
-    let header = format!(
+    write!(
+        writer,
         "HTTP/1.0 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n",
         body.len()
-    );
-    writer.write_all(header.as_bytes())?;
+    )?;
     writer.write_all(body.as_bytes())?;
     Ok(())
 }
@@ -325,13 +326,13 @@ fn render(registry: &HardwareRegistry, snapshot: &[ScrapeRow]) -> String {
 
         match sample.reading {
             Reading::Scalar(v) => {
-                out.push_str(&format!("# HELP {metric} {}\n", d.display_name));
-                out.push_str(&format!("# TYPE {metric} gauge\n"));
+                let _ = writeln!(out, "# HELP {metric} {}", d.display_name);
+                let _ = writeln!(out, "# TYPE {metric} gauge");
                 emit_sample_line(&mut out, &metric, unit, device_key, &v.to_string());
             }
             Reading::Counter(v) => {
-                out.push_str(&format!("# HELP {metric} {}\n", d.display_name));
-                out.push_str(&format!("# TYPE {metric} counter\n"));
+                let _ = writeln!(out, "# HELP {metric} {}", d.display_name);
+                let _ = writeln!(out, "# TYPE {metric} counter");
                 emit_sample_line(&mut out, &metric, unit, device_key, &v.to_string());
             }
             Reading::State(_) | Reading::Table(_) => {
@@ -351,15 +352,17 @@ fn render(registry: &HardwareRegistry, snapshot: &[ScrapeRow]) -> String {
     for dev in devices {
         let nickname = nicks.get(dev.key.as_str()).cloned().unwrap_or_default();
         let vendor = dev.vendor.as_deref().unwrap_or("");
-        out.push_str(&format!(
-            "linsight_hardware_info{{device_key=\"{}\",category=\"{}\",model=\"{}\",vendor=\"{}\",nickname=\"{}\",plugin_id=\"{}\"}} 1\n",
-            escape_label(dev.key.as_str()),
-            dev.category.as_str(),
-            escape_label(&dev.model),
-            escape_label(vendor),
-            escape_label(&nickname),
-            escape_label(&dev.plugin_id),
-        ));
+        let _ = write!(out, "linsight_hardware_info{{device_key=\"");
+        push_escaped_label(&mut out, dev.key.as_str());
+        let _ = write!(out, "\",category=\"{}\",model=\"", dev.category.as_str());
+        push_escaped_label(&mut out, &dev.model);
+        let _ = write!(out, "\",vendor=\"");
+        push_escaped_label(&mut out, vendor);
+        let _ = write!(out, "\",nickname=\"");
+        push_escaped_label(&mut out, &nickname);
+        let _ = write!(out, "\",plugin_id=\"");
+        push_escaped_label(&mut out, &dev.plugin_id);
+        let _ = writeln!(out, "\"}} 1");
     }
     out
 }
@@ -374,22 +377,20 @@ fn emit_sample_line(
     device_key: Option<&HardwareDeviceKey>,
     value: &str,
 ) {
-    match device_key {
-        Some(k) => out.push_str(&format!(
-            "{metric}{{unit=\"{}\",device_key=\"{}\"}} {value}\n",
-            escape_label(unit),
-            escape_label(k.as_str()),
-        )),
-        None => out.push_str(&format!("{metric}{{unit=\"{}\"}} {value}\n", escape_label(unit),)),
+    let _ = write!(out, "{metric}{{unit=\"");
+    push_escaped_label(out, unit);
+    if let Some(k) = device_key {
+        let _ = write!(out, "\",device_key=\"");
+        push_escaped_label(out, k.as_str());
     }
+    let _ = writeln!(out, "\"}} {value}");
 }
 
-/// Escape a Prometheus label value per the exposition format:
+/// Append an escaped Prometheus label value to `out`.
 /// backslash → `\\`, double-quote → `\"`, newline → `\n`.
 /// Other control chars (NUL, etc.) are dropped at the daemon's
 /// validate_nickname seam, so we don't see them here.
-fn escape_label(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
+fn push_escaped_label(out: &mut String, value: &str) {
     for c in value.chars() {
         match c {
             '\\' => out.push_str(r"\\"),
@@ -398,7 +399,6 @@ fn escape_label(value: &str) -> String {
             _ => out.push(c),
         }
     }
-    out
 }
 
 fn sanitize_metric_name(s: &str) -> String {

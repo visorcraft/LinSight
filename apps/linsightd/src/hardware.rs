@@ -50,11 +50,14 @@ pub enum RegistryError {
 
 pub struct HardwareRegistry {
     pub devices: HashMap<HardwareDeviceKey, HardwareDevice>,
-    /// `(plugin_id, plugin_device_id) -> device_key`. The pair is needed
+    /// `plugin_id -> plugin_device_id -> device_key`. The pair is needed
     /// because a `plugin_device_id` like `"gpu0"` is only unique within
     /// the plugin that produced it.
-    by_plugin: HashMap<(String, String), HardwareDeviceKey>,
+    by_plugin: HashMap<String, HashMap<String, HardwareDeviceKey>>,
     nicknames: HashMap<HardwareDeviceKey, String>,
+    /// Precomputed display labels, rebuilt whenever devices or nicknames
+    /// change. Eliminates per-lookup clones of the entire device list.
+    labels: HashMap<HardwareDeviceKey, String>,
 }
 
 impl HardwareRegistry {
@@ -82,7 +85,7 @@ impl HardwareRegistry {
         nicknames: HashMap<String, String>,
     ) -> Self {
         let mut devices: HashMap<HardwareDeviceKey, HardwareDevice> = HashMap::new();
-        let mut by_plugin: HashMap<(String, String), HardwareDeviceKey> = HashMap::new();
+        let mut by_plugin: HashMap<String, HashMap<String, HardwareDeviceKey>> = HashMap::new();
 
         for (plugin_id, plugin_devices, sensors) in manifests {
             for dev in *plugin_devices {
@@ -102,10 +105,10 @@ impl HardwareRegistry {
                 // sensor descriptors below so the cross-reference is
                 // authoritative regardless of what the plugin emitted.
                 device.sensor_ids.clear();
-                by_plugin.insert(
-                    ((*plugin_id).to_owned(), device.plugin_device_id.clone()),
-                    device.key.clone(),
-                );
+                by_plugin
+                    .entry((*plugin_id).to_owned())
+                    .or_default()
+                    .insert(device.plugin_device_id.clone(), device.key.clone());
                 devices.insert(device.key.clone(), device);
             }
 
@@ -140,7 +143,25 @@ impl HardwareRegistry {
             }
         }
 
-        Self { devices, by_plugin, nicknames: typed_nicknames }
+        let mut registry =
+            Self { devices, by_plugin, nicknames: typed_nicknames, labels: HashMap::new() };
+        registry.rebuild_labels();
+        registry
+    }
+
+    /// Recompute `self.labels` from the current device/nickname state.
+    /// Called once at build and after every nickname mutation.
+    fn rebuild_labels(&mut self) {
+        self.labels.clear();
+        let all_devices: Vec<HardwareDevice> = self.devices.values().cloned().collect();
+        let nicks_str: HashMap<String, String> =
+            self.nicknames.iter().map(|(k, v)| (k.as_str().to_owned(), v.clone())).collect();
+        for (key, dev) in &self.devices {
+            self.labels.insert(
+                key.clone(),
+                linsight_core::compute_device_label(dev, &all_devices, &nicks_str),
+            );
+        }
     }
 
     /// Display label for `key`. Delegates to
@@ -149,13 +170,7 @@ impl HardwareRegistry {
     /// the GUI's Hardware-page title and the SensorInfo.device_label
     /// stamped onto tiles use the same algorithm.
     pub fn device_label_for(&self, key: &HardwareDeviceKey) -> String {
-        let Some(dev) = self.devices.get(key) else {
-            return key.as_str().to_owned();
-        };
-        let all_devices: Vec<HardwareDevice> = self.devices.values().cloned().collect();
-        let nicks_str: HashMap<String, String> =
-            self.nicknames.iter().map(|(k, v)| (k.as_str().to_owned(), v.clone())).collect();
-        linsight_core::compute_device_label(dev, &all_devices, &nicks_str)
+        self.labels.get(key).cloned().unwrap_or_else(|| key.as_str().to_owned())
     }
 
     /// Resolve a `(plugin_id, plugin_device_id)` pair from a sensor
@@ -163,7 +178,7 @@ impl HardwareRegistry {
     /// sensors that don't bind to a device (memory has no per-DIMM
     /// identity; CPU pins to a single shared device_key).
     pub fn key_for(&self, plugin_id: &str, plugin_device_id: &str) -> Option<&HardwareDeviceKey> {
-        self.by_plugin.get(&(plugin_id.to_owned(), plugin_device_id.to_owned()))
+        self.by_plugin.get(plugin_id).and_then(|m| m.get(plugin_device_id))
     }
 
     /// Set, update, or clear a nickname.
@@ -207,6 +222,7 @@ impl HardwareRegistry {
                 self.nicknames.remove(key);
             }
         }
+        self.rebuild_labels();
         Ok(())
     }
 
