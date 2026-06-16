@@ -8,7 +8,7 @@
 //! registers zero sensors — never an error loop.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use linsight_core::{HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId};
@@ -23,32 +23,60 @@ use crate::udisks;
 
 const CACHE_TTL: Duration = Duration::from_secs(30);
 const UDISKS_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_CONCURRENT_UDISKS: usize = 2;
+const BACKOFF_BASE: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
 pub struct SmartPlugin {
     inner: Mutex<Inner>,
 }
 
+type SmartDrives = HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>;
+
 /// Fetch SMART drive data from udisks2 with a wall-clock timeout. The D-Bus
 /// call can hang if udisks2 itself is wedged; without this, the daemon's
-/// sampler thread stalls on every SMART sample.
-fn fetch_smart_drives_timeout() -> Result<
-    std::collections::HashMap<
-        String,
-        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-    >,
-    PluginError,
-> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(crate::udisks::fetch_smart_drives());
-    });
-    rx.recv_timeout(UDISKS_TIMEOUT)
-        .map_err(|_| PluginError::Io(format!("udisks2 fetch timed out after {UDISKS_TIMEOUT:?}")))?
-        .map_err(PluginError::Io)
+/// sampler thread stalls on every SMART sample. Repeated timeouts back off so
+/// a stuck udisks2 cannot spawn an unbounded number of worker threads.
+fn fetch_smart_drives_timeout(inner: &mut Inner) -> Result<SmartDrives, PluginError> {
+    fetch_smart_drives_timeout_with(inner, crate::udisks::fetch_smart_drives, UDISKS_TIMEOUT)
 }
 
-#[derive(Default)]
+fn fetch_smart_drives_timeout_with<F>(
+    inner: &mut Inner,
+    fetch: F,
+    timeout: Duration,
+) -> Result<SmartDrives, PluginError>
+where
+    F: FnOnce() -> Result<SmartDrives, String> + Send + 'static,
+{
+    if let Some(until) = inner.backoff_until
+        && Instant::now() < until
+    {
+        return Err(PluginError::Unsupported("udisks2 backed off after repeated timeouts".into()));
+    }
+
+    let permit = inner.sem.acquire();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(fetch());
+    });
+    let result = rx.recv_timeout(timeout).map_err(|_| {
+        inner.timeout_strikes = inner.timeout_strikes.saturating_add(1);
+        let factor = 1u64 << inner.timeout_strikes.min(8);
+        inner.backoff_until =
+            Some(Instant::now() + BACKOFF_BASE.saturating_mul(factor as u32).min(BACKOFF_MAX));
+        PluginError::Unsupported(format!("udisks2 fetch timed out after {timeout:?}"))
+    });
+    drop(permit);
+
+    if result.is_ok() {
+        inner.timeout_strikes = 0;
+        inner.backoff_until = None;
+    }
+    result?.map_err(PluginError::Io)
+}
+
 struct Inner {
     /// Disk name → cached sensor readings.
     cache: HashMap<String, (Instant, Vec<(SensorId, Reading)>)>,
@@ -56,6 +84,61 @@ struct Inner {
     warned: bool,
     /// Whether we already warned about a sample-time udisks2 failure.
     sample_warned: bool,
+    /// Instant after which we may retry udisks2 after a timeout.
+    backoff_until: Option<Instant>,
+    /// Consecutive timeout strikes, used to escalate backoff.
+    timeout_strikes: u32,
+    /// Limits concurrent udisks2 worker threads.
+    sem: Arc<Semaphore>,
+}
+
+impl Default for Inner {
+    fn default() -> Self {
+        Self {
+            cache: HashMap::new(),
+            warned: false,
+            sample_warned: false,
+            backoff_until: None,
+            timeout_strikes: 0,
+            sem: Arc::new(Semaphore::new(MAX_CONCURRENT_UDISKS)),
+        }
+    }
+}
+
+/// Counting semaphore implemented with std primitives. The permit is held by
+/// the caller and released as soon as the timeout fires, so a stuck udisks2
+/// call cannot permanently exhaust the concurrency budget.
+struct Semaphore {
+    permits: Mutex<usize>,
+    cvar: Condvar,
+    max: usize,
+}
+
+struct SemaphorePermit<'a> {
+    sem: &'a Semaphore,
+}
+
+impl Semaphore {
+    fn new(max: usize) -> Self {
+        Self { permits: Mutex::new(max), cvar: Condvar::new(), max }
+    }
+
+    fn acquire(&self) -> SemaphorePermit<'_> {
+        let mut permits = self.permits.lock().expect("smart semaphore poisoned");
+        while *permits == 0 {
+            permits = self.cvar.wait(permits).expect("smart semaphore poisoned");
+        }
+        *permits -= 1;
+        SemaphorePermit { sem: self }
+    }
+}
+
+impl Drop for SemaphorePermit<'_> {
+    fn drop(&mut self) {
+        let mut permits = self.sem.permits.lock().expect("smart semaphore poisoned");
+        *permits = self.sem.max.min(*permits + 1);
+        self.sem.cvar.notify_one();
+    }
 }
 
 impl SmartPlugin {
@@ -63,7 +146,7 @@ impl SmartPlugin {
         let mut inner = self.inner.lock().expect("SmartPlugin poisoned");
         inner.cache.clear();
 
-        let drives = match fetch_smart_drives_timeout() {
+        let drives = match fetch_smart_drives_timeout(&mut inner) {
             Ok(d) => d,
             Err(e) => {
                 if !inner.warned {
@@ -139,7 +222,7 @@ impl SmartPlugin {
         }
 
         // Cache miss or expiry — refresh all SMART data.
-        let drives = match fetch_smart_drives_timeout() {
+        let drives = match fetch_smart_drives_timeout(&mut inner) {
             Ok(d) => d,
             Err(e) => {
                 if !inner.sample_warned {
@@ -225,5 +308,91 @@ mod tests {
             err.to_string().contains("unsupported") || err.to_string().contains("udisks2"),
             "unexpected error: {err}"
         );
+    }
+
+    fn ok_udisks() -> Result<SmartDrives, String> {
+        Ok(SmartDrives::new())
+    }
+
+    fn hang_udisks() -> Result<SmartDrives, String> {
+        std::thread::sleep(Duration::from_secs(60));
+        Ok(SmartDrives::new())
+    }
+
+    #[test]
+    fn timeout_marks_udisks_backoff() {
+        let mut inner = Inner::default();
+        let err =
+            fetch_smart_drives_timeout_with(&mut inner, hang_udisks, Duration::from_millis(50))
+                .unwrap_err();
+        assert!(matches!(err, PluginError::Unsupported(_)), "unexpected error: {err}");
+        assert!(inner.backoff_until.is_some(), "backoff should be set");
+        assert_eq!(inner.timeout_strikes, 1);
+    }
+
+    #[test]
+    fn success_clears_udisks_backoff() {
+        let mut inner = Inner::default();
+        inner.timeout_strikes = 1;
+        inner.backoff_until = Some(Instant::now() - Duration::from_millis(1));
+        let drives =
+            fetch_smart_drives_timeout_with(&mut inner, ok_udisks, Duration::from_millis(50))
+                .unwrap();
+        assert!(drives.is_empty());
+        assert_eq!(inner.timeout_strikes, 0);
+        assert!(inner.backoff_until.is_none());
+    }
+
+    #[test]
+    fn active_backoff_returns_unsupported_immediately() {
+        let mut inner = Inner::default();
+        inner.backoff_until = Some(Instant::now() + Duration::from_secs(60));
+        let err =
+            fetch_smart_drives_timeout_with(&mut inner, hang_udisks, Duration::from_millis(50))
+                .unwrap_err();
+        assert!(matches!(err, PluginError::Unsupported(_)), "unexpected error: {err}");
+        assert_eq!(inner.timeout_strikes, 0, "no new strike when backed off");
+    }
+
+    #[test]
+    fn backoff_escalates_with_each_timeout() {
+        let mut inner = Inner::default();
+        let _ = fetch_smart_drives_timeout_with(&mut inner, hang_udisks, Duration::from_millis(20))
+            .unwrap_err();
+        let first = inner.backoff_until.unwrap();
+        // Expire the first backoff so the next call actually times out again
+        // rather than returning immediately from the guard.
+        inner.backoff_until = Some(Instant::now() - Duration::from_millis(1));
+        let _ = fetch_smart_drives_timeout_with(&mut inner, hang_udisks, Duration::from_millis(20))
+            .unwrap_err();
+        let second = inner.backoff_until.unwrap();
+        assert!(second > first, "backoff should escalate");
+        assert_eq!(inner.timeout_strikes, 2);
+    }
+
+    #[test]
+    fn semaphore_caps_udisks_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let sem = Arc::new(Semaphore::new(2));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::with_capacity(10);
+        for _ in 0..10 {
+            let sem = Arc::clone(&sem);
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            handles.push(std::thread::spawn(move || {
+                let _permit = sem.acquire();
+                let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                max_active.fetch_max(n, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(10));
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(max_active.load(Ordering::SeqCst), 2);
     }
 }
