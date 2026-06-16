@@ -21,6 +21,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -42,9 +43,20 @@ pub struct SockPlugin {
     inner: Mutex<Inner>,
 }
 
+/// Cache TTL for `/proc/net` reads. The daemon samples all five sock.*
+/// sensors within the same pump tick (≤ 150 ms), but each `sample_inner`
+/// call is independent. Without a cache, `/proc/net/tcp` + `/proc/net/tcp6`
+/// are read and parsed three times per tick (once per TCP metric) and
+/// `/proc/net/sockstat` twice. The cache collapses these to one read each.
+const PROC_CACHE_TTL: std::time::Duration = std::time::Duration::from_millis(120);
+
 #[derive(Default)]
 struct Inner {
     sysroot: Option<PathBuf>,
+    /// Cached TCP state counts with the instant they were read.
+    tcp_cache: Option<(Instant, TcpStates)>,
+    /// Cached sockstat summary with the instant it was read.
+    sockstat_cache: Option<(Instant, SockStat)>,
 }
 
 /// TCP connection counts tallied by state across `/proc/net/tcp{,6}`.
@@ -115,22 +127,43 @@ impl SockPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("SockPlugin poisoned");
+        let mut inner = self.inner.lock().expect("SockPlugin poisoned");
         let metric = sensor
             .as_str()
             .strip_prefix("sock.")
             .ok_or_else(|| PluginError::Unsupported(sensor.to_string()))?;
         let net = net_dir(inner.sysroot.as_deref());
         match metric {
-            "tcp_established" => Ok(Reading::Scalar(tcp_states(&net).established as f64)),
-            "tcp_listen" => Ok(Reading::Scalar(tcp_states(&net).listen as f64)),
-            "tcp_time_wait" => Ok(Reading::Scalar(tcp_states(&net).time_wait as f64)),
-            "udp_inuse" => Ok(Reading::Scalar(
-                parse_sockstat(&read_opt(&net.join("sockstat"))).udp_inuse as f64,
-            )),
-            "tcp_mem_bytes" => {
-                let pages = parse_sockstat(&read_opt(&net.join("sockstat"))).tcp_mem_pages;
-                Ok(Reading::Scalar((pages * PAGE_SIZE) as f64))
+            "tcp_established" | "tcp_listen" | "tcp_time_wait" => {
+                let states = inner.tcp_cache.get_or_insert_with(|| {
+                    let now = Instant::now();
+                    (now, tcp_states(&net))
+                });
+                if states.0.elapsed() > PROC_CACHE_TTL {
+                    *states = (Instant::now(), tcp_states(&net));
+                }
+                match metric {
+                    "tcp_established" => Ok(Reading::Scalar(states.1.established as f64)),
+                    "tcp_listen" => Ok(Reading::Scalar(states.1.listen as f64)),
+                    "tcp_time_wait" => Ok(Reading::Scalar(states.1.time_wait as f64)),
+                    _ => unreachable!(),
+                }
+            }
+            "udp_inuse" | "tcp_mem_bytes" => {
+                let stat = inner.sockstat_cache.get_or_insert_with(|| {
+                    let now = Instant::now();
+                    (now, parse_sockstat(&read_opt(&net.join("sockstat"))))
+                });
+                if stat.0.elapsed() > PROC_CACHE_TTL {
+                    *stat = (Instant::now(), parse_sockstat(&read_opt(&net.join("sockstat"))));
+                }
+                match metric {
+                    "udp_inuse" => Ok(Reading::Scalar(stat.1.udp_inuse as f64)),
+                    "tcp_mem_bytes" => {
+                        Ok(Reading::Scalar((stat.1.tcp_mem_pages * PAGE_SIZE) as f64))
+                    }
+                    _ => unreachable!(),
+                }
             }
             _ => Err(PluginError::Unsupported(sensor.to_string())),
         }

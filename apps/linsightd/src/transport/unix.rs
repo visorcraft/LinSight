@@ -52,6 +52,12 @@ const MAX_CLIENT_SESSIONS: usize = 64;
 /// cap RSS growth. When full, samples are dropped rather than disconnecting,
 /// so a laggy client recovers live data once it catches up.
 const OUTBOUND_QUEUE_CAP: usize = 1024;
+/// Maximum outbound messages the pump thread drains per tick. Capping
+/// this prevents a slow client from monopolizing the shared writer mutex
+/// (which the read loop also needs for RPC responses). At 256 messages
+/// per 150 ms tick, throughput is ~1 700 msg/s — far above any realistic
+/// sample rate — while still yielding the lock between batches.
+const PUMP_DRAIN_CAP: u32 = 256;
 
 /// Sentinel returned by [`now_micros`] when the system clock is before
 /// `UNIX_EPOCH`. Distinguishable from real timestamps for downstream code.
@@ -305,30 +311,49 @@ fn spawn_sampler(
                 continue;
             }
 
-            let mut map = clients.lock().unwrap();
-            map.retain(|_id, sink| {
-                let subscriptions = sink.subscriptions.lock().unwrap();
-                let interested: Vec<_> = samples
-                    .iter()
-                    .filter(|sample| subscriptions.contains_key(&sample.sensor))
-                    .cloned()
-                    .collect();
-                drop(subscriptions);
-
+            // Snapshot client sinks under a brief lock, then fan out
+            // without holding the global clients mutex so accept /
+            // subscribe / RPC handlers are not blocked during per-client
+            // delivery.
+            let sinks: Vec<(
+                u64,
+                std::sync::mpsc::SyncSender<ServerMsg>,
+                Arc<Mutex<ClientSubscriptions>>,
+            )> = {
+                let map = clients.lock().unwrap();
+                map.iter()
+                    .map(|(id, sink)| (*id, sink.tx.clone(), Arc::clone(&sink.subscriptions)))
+                    .collect()
+            };
+            let mut disconnected: Vec<u64> = Vec::new();
+            for (id, tx, subscriptions) in sinks {
+                let interested: Vec<_> = {
+                    let subs = subscriptions.lock().unwrap();
+                    samples
+                        .iter()
+                        .filter(|sample| subs.contains_key(&sample.sensor))
+                        .cloned()
+                        .collect()
+                };
                 for sample in interested {
-                    match sink.tx.try_send(ServerMsg::Sample(sample)) {
+                    match tx.try_send(ServerMsg::Sample(sample)) {
                         Ok(()) => {}
                         Err(std::sync::mpsc::TrySendError::Full(_)) => {
-                            // Slow client: drop the sample so the daemon's
-                            // memory doesn't grow without bound. The client
-                            // recovers live data once its pump catches up.
                             tracing::debug!("outbound queue full; dropping sample for slow client");
                         }
-                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return false,
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            disconnected.push(id);
+                            break;
+                        }
                     }
                 }
-                true
-            });
+            }
+            if !disconnected.is_empty() {
+                let mut map = clients.lock().unwrap();
+                for id in &disconnected {
+                    map.remove(id);
+                }
+            }
         }
     })
 }
@@ -490,15 +515,22 @@ fn serve(
             if stop_rx.recv_timeout(tick).is_ok() {
                 break;
             }
-            // Drain any pending outbound messages. The channel is unbounded;
+            // Drain any pending outbound messages. The channel is bounded;
             // `try_recv` lets us pull multiple messages per tick
             // without blocking the sample drain when none are queued.
+            // Cap the drain so a slow client can't monopolize the shared
+            // writer lock — the read loop needs it to send RPC responses.
+            let mut drained = 0u32;
             loop {
                 match outbound_rx.try_recv() {
                     Ok(msg) => {
                         let mut w = pump_writer.lock().unwrap();
                         if w.write_server(&msg).is_err() {
                             return;
+                        }
+                        drained += 1;
+                        if drained >= PUMP_DRAIN_CAP {
+                            break;
                         }
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,

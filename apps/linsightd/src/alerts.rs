@@ -172,6 +172,10 @@ struct RuleConfig {
 struct CompiledRule {
     name: String,
     expr: String,
+    /// Expression with `.` rewritten to `__` for evalexpr compatibility.
+    /// Pre-computed at compile time so the hot path avoids a per-eval
+    /// `String::replace` allocation.
+    rewritten_expr: String,
     for_duration: Duration,
     cooldown: Duration,
     notify: Vec<String>,
@@ -184,8 +188,13 @@ struct CompiledRule {
 
 pub struct AlertEngine {
     rules: Vec<CompiledRule>,
-    /// Latest scalar value seen per sensor.
+    /// Latest scalar value seen per sensor (original sensor IDs).
     values: HashMap<String, f64>,
+    /// Persistent evaluation context with rewritten variable names
+    /// (`.` → `__`). Updated incrementally in `observe()` so the hot
+    /// path is O(1) per sample instead of rebuilding the full context
+    /// (O(N) String allocations) on every rule evaluation.
+    ctx: HashMapContext,
     /// Ring buffer of recent fire/clear events; newest-first (front = newest).
     events: VecDeque<AlertEvent>,
     /// Optional history writer for persisting events to SQLite.
@@ -252,6 +261,7 @@ impl AlertEngineHandle {
         let referenced_sensors = extract_sensor_refs(expr);
         if let Some(existing) = eng.rules.iter_mut().find(|r| r.name == name) {
             existing.expr = expr.to_string();
+            existing.rewritten_expr = expr.replace('.', "__");
             existing.notify = notify;
             existing.referenced_sensors = referenced_sensors;
             existing.for_duration = for_duration;
@@ -265,6 +275,7 @@ impl AlertEngineHandle {
         } else {
             eng.rules.push(CompiledRule {
                 name: name.to_string(),
+                rewritten_expr: expr.replace('.', "__"),
                 expr: expr.to_string(),
                 for_duration,
                 cooldown,
@@ -342,6 +353,7 @@ impl AlertEngine {
             let referenced_sensors = extract_sensor_refs(&r.expr);
             compiled.push(CompiledRule {
                 name: r.name,
+                rewritten_expr: r.expr.replace('.', "__"),
                 expr: r.expr,
                 for_duration,
                 cooldown,
@@ -357,6 +369,7 @@ impl AlertEngine {
         Ok(Self {
             rules: compiled,
             values: HashMap::new(),
+            ctx: HashMapContext::new(),
             events: VecDeque::new(),
             event_writer: None,
         })
@@ -380,6 +393,9 @@ impl AlertEngine {
             self.prune_unreferenced_values();
         }
         self.values.insert(id.clone(), val);
+        // Update the persistent evaluation context incrementally (O(1) per
+        // sample) instead of rebuilding the full context per rule eval.
+        let _ = self.ctx.set_value(id.replace('.', "__"), Value::Float(val));
 
         let now = Instant::now();
         let mut to_eval: Vec<usize> = Vec::new();
@@ -409,6 +425,13 @@ impl AlertEngine {
         self.values.retain(|k, _| referenced.contains(k.as_str()));
         let pruned = before - self.values.len();
         if pruned > 0 {
+            // Rebuild the evaluation context from the surviving values.
+            // This path only fires when VALUES_CAP is exceeded (a rare
+            // defensive case), so the O(N) rebuild is acceptable.
+            self.ctx = HashMapContext::new();
+            for (k, v) in &self.values {
+                let _ = self.ctx.set_value(k.replace('.', "__"), Value::Float(*v));
+            }
             warn!(pruned, remaining = self.values.len(), "pruned unreferenced sensor values");
         }
     }
@@ -416,10 +439,21 @@ impl AlertEngine {
     fn evaluate_rule(&mut self, idx: usize, now: Instant) {
         // Read rule metadata without holding a mutable borrow on self.rules,
         // so we can also write to self.events after evaluation.
-        let (name, expr, for_duration, cooldown, notify, prev_fired, triggered_at, last_fired_at) = {
+        let (
+            name,
+            rewritten_expr,
+            expr,
+            for_duration,
+            cooldown,
+            notify,
+            prev_fired,
+            triggered_at,
+            last_fired_at,
+        ) = {
             let rule = &self.rules[idx];
             (
                 rule.name.clone(),
+                rule.rewritten_expr.clone(),
                 rule.expr.clone(),
                 rule.for_duration,
                 rule.cooldown,
@@ -429,17 +463,11 @@ impl AlertEngine {
                 rule.last_fired_at,
             )
         };
-        let mut ctx = HashMapContext::new();
-        for (k, v) in &self.values {
-            // evalexpr identifiers may contain `.`; we substitute the dot for
-            // `__` to keep the parser happy and rewrite the expression once.
-            // The conversion happens at expression-eval time below.
-            let _ = ctx.set_value(k.replace('.', "__"), Value::Float(*v));
-        }
-        let rewritten_expr = expr.replace('.', "__");
-        // Inline (no per-tick worker thread) — see `eval_inline`. Trusted
-        // config + length cap + catch_unwind; never returns `Timeout`.
-        let truthy = match eval_inline(&rewritten_expr, &ctx) {
+        // The context is maintained incrementally in observe() — no per-eval
+        // rebuild needed. Inline (no per-tick worker thread) — see
+        // `eval_inline`. Trusted config + length cap + catch_unwind; never
+        // returns `Timeout`.
+        let truthy = match eval_inline(&rewritten_expr, &self.ctx) {
             EvalOutcome::Ok(b) => b,
             EvalOutcome::Err(e) => {
                 warn!(rule = %name, error = %e, "alert expression failed to evaluate");
@@ -492,10 +520,12 @@ impl AlertEngine {
         if self.events.len() == EVENT_CAPACITY {
             self.events.pop_back();
         }
-        self.events.push_front(event.clone());
+        // Only clone when a history writer is attached; in the default
+        // (no-history) config the event moves into the ring buffer directly.
         if let Some(ref writer) = self.event_writer {
-            writer.record_alert_event(event);
+            writer.record_alert_event(event.clone());
         }
+        self.events.push_front(event);
     }
 }
 
@@ -860,6 +890,7 @@ impl AlertEngine {
         Self {
             rules: vec![CompiledRule {
                 name: name.to_string(),
+                rewritten_expr: expr.replace('.', "__"),
                 expr: expr.to_string(),
                 for_duration: Duration::ZERO,
                 cooldown: Duration::ZERO,
@@ -871,6 +902,7 @@ impl AlertEngine {
                 referenced_sensors,
             }],
             values: HashMap::new(),
+            ctx: HashMapContext::new(),
             events: VecDeque::new(),
             event_writer: None,
         }

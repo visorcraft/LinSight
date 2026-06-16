@@ -8,11 +8,41 @@
 //!   2. queuing the result back onto the Qt event loop, and
 //!   3. discarding stale results via a `generation` counter.
 
+use std::sync::{Condvar, LazyLock, Mutex};
 use std::thread;
 
 use cxx_qt::CxxQtThread;
 use cxx_qt::CxxQtType;
 use cxx_qt::Threading;
+
+/// Maximum number of RPC fetch closures executing concurrently. Excess
+/// threads are spawned as before (the GUI thread never blocks on
+/// `spawn_rpc`) but park on the semaphore until a slot frees, preventing
+/// a burst of history-range clicks or host switches from spawning dozens
+/// of simultaneous blocking RPC threads.
+const MAX_CONCURRENT_RPC: usize = 16;
+
+static RPC_SEMAPHORE: LazyLock<(Mutex<usize>, Condvar)> =
+    LazyLock::new(|| (Mutex::new(0), Condvar::new()));
+
+/// Acquire a concurrency slot. Called from inside the spawned thread so
+/// the GUI thread is never blocked.
+fn acquire_rpc_slot() {
+    let (lock, cvar) = &*RPC_SEMAPHORE;
+    let mut count = lock.lock().unwrap();
+    while *count >= MAX_CONCURRENT_RPC {
+        count = cvar.wait(count).unwrap();
+    }
+    *count += 1;
+}
+
+/// Release a concurrency slot and wake one waiting thread.
+fn release_rpc_slot() {
+    let (lock, cvar) = &*RPC_SEMAPHORE;
+    let mut count = lock.lock().unwrap();
+    *count -= 1;
+    cvar.notify_one();
+}
 
 /// Staleness contract for QObjects that own a `request_generation` counter.
 ///
@@ -59,7 +89,9 @@ pub(crate) fn spawn_rpc<Obj, Fetch, Apply, R>(
     R: Send + 'static,
 {
     thread::spawn(move || {
+        acquire_rpc_slot();
         let result = fetch();
+        release_rpc_slot();
         let _ = qt_thread.queue(move |mut pin| {
             if !is_current(pin.as_mut().rust(), generation) {
                 return;
