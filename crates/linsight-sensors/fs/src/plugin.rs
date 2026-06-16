@@ -412,9 +412,24 @@ fn snapshot_with(
     // Spawn each statvfs call in its own worker thread, capped by a
     // semaphore. A hung mount only blocks its own recv timeout; the
     // permit is released immediately so other mounts can proceed.
+    //
+    // To avoid deadlocking when mounts.len() exceeds the semaphore
+    // capacity, we drain one in-flight result before acquiring another
+    // permit once we are at the concurrency limit.
     let deadline = Instant::now() + timeout;
     let mut pending = Vec::with_capacity(mounts.len());
+    let mut outcomes = Vec::with_capacity(mounts.len());
     for (mountpoint, _) in mounts {
+        if pending.len() >= MAX_CONCURRENT_STATVFS {
+            let (mp, rx, permit): (
+                String,
+                std::sync::mpsc::Receiver<Result<FsStat, PluginError>>,
+                _,
+            ) = pending.remove(0);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            outcomes.push((mp, rx.recv_timeout(remaining)));
+            drop(permit);
+        }
         let permit = inner.sem.acquire();
         let mp = mountpoint.clone();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -424,8 +439,7 @@ fn snapshot_with(
         pending.push((mountpoint, rx, permit));
     }
 
-    let mut stats = HashMap::with_capacity(pending.len());
-    let mut outcomes = Vec::with_capacity(pending.len());
+    let mut stats = HashMap::with_capacity(outcomes.len() + pending.len());
     for (mountpoint, rx, permit) in pending {
         let remaining = deadline.saturating_duration_since(Instant::now());
         outcomes.push((mountpoint, rx.recv_timeout(remaining)));
@@ -803,8 +817,8 @@ mod tests {
 
     #[test]
     fn snapshot_marks_timeout_mount_backoff() {
-        let mut inner = Inner::default();
-        inner.mounts = vec![("/hang".into(), "hang".into())];
+        let mut inner =
+            Inner { mounts: vec![("/hang".into(), "hang".into())], ..Default::default() };
         let err = snapshot_with(&mut inner, hang_forever, Duration::from_millis(50)).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)), "unexpected error: {err}");
         assert!(inner.backoff.contains_key("/hang"), "mount should be backed off");
@@ -813,12 +827,22 @@ mod tests {
 
     #[test]
     fn snapshot_clears_backoff_on_success() {
-        let mut inner = Inner::default();
-        inner.mounts = vec![("/ok".into(), "ok".into())];
         // Put the mount in a backed-off state that has already expired so the
         // snapshot actually attempts it and the success path clears it.
-        inner.strikes.insert("/ok".into(), 1);
-        inner.backoff.insert("/ok".into(), Instant::now() - Duration::from_millis(1));
+        let mut inner = Inner {
+            mounts: vec![("/ok".into(), "ok".into())],
+            strikes: {
+                let mut m = HashMap::new();
+                m.insert("/ok".into(), 1);
+                m
+            },
+            backoff: {
+                let mut m = HashMap::new();
+                m.insert("/ok".into(), Instant::now() - Duration::from_millis(1));
+                m
+            },
+            ..Default::default()
+        };
         let stats = snapshot_with(&mut inner, ok_statvfs, Duration::from_millis(50)).unwrap();
         assert!(stats.contains_key("/ok"));
         assert!(!inner.backoff.contains_key("/ok"));
@@ -827,12 +851,30 @@ mod tests {
 
     #[test]
     fn snapshot_returns_partial_results_on_timeout() {
-        let mut inner = Inner::default();
-        inner.mounts = vec![("/ok".into(), "ok".into()), ("/hang".into(), "hang".into())];
+        let mut inner = Inner {
+            mounts: vec![("/ok".into(), "ok".into()), ("/hang".into(), "hang".into())],
+            ..Default::default()
+        };
         let stats = snapshot_with(&mut inner, mixed_statvfs, Duration::from_millis(100)).unwrap();
         assert!(stats.contains_key("/ok"), "successful mount must appear in snapshot");
         assert!(!stats.contains_key("/hang"), "timed-out mount must not appear");
         assert!(inner.backoff.contains_key("/hang"), "timed-out mount must be backed off");
+    }
+
+    #[test]
+    fn snapshot_does_not_deadlock_when_mounts_exceed_concurrency_limit() {
+        // More mounts than MAX_CONCURRENT_STATVFS, all fast. The previous
+        // implementation could deadlock because it acquired permits for every
+        // mount before receiving any results.
+        let mut inner = Inner {
+            mounts: (0..MAX_CONCURRENT_STATVFS + 4)
+                .map(|i| (format!("/mnt/{i}"), format!("mnt_{i}")))
+                .collect(),
+            ..Default::default()
+        };
+        let stats =
+            snapshot_with(&mut inner, ok_statvfs, Duration::from_millis(500)).expect("no deadlock");
+        assert_eq!(stats.len(), inner.mounts.len());
     }
 
     #[test]

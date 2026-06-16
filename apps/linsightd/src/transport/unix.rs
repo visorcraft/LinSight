@@ -37,6 +37,15 @@ const ACCEPT_BACKOFF_MAX: Duration = Duration::from_secs(5);
 /// would park a worker thread forever.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Idle read timeout after a successful handshake. A client that has not sent
+/// any command in this window is treated as stale / half-open and disconnected
+/// so it cannot hold a session forever.
+const CLIENT_IDLE_READ_TIMEOUT: Duration = Duration::from_secs(1800);
+
+/// Per-message write timeout. A slow or frozen client cannot be allowed to
+/// block the outbound pump thread indefinitely.
+const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Maximum number of concurrently-served client sessions. Excess connections
 /// receive a `Bye` and are closed immediately so the scheduler mutex's
 /// contention stays bounded and the daemon can't be DoS'd by a connection
@@ -63,8 +72,21 @@ const PUMP_DRAIN_CAP: u32 = 256;
 /// `UNIX_EPOCH`. Distinguishable from real timestamps for downstream code.
 const TS_SENTINEL_BAD_CLOCK: u64 = u64::MAX;
 
-/// Per-client subscription tokens, grouped by sensor for quick fan-out checks.
-type ClientSubscriptions = HashMap<SensorId, Vec<Subscription>>;
+/// How long the sampler waits for a single batch of due sensors before
+/// marking the remaining in-flight samples as timed out. Chosen so a single
+/// hung sensor cannot stall the whole tick indefinitely while still allowing
+/// slow-but-finite operations (large D-Bus round trips, NVML init) to finish.
+const SAMPLE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Number of worker threads in the sampler pool. Caps the number of
+/// concurrently-running plugin samples so repeated timeouts cannot grow
+/// worker threads without bound.
+const SAMPLER_POOL_SIZE: usize = 8;
+
+/// Per-client subscription tokens, keyed by `(sensor, period)` so a duplicate
+/// `Subscribe` for the same sensor and rate is idempotent instead of leaking
+/// a second `Subscription` and inflating the scheduler's refcount.
+type ClientSubscriptions = HashMap<(SensorId, u64), Subscription>;
 
 struct ClientSink {
     tx: std::sync::mpsc::SyncSender<ServerMsg>,
@@ -246,13 +268,23 @@ pub fn accept_loop(
                 let reg = Arc::clone(&registry);
                 let clients_for_serve = Arc::clone(&clients);
                 let store_path_for_serve = store_path.clone();
-                let guard = SessionGuard(Arc::clone(&sessions));
-                thread::spawn(move || {
-                    let _g = guard;
-                    if let Err(e) = serve(s, sched, reg, clients_for_serve, store_path_for_serve) {
-                        warn!(error = ?e, "client session ended with error");
-                    }
-                });
+                let sessions_for_guard = Arc::clone(&sessions);
+                if let Err(e) =
+                    std::thread::Builder::new().name("linsight-client".into()).spawn(move || {
+                        let _guard = SessionGuard(sessions_for_guard);
+                        if let Err(e) =
+                            serve(s, sched, reg, clients_for_serve, store_path_for_serve)
+                        {
+                            warn!(error = ?e, "client session ended with error");
+                        }
+                    })
+                {
+                    // Spawn failed: the closure was dropped without creating
+                    // the guard, so decrement the session counter here to
+                    // prevent a leak.
+                    sessions.fetch_sub(1, Ordering::AcqRel);
+                    warn!(error = ?e, "failed to spawn client session thread");
+                }
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(ACCEPT_POLL_INTERVAL);
@@ -276,12 +308,177 @@ pub fn accept_loop(
     Ok(())
 }
 
+/// Bounded pool of worker threads that run individual plugin samples.
+/// Isolates slow or hung sensors so one blocked plugin cannot stall the
+/// entire scheduler tick, while capping the number of in-flight sampling
+/// threads so repeated timeouts cannot grow without bound.
+struct SamplingPool {
+    job_tx: Option<std::sync::mpsc::Sender<SamplingJob>>,
+    result_rx: std::sync::mpsc::Receiver<SamplingResult>,
+    handles: Vec<std::thread::JoinHandle<()>>,
+    next_call_id: AtomicU64,
+}
+
+struct SamplingJob {
+    host: Arc<crate::plugin_host::PluginHost>,
+    id: SensorId,
+    ts_micros: u64,
+    call_id: u64,
+}
+
+struct SamplingResult {
+    call_id: u64,
+    sensor: SensorId,
+    result: Result<linsight_core::Sample, linsight_plugin_sdk::PluginError>,
+}
+
+impl SamplingPool {
+    fn new(size: usize) -> Self {
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<SamplingJob>();
+        let job_rx = Arc::new(std::sync::Mutex::new(job_rx));
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let mut handles = Vec::with_capacity(size);
+        for i in 0..size {
+            let rx = Arc::clone(&job_rx);
+            let tx = result_tx.clone();
+            let name = format!("linsight-sampler-{i}");
+            match std::thread::Builder::new().name(name).spawn(move || {
+                loop {
+                    let job = {
+                        let rx = rx.lock().unwrap();
+                        match rx.recv() {
+                            Ok(job) => job,
+                            Err(_) => break,
+                        }
+                    };
+                    let result = job.host.sample_to(&job.id, job.ts_micros);
+                    let _ =
+                        tx.send(SamplingResult { call_id: job.call_id, sensor: job.id, result });
+                }
+            }) {
+                Ok(handle) => handles.push(handle),
+                Err(e) => {
+                    tracing::error!(error = ?e, worker_index = i, "failed to spawn sampler worker");
+                }
+            }
+        }
+        Self { job_tx: Some(job_tx), result_rx, handles, next_call_id: AtomicU64::new(0) }
+    }
+
+    fn sample(
+        &self,
+        host: Arc<crate::plugin_host::PluginHost>,
+        plan: Vec<crate::scheduler::TickItem>,
+        now: u64,
+        timeout: Duration,
+    ) -> Vec<(
+        crate::scheduler::TickItem,
+        Result<linsight_core::Sample, linsight_plugin_sdk::PluginError>,
+    )> {
+        let call_id = self.next_call_id.fetch_add(1, Ordering::Relaxed);
+        let mut results = Vec::with_capacity(plan.len());
+        let mut in_flight: HashMap<SensorId, crate::scheduler::TickItem> =
+            HashMap::with_capacity(plan.len().min(self.handles.len().max(1)));
+        let mut pending: std::collections::VecDeque<crate::scheduler::TickItem> = plan.into();
+        let job_tx = self.job_tx.as_ref().expect("sampling pool is shut down");
+        let deadline = std::time::Instant::now() + timeout;
+
+        // Seed the pool with up to pool_size jobs. Workers pull more as
+        // results arrive, so the number of concurrently-running samples is
+        // always bounded by the pool size.
+        for _ in 0..self.handles.len().max(1) {
+            let Some(item) = pending.pop_front() else { break };
+            if job_tx
+                .send(SamplingJob {
+                    host: Arc::clone(&host),
+                    id: item.id.clone(),
+                    ts_micros: now,
+                    call_id,
+                })
+                .is_ok()
+            {
+                in_flight.insert(item.id.clone(), item);
+            } else {
+                results.push((
+                    item,
+                    Err(linsight_plugin_sdk::PluginError::Timeout(
+                        "sampling pool shut down".into(),
+                    )),
+                ));
+            }
+        }
+
+        while !in_flight.is_empty() {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match self.result_rx.recv_timeout(remaining) {
+                Ok(SamplingResult { call_id: got_id, sensor, result }) => {
+                    if got_id != call_id {
+                        // Stale result from a previous tick; ignore.
+                        continue;
+                    }
+                    if let Some(item) = in_flight.remove(&sensor) {
+                        results.push((item, result));
+                        if let Some(next) = pending.pop_front() {
+                            if job_tx
+                                .send(SamplingJob {
+                                    host: Arc::clone(&host),
+                                    id: next.id.clone(),
+                                    ts_micros: now,
+                                    call_id,
+                                })
+                                .is_ok()
+                            {
+                                in_flight.insert(next.id.clone(), next);
+                            } else {
+                                results.push((
+                                    next,
+                                    Err(linsight_plugin_sdk::PluginError::Timeout(
+                                        "sampling pool shut down".into(),
+                                    )),
+                                ));
+                            }
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        for (_id, item) in in_flight.drain() {
+            results.push((
+                item,
+                Err(linsight_plugin_sdk::PluginError::Timeout(format!(
+                    "sample did not complete within {timeout:?}"
+                ))),
+            ));
+        }
+        // Pending jobs never started this tick; leave them for their next
+        // scheduled due time instead of marking them degraded.
+        results
+    }
+}
+
+impl Drop for SamplingPool {
+    fn drop(&mut self) {
+        // Close the job channel so workers unblock from recv() and exit.
+        drop(self.job_tx.take());
+        for handle in self.handles.drain(..) {
+            let _ = handle.join();
+        }
+    }
+}
+
 fn spawn_sampler(
     sched: Arc<Mutex<Scheduler>>,
     clients: ClientMap,
     shutdown: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        let pool = SamplingPool::new(SAMPLER_POOL_SIZE);
         while !shutdown.load(Ordering::Relaxed) {
             // One scheduler owner avoids per-client pumps racing to advance
             // global due times. Use the protocol minimum so clients that ask
@@ -296,13 +493,7 @@ fn spawn_sampler(
                 let mut s = sched.lock().unwrap();
                 (s.host(), s.tick_plan(now))
             };
-            let results: Vec<_> = plan
-                .into_iter()
-                .map(|item| {
-                    let sample = host.sample_to(&item.id, now);
-                    (item, sample)
-                })
-                .collect();
+            let results = pool.sample(host, plan, now, SAMPLE_TIMEOUT);
             let samples = {
                 let mut s = sched.lock().unwrap();
                 s.tick_commit(results, now)
@@ -331,7 +522,9 @@ fn spawn_sampler(
                     let subs = subscriptions.lock().unwrap();
                     samples
                         .iter()
-                        .filter(|sample| subs.contains_key(&sample.sensor))
+                        .filter(|sample| {
+                            subs.keys().any(|(sensor_id, _period)| sensor_id == &sample.sensor)
+                        })
                         .cloned()
                         .collect()
                 };
@@ -420,13 +613,17 @@ fn serve(
     let peer = stream.peer_addr().ok();
     info!(?peer, "client connected");
     // Bound the time a quiet client can hold a worker thread before sending
-    // Hello. We clear this once the handshake completes so steady-state
-    // reads can block indefinitely waiting for client commands. The
-    // `read_clone` keeps a handle to the read end so we can re-tune the
-    // timeout after handshake without poking at `FrameReader` internals.
+    // Hello. After handshake we switch to the idle read timeout and set a
+    // per-message write timeout so a stuck peer cannot pin the pump thread
+    // forever. The `read_clone` keeps a handle to the read end so we can
+    // re-tune the timeout after handshake without poking at `FrameReader`
+    // internals.
     let read_clone = stream.try_clone().map_err(FrameError::Io)?;
     read_clone.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).map_err(FrameError::Io)?;
     let mut reader = FrameReader::new(read_clone.try_clone().map_err(FrameError::Io)?);
+    // The writer uses the original stream; set its write timeout before
+    // wrapping it so RPC responses and pumped samples share the same bound.
+    stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(FrameError::Io)?;
     let writer = Arc::new(Mutex::new(FrameWriter::new(stream)));
 
     // 1) Handshake.
@@ -474,10 +671,11 @@ fn serve(
         plugins,
     })?;
 
-    // Clear the handshake timeout so subscribed clients can wait quietly for
-    // pushed samples without being kicked. Same FD as the reader (it's a
-    // clone of the same socket), so the kernel-side timeout applies.
-    read_clone.set_read_timeout(None).map_err(FrameError::Io)?;
+    // Replace the handshake timeout with an idle read timeout so stale or
+    // half-open clients are eventually evicted instead of holding a session
+    // forever. Same FD as the reader (it's a clone of the same socket), so
+    // the kernel-side timeout applies.
+    read_clone.set_read_timeout(Some(CLIENT_IDLE_READ_TIMEOUT)).map_err(FrameError::Io)?;
 
     // Register ourselves as an outbound target so the shared sampler and
     // SetNickname RPCs can push messages for this client. The receiver is
@@ -559,13 +757,27 @@ fn serve(
                         let mut s = sched.lock().unwrap();
                         let mut local = subscriptions.lock().unwrap();
                         for id in &sensors {
-                            match s.subscribe(id, rate_hz) {
-                                Ok(subscription) => {
-                                    local.entry(id.clone()).or_default().push(subscription);
-                                }
+                            // Idempotent subscribe: a client already holding
+                            // this (sensor, period) token does not need a new
+                            // scheduler refcount. This prevents duplicate GUI
+                            // subscriptions from leaking memory.
+                            let subscription = match s.subscribe(id, rate_hz) {
+                                Ok(sub) => sub,
                                 Err(e) => {
                                     warn!(error = ?e, "subscribe rejected");
                                     degraded.push((id.clone(), e.to_string()));
+                                    continue;
+                                }
+                            };
+                            let key = (id.clone(), subscription.period_micros());
+                            match local.entry(key) {
+                                std::collections::hash_map::Entry::Vacant(e) => {
+                                    e.insert(subscription);
+                                }
+                                std::collections::hash_map::Entry::Occupied(_) => {
+                                    // Duplicate: drop the scheduler-side refcount
+                                    // we just acquired so it stays balanced.
+                                    s.unsubscribe(&subscription);
                                 }
                             }
                         }
@@ -583,12 +795,17 @@ fn serve(
                     {
                         let mut local = subscriptions.lock().unwrap();
                         for id in &sensors {
-                            if let Some(entries) = local.get_mut(id) {
-                                if let Some(subscription) = entries.pop() {
+                            // Remove every (sensor, period) token held by this
+                            // client. `Unsubscribe` carries no rate, so the
+                            // only sensible interpretation is "stop all".
+                            let keys_to_remove: Vec<_> = local
+                                .keys()
+                                .filter(|(sensor_id, _period)| sensor_id == id)
+                                .cloned()
+                                .collect();
+                            for key in keys_to_remove {
+                                if let Some(subscription) = local.remove(&key) {
                                     removed.push(subscription);
-                                }
-                                if entries.is_empty() {
-                                    local.remove(id);
                                 }
                             }
                         }
@@ -629,7 +846,7 @@ fn serve(
     clients.lock().unwrap().remove(&client_id);
     let removed: Vec<_> = {
         let mut local = subscriptions.lock().unwrap();
-        local.drain().flat_map(|(_sensor, entries)| entries).collect()
+        local.drain().map(|(_key, subscription)| subscription).collect()
     };
     if !removed.is_empty() {
         let mut s = sched.lock().unwrap();
@@ -1083,6 +1300,8 @@ mod tests {
     use linsight_core::{Category, SensorId, SensorKind, Unit};
 
     use super::*;
+    use crate::plugin_host::PluginHost;
+    use crate::scheduler::{Scheduler, TickItem};
 
     #[test]
     fn rate_limiter_allows_burst_up_to_capacity() {
@@ -1193,5 +1412,48 @@ mod tests {
 
         broadcast_sensor_list(&clients, vec![]);
         assert!(clients.lock().unwrap().is_empty(), "dead receiver should be removed");
+    }
+
+    #[test]
+    fn subscribe_is_idempotent_per_client() {
+        // Mirrors the `Subscribe` handler's bookkeeping to ensure a duplicate
+        // (sensor, period) does not inflate the scheduler refcount.
+        let host = PluginHost::with_builtins();
+        let mut sched = Scheduler::new(host);
+        let id = SensorId::new("cpu.util");
+        let mut local = ClientSubscriptions::new();
+
+        let first = sched.subscribe(&id, None).unwrap();
+        let key = (id.clone(), first.period_micros());
+        local.insert(key, first);
+
+        let duplicate = sched.subscribe(&id, None).unwrap();
+        let duplicate_period = duplicate.period_micros();
+        let key = (id.clone(), duplicate_period);
+        match local.entry(key) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(duplicate);
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {
+                sched.unsubscribe(&duplicate);
+            }
+        }
+
+        assert_eq!(local.len(), 1, "duplicate subscribe should not add a second token");
+
+        // Removing the single client token should drop the scheduler entry.
+        let sub = local.remove(&(id.clone(), duplicate_period)).unwrap();
+        sched.unsubscribe(&sub);
+        assert!(sched.tick_plan(1_000_000).is_empty());
+    }
+
+    #[test]
+    fn sampling_pool_samples_due_sensors() {
+        let host = PluginHost::with_builtins();
+        let pool = SamplingPool::new(2);
+        let plan = vec![TickItem { id: SensorId::new("cpu.util") }];
+        let results = pool.sample(Arc::new(host), plan, 1_000_000, Duration::from_secs(5));
+        assert_eq!(results.len(), 1);
+        assert!(results[0].1.is_ok(), "pool should produce a sample: {:?}", results[0].1);
     }
 }

@@ -23,6 +23,13 @@ pub enum PluginError {
     Unsupported(String),
     #[error("transient: {0}")]
     Transient(String),
+    /// Host-side timeout: a blocking external call or sample did not finish
+    /// within its wall-clock deadline. There is no corresponding
+    /// `RPluginErrorKind::Timeout` because plugins cannot return this across
+    /// the FFI boundary; the daemon synthesizes it when a sample exceeds its
+    /// deadline.
+    #[error("timeout: {0}")]
+    Timeout(String),
     /// ABI v4 host-side validation failure on a plugin's manifest. This
     /// variant has no corresponding `RPluginError` discriminant — the
     /// daemon synthesizes it during `host_init` after inspecting the
@@ -67,6 +74,10 @@ impl From<PluginError> for RPluginError {
             PluginError::Parse(s) => (RPluginErrorKind::Parse, s),
             PluginError::Unsupported(s) => (RPluginErrorKind::Unsupported, s),
             PluginError::Transient(s) => (RPluginErrorKind::Transient, s),
+            // `Timeout` is host-side only — see the variant doc. Route it
+            // through `Transient` so a plugin that somehow produces it does
+            // not force the host to abort on an unknown discriminant.
+            PluginError::Timeout(s) => (RPluginErrorKind::Transient, format!("timeout: {s}")),
             // `Manifest` is host-side only — see the variant doc. If a
             // plugin somehow returns one (it shouldn't be able to: there
             // is no `RPluginErrorKind::Manifest`), route it through `Io`

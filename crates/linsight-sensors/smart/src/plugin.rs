@@ -332,9 +332,11 @@ mod tests {
 
     #[test]
     fn success_clears_udisks_backoff() {
-        let mut inner = Inner::default();
-        inner.timeout_strikes = 1;
-        inner.backoff_until = Some(Instant::now() - Duration::from_millis(1));
+        let mut inner = Inner {
+            timeout_strikes: 1,
+            backoff_until: Some(Instant::now() - Duration::from_millis(1)),
+            ..Default::default()
+        };
         let drives =
             fetch_smart_drives_timeout_with(&mut inner, ok_udisks, Duration::from_millis(50))
                 .unwrap();
@@ -345,8 +347,10 @@ mod tests {
 
     #[test]
     fn active_backoff_returns_unsupported_immediately() {
-        let mut inner = Inner::default();
-        inner.backoff_until = Some(Instant::now() + Duration::from_secs(60));
+        let mut inner = Inner {
+            backoff_until: Some(Instant::now() + Duration::from_secs(60)),
+            ..Default::default()
+        };
         let err =
             fetch_smart_drives_timeout_with(&mut inner, hang_udisks, Duration::from_millis(50))
                 .unwrap_err();

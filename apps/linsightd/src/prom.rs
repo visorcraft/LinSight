@@ -24,6 +24,7 @@
 //! timestamp for consistency, but sample under smaller lock acquisitions so
 //! GUI/CLI subscription work is not blocked behind one full scrape.
 
+use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -33,7 +34,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use linsight_core::{HardwareDeviceKey, Reading, Sample};
+use linsight_core::{HardwareDevice, HardwareDeviceKey, Reading, Sample};
 use linsight_plugin_sdk::SensorDescriptor;
 use tracing::{info, warn};
 
@@ -43,6 +44,10 @@ use crate::scheduler::Scheduler;
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_PROM_CONNECTIONS: usize = 10;
 const PROM_READ_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(not(test))]
+const PROM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const PROM_WRITE_TIMEOUT: Duration = Duration::from_millis(100);
 const MAX_REQUEST_LINE_BYTES: usize = 2048;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 
@@ -178,6 +183,7 @@ fn serve_one(
     scheduler: Arc<Mutex<Scheduler>>,
     registry: Arc<RwLock<HardwareRegistry>>,
 ) -> Result<()> {
+    stream.set_write_timeout(Some(PROM_WRITE_TIMEOUT))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
     let request_line = match read_limited_line(&mut reader, MAX_REQUEST_LINE_BYTES) {
@@ -251,7 +257,7 @@ fn serve_one(
 /// `device_key` via `HardwareRegistry::key_for` when the descriptor
 /// doesn't carry one (older plugins predating ABI v4's `device_key` field
 /// still ship through the same exporter path).
-type ScrapeRow = (SensorDescriptor, Option<Sample>, String);
+type ScrapeRow = (SensorDescriptor, Option<Sample>, String, Option<HardwareDeviceKey>);
 type ScrapeTarget = (SensorDescriptor, String);
 
 /// Acquire the scheduler + registry locks, build the per-scrape input,
@@ -267,9 +273,24 @@ fn render_for_scrape(scheduler: &Mutex<Scheduler>, registry: &RwLock<HardwareReg
         let s = scheduler.lock().unwrap();
         s.scrape_targets()
     };
-    let snapshot = collect_scrape_rows(scheduler, targets, now);
-    let reg = registry.read().unwrap();
-    render(&reg, &snapshot)
+    let rows = collect_scrape_rows(scheduler, targets, now);
+    // Resolve device keys and snapshot the hardware registry under the read
+    // lock, then render outside the lock so long scrapes do not block
+    // SetNickname or other registry writers.
+    let (snapshot, devices, nicknames) = {
+        let reg = registry.read().unwrap();
+        let snapshot: Vec<ScrapeRow> = rows
+            .into_iter()
+            .map(|(d, sample, plugin_id, _)| {
+                let device_key = d.device_key.clone().or_else(|| {
+                    d.device_id.as_ref().and_then(|did| reg.key_for(&plugin_id, did).cloned())
+                });
+                (d, sample, plugin_id, device_key)
+            })
+            .collect();
+        (snapshot, reg.snapshot(), reg.nicknames_snapshot())
+    };
+    render(&devices, &nicknames, &snapshot)
 }
 
 fn collect_scrape_rows(
@@ -298,34 +319,35 @@ where
             s.host()
         };
         let sample = host.sample_to(&descriptor.id, now).ok();
-        rows.push((descriptor, sample, plugin_id));
+        rows.push((descriptor, sample, plugin_id, None));
         after_sample(scheduler);
     }
     rows
 }
 
-/// Pure render: take a hardware registry snapshot + a vector of
-/// `(descriptor, sample, plugin_id)` rows, emit the Prometheus text
-/// exposition body. No locks, no IO — exercised directly by the unit
-/// tests below.
-fn render(registry: &HardwareRegistry, snapshot: &[ScrapeRow]) -> String {
+/// Pure render: take a hardware device snapshot, a nickname map, and a
+/// vector of `(descriptor, sample, plugin_id, resolved_device_key)` rows,
+/// emit the Prometheus text exposition body. No locks, no IO — exercised
+/// directly by the unit tests below.
+fn render(
+    devices: &[HardwareDevice],
+    nicknames: &HashMap<String, String>,
+    snapshot: &[ScrapeRow],
+) -> String {
     let mut out = String::new();
     out.push_str("# linsight Prometheus exporter\n");
-    for (d, sample, plugin_id) in snapshot {
+    for (d, sample, _plugin_id, device_key) in snapshot {
         let Some(sample) = sample else { continue };
         let metric = sanitize_metric_name(d.id.as_str());
         let unit = d.unit.symbol();
 
-        // Resolve the device_key: prefer the descriptor's own value (set
-        // by ABI v4 plugins via `SensorDescriptor::device_key`), else
-        // fall back to a `(plugin_id, device_id)` lookup against the
-        // registry. Sensors with no device binding emit unlabeled — we
-        // do NOT add an empty `device_key=""` because Prometheus treats
-        // `{}` and `{device_key=""}` as distinct time series.
-        let device_key: Option<&HardwareDeviceKey> = d
-            .device_key
-            .as_ref()
-            .or_else(|| d.device_id.as_ref().and_then(|did| registry.key_for(plugin_id, did)));
+        // `device_key` was resolved under the registry read lock in
+        // `render_for_scrape`; fall back to the descriptor's own value for
+        // direct test callers. Sensors with no device binding emit
+        // unlabeled — we do NOT add an empty `device_key=""` because
+        // Prometheus treats `{}` and `{device_key=""}` as distinct time
+        // series.
+        let device_key: Option<&HardwareDeviceKey> = device_key.as_ref().or(d.device_key.as_ref());
 
         match sample.reading {
             Reading::Scalar(v) => {
@@ -348,12 +370,10 @@ fn render(registry: &HardwareRegistry, snapshot: &[ScrapeRow]) -> String {
     // join per-sample metrics (which carry only `device_key`) against
     // model / vendor / nickname / plugin_id without re-fetching the
     // hardware catalogue over gRPC.
-    let devices = registry.snapshot();
-    let nicks = registry.nicknames_snapshot();
     out.push_str("# HELP linsight_hardware_info Static hardware metadata\n");
     out.push_str("# TYPE linsight_hardware_info gauge\n");
     for dev in devices {
-        let nickname = nicks.get(dev.key.as_str()).cloned().unwrap_or_default();
+        let nickname = nicknames.get(dev.key.as_str()).cloned().unwrap_or_default();
         let vendor = dev.vendor.as_deref().unwrap_or("");
         let _ = write!(out, "linsight_hardware_info{{device_key=\"");
         push_escaped_label(&mut out, dev.key.as_str());
@@ -469,6 +489,20 @@ mod tests {
         Sample { sensor: SensorId::new(id), ts_micros: 1_000_000, reading: Reading::Scalar(v) }
     }
 
+    fn resolve_rows(
+        reg: &HardwareRegistry,
+        rows: Vec<(SensorDescriptor, Option<Sample>, String)>,
+    ) -> Vec<ScrapeRow> {
+        rows.into_iter()
+            .map(|(d, sample, plugin_id)| {
+                let device_key = d.device_key.clone().or_else(|| {
+                    d.device_id.as_ref().and_then(|did| reg.key_for(&plugin_id, did).cloned())
+                });
+                (d, sample, plugin_id, device_key)
+            })
+            .collect()
+    }
+
     fn test_scheduler() -> Arc<Mutex<Scheduler>> {
         Arc::new(Mutex::new(Scheduler::new(PluginHost::with_builtins())))
     }
@@ -513,7 +547,7 @@ mod tests {
             Some(sample_scalar("xe.gpu0.util", 27.6)),
             "com.visorcraft.linsight.xe".to_owned(),
         )];
-        let body = render(&reg, &rows);
+        let body = render(&reg.snapshot(), &reg.nicknames_snapshot(), &resolve_rows(&reg, rows));
         assert!(
             body.contains(r#"device_key="pci:0000:06:00.0""#),
             "expected device_key label on per-sample line; body was:\n{body}",
@@ -528,7 +562,7 @@ mod tests {
     #[test]
     fn exporter_emits_hardware_info_block() {
         let reg = test_registry();
-        let body = render(&reg, &[]);
+        let body = render(&reg.snapshot(), &reg.nicknames_snapshot(), &[]);
         assert!(body.contains("# HELP linsight_hardware_info"));
         assert!(body.contains("# TYPE linsight_hardware_info gauge"));
         assert!(body.contains(r#"device_key="pci:0000:06:00.0""#));
@@ -554,7 +588,7 @@ mod tests {
         raw_nicks.insert(key.as_str().to_owned(), "a\"b\\c\nd".to_owned());
         let d = [dev("pci:0000:06:00.0", "Intel Arc B-series", Some("Intel Corporation"))];
         let reg = HardwareRegistry::build(&[("com.visorcraft.linsight.xe", &d, &[])], raw_nicks);
-        let body = render(&reg, &[]);
+        let body = render(&reg.snapshot(), &reg.nicknames_snapshot(), &[]);
         assert!(
             body.contains(r#"nickname="a\"b\\c\nd""#),
             "label escape failed; body had:\n{body}",
@@ -573,7 +607,7 @@ mod tests {
             Some(sample_scalar("mem.used", 1.5)),
             "com.visorcraft.linsight.mem".to_owned(),
         )];
-        let body = render(&reg, &rows);
+        let body = render(&reg.snapshot(), &reg.nicknames_snapshot(), &resolve_rows(&reg, rows));
         assert!(
             body.contains("linsight_mem_used{"),
             "expected the unlabeled metric line; body was:\n{body}",
@@ -603,7 +637,7 @@ mod tests {
             Some(sample_scalar("xe.gpu0.util", 50.0)),
             "com.visorcraft.linsight.xe".to_owned(),
         )];
-        let body = render(&reg, &rows);
+        let body = render(&reg.snapshot(), &reg.nicknames_snapshot(), &resolve_rows(&reg, rows));
         assert!(
             body.contains(r#"device_key="pci:0000:06:00.0""#),
             "expected device_key resolved via key_for; body was:\n{body}",

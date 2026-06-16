@@ -47,6 +47,15 @@ pub type ClientHandle = Arc<Client>;
 /// ticks (~230 sensors/tick) so normal jitter never triggers drops.
 const SAMPLE_CHANNEL_CAP: usize = 512;
 
+/// Idle socket timeout. If the daemon or SSH tunnel freezes and no
+/// frame is exchanged within this window, the reader/writer returns
+/// instead of blocking forever.
+const DAEMON_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const DAEMON_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Wall-clock cap for `ssh ... printenv XDG_RUNTIME_DIR` discovery.
+const SSH_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Error type for the v2 request/response RPCs (`get_hardware`,
 /// `set_nickname`). The reader thread parks the caller on an
 /// `mpsc::channel`; the variants below cover every way that wait can
@@ -142,7 +151,7 @@ impl Client {
         let local_socket =
             std::env::temp_dir().join(format!("linsight-remote-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&local_socket);
-        let ssh = Command::new("ssh")
+        let mut ssh = Command::new("ssh")
             .args(["-N", "-L", &format!("{}:{}", local_socket.display(), remote_socket), target])
             .spawn()
             .context("spawning ssh -L")?;
@@ -150,6 +159,9 @@ impl Client {
         let deadline = Instant::now() + Duration::from_secs(10);
         let stream = loop {
             if Instant::now() > deadline {
+                let _ = ssh.kill();
+                let _ = ssh.wait();
+                let _ = std::fs::remove_file(&local_socket);
                 anyhow::bail!("ssh -L to {target} did not establish the socket within 10s");
             }
             match UnixStream::connect(&local_socket) {
@@ -158,7 +170,15 @@ impl Client {
             }
         };
         info!(target, remote = %remote_socket, "attached to remote daemon over ssh");
-        let client = Self::finish_handshake(stream, None)?;
+        let client = match Self::finish_handshake(stream, None) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = ssh.kill();
+                let _ = ssh.wait();
+                let _ = std::fs::remove_file(&local_socket);
+                return Err(e);
+            }
+        };
         // Stash ssh child + socket path so Drop cleans both up.
         *client.ssh_child.lock().unwrap() = Some(ssh);
         *client.ssh_socket_path.lock().unwrap() = Some(local_socket);
@@ -171,7 +191,19 @@ impl Client {
     }
 
     fn finish_handshake(stream: UnixStream, child: Option<Child>) -> Result<ClientHandle> {
+        stream
+            .set_read_timeout(Some(DAEMON_READ_TIMEOUT))
+            .context("set daemon socket read timeout")?;
+        stream
+            .set_write_timeout(Some(DAEMON_WRITE_TIMEOUT))
+            .context("set daemon socket write timeout")?;
         let read_stream = stream.try_clone().context("clone stream")?;
+        read_stream
+            .set_read_timeout(Some(DAEMON_READ_TIMEOUT))
+            .context("set daemon socket read timeout on reader clone")?;
+        read_stream
+            .set_write_timeout(Some(DAEMON_WRITE_TIMEOUT))
+            .context("set daemon socket write timeout on reader clone")?;
         let mut reader = FrameReader::new(read_stream);
         let mut writer = FrameWriter::new(stream);
 
@@ -524,7 +556,7 @@ fn connect_or_spawn_inner(socket: &Path) -> Result<(UnixStream, Option<Child>)> 
     // pointing at a path with arbitrary OS bytes) and unwrap would panic.
     let mut cmd = Command::new(&bin);
     cmd.arg("--socket").arg(socket);
-    let child = cmd.spawn().with_context(|| format!("spawning {}", bin.display()))?;
+    let mut child = cmd.spawn().with_context(|| format!("spawning {}", bin.display()))?;
 
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline {
@@ -533,6 +565,8 @@ fn connect_or_spawn_inner(socket: &Path) -> Result<(UnixStream, Option<Child>)> 
         }
         thread::sleep(Duration::from_millis(50));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     anyhow::bail!("daemon at {} did not bind socket within 3s", bin.display())
 }
 
@@ -550,18 +584,72 @@ fn locate_linsightd() -> Result<PathBuf> {
     Ok(PathBuf::from("linsightd"))
 }
 
+/// Run a `Command` with a wall-clock timeout, killing the child if it does
+/// not finish in time. stdout/stderr are piped and drained by helper threads
+/// so that commands producing more than a pipe's worth of output do not
+/// deadlock, while the parent thread retains ownership of the `Child` and
+/// can therefore kill it on timeout.
+fn run_command_with_timeout(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output> {
+    use std::process::Stdio;
+
+    let mut child =
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("spawning command")?;
+
+    let mut stdout_pipe = child.stdout.take().expect("piped stdout");
+    let mut stderr_pipe = child.stderr.take().expect("piped stderr");
+    let stdout_buf = Arc::new(Mutex::new(Vec::new()));
+    let stderr_buf = Arc::new(Mutex::new(Vec::new()));
+    let stdout_thread = thread::spawn({
+        let stdout_buf = Arc::clone(&stdout_buf);
+        move || {
+            let _ = std::io::Read::read_to_end(&mut stdout_pipe, &mut stdout_buf.lock().unwrap());
+        }
+    });
+    let stderr_thread = thread::spawn({
+        let stderr_buf = Arc::clone(&stderr_buf);
+        move || {
+            let _ = std::io::Read::read_to_end(&mut stderr_pipe, &mut stderr_buf.lock().unwrap());
+        }
+    });
+
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait().context("waiting for command")? {
+            Some(status) => break status,
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    stdout_thread.join().unwrap();
+                    stderr_thread.join().unwrap();
+                    anyhow::bail!("command timed out after {timeout:?}")
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    };
+
+    stdout_thread.join().unwrap();
+    stderr_thread.join().unwrap();
+    Ok(std::process::Output {
+        status,
+        stdout: stdout_buf.lock().unwrap().clone(),
+        stderr: stderr_buf.lock().unwrap().clone(),
+    })
+}
+
 /// Ask the remote host where to find its LinSight socket. Runs
 /// `printenv XDG_RUNTIME_DIR` over SSH; if unset, falls back to `/run/user/$(id -u)`.
 fn discover_remote_socket(target: &str) -> Result<String> {
-    let out = Command::new("ssh")
-        .args([
-            target,
-            "sh",
-            "-c",
-            "printf %s \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\"/linsight.sock",
-        ])
-        .output()
-        .context("running ssh to discover remote socket path")?;
+    let mut cmd = Command::new("ssh");
+    cmd.args([
+        target,
+        "sh",
+        "-c",
+        "printf %s \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\"/linsight.sock",
+    ]);
+    let out = run_command_with_timeout(&mut cmd, SSH_DISCOVERY_TIMEOUT)
+        .with_context(|| format!("running ssh to discover remote socket path for {target}"))?;
     if !out.status.success() {
         anyhow::bail!("ssh to {target} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
@@ -885,5 +973,51 @@ mod tests {
         let runner = DispatchRunner::spawn(sample_tx);
         // Dropping the runner closes the server-side socket, producing EOF.
         runner.join();
+    }
+
+    #[test]
+    fn run_command_with_timeout_returns_output() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo hello; echo err >&2"]);
+        let out = run_command_with_timeout(&mut cmd, Duration::from_secs(5)).unwrap();
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hello");
+        assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "err");
+    }
+
+    #[test]
+    fn run_command_with_timeout_kills_lingering_child() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pid_file = tmp.path().join("pid");
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(format!("echo $$ > {}; exec sleep 60", pid_file.display()));
+        let err = run_command_with_timeout(&mut cmd, Duration::from_millis(200)).unwrap_err();
+        assert!(err.to_string().contains("timed out"), "err: {err}");
+        // Give the kernel a moment to reap the process after wait().
+        thread::sleep(Duration::from_millis(100));
+        let pid = std::fs::read_to_string(&pid_file).unwrap().trim().parse::<u32>().unwrap();
+        let status = Command::new("kill").arg("-0").arg(pid.to_string()).status().unwrap();
+        assert!(!status.success(), "child {pid} was not killed after timeout");
+    }
+
+    #[test]
+    fn validate_ssh_target_accepts_normal_host() {
+        validate_ssh_target("host").unwrap();
+        validate_ssh_target("host:2222").unwrap();
+        validate_ssh_target("user@host").unwrap();
+        validate_ssh_target("user@host:2222").unwrap();
+    }
+
+    #[test]
+    fn validate_ssh_target_rejects_option_injection() {
+        assert!(validate_ssh_target("-oProxyCommand=evil").is_err());
+        assert!(validate_ssh_target("user@-oBad=yes").is_err());
+    }
+
+    #[test]
+    fn validate_ssh_target_rejects_empty_and_control_chars() {
+        assert!(validate_ssh_target("").is_err());
+        assert!(validate_ssh_target("host\n").is_err());
+        assert!(validate_ssh_target("host\t").is_err());
     }
 }

@@ -67,6 +67,15 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// never cut off. Prevents slow-loris attacks where an authenticated client
 /// holds connection slots by opening connections and going silent.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+/// Per-direction I/O timeout for individual `write_all` and `shutdown`
+/// operations inside [`copy_bidirectional_idle`]. A stuck peer that accepts
+/// data but never drains its receive buffer (or never completes a TLS
+/// close-notify) can otherwise block a tunnel task forever and leak a
+/// connection slot.
+#[cfg(not(test))]
+const COPY_IO_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const COPY_IO_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Parser, Debug)]
 #[command(version, about = "LinSight mTLS remote tunnel")]
@@ -687,6 +696,20 @@ async fn handle_client_conn(
 /// `tokio::time::timeout`, which caps total connection lifetime and would kill
 /// healthy long-lived sessions every `idle`. An idle expiry returns an error
 /// with `ErrorKind::TimedOut`.
+async fn write_all_timeout<W: AsyncWrite + Unpin>(w: &mut W, buf: &[u8]) -> std::io::Result<()> {
+    match tokio::time::timeout(COPY_IO_TIMEOUT, w.write_all(buf)).await {
+        Ok(r) => r,
+        Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "write timeout")),
+    }
+}
+
+async fn shutdown_timeout<W: AsyncWrite + Unpin>(w: &mut W) {
+    // Shutdown is best-effort: we are already closing the tunnel. If the
+    // peer never completes the TLS close-notify, give up after the I/O
+    // timeout rather than leaking the task.
+    let _ = tokio::time::timeout(COPY_IO_TIMEOUT, w.shutdown()).await;
+}
+
 async fn copy_bidirectional_idle<A, B>(
     a: &mut A,
     b: &mut B,
@@ -711,10 +734,10 @@ where
                 }
                 Ok(Ok(0)) => {
                     a_done = true;
-                    let _ = b.shutdown().await;
+                    shutdown_timeout(b).await;
                 }
                 Ok(Ok(n)) => {
-                    b.write_all(&buf_a[..n]).await?;
+                    write_all_timeout(b, &buf_a[..n]).await?;
                     a_to_b += n as u64;
                 }
                 Ok(Err(e)) => return Err(e),
@@ -725,10 +748,10 @@ where
                 }
                 Ok(Ok(0)) => {
                     b_done = true;
-                    let _ = a.shutdown().await;
+                    shutdown_timeout(a).await;
                 }
                 Ok(Ok(n)) => {
-                    a.write_all(&buf_b[..n]).await?;
+                    write_all_timeout(a, &buf_b[..n]).await?;
                     b_to_a += n as u64;
                 }
                 Ok(Err(e)) => return Err(e),
@@ -985,5 +1008,93 @@ mod tests {
         let (a_to_b, b_to_a) = pump.await.unwrap().expect("clean completion");
         assert_eq!(a_to_b, 4);
         assert_eq!(b_to_a, 6);
+    }
+
+    // An `AsyncRead + AsyncWrite` that yields data once on read and then
+    // stalls every I/O operation. Used to exercise the per-operation write
+    // and shutdown timeouts without waiting for real network latency.
+    struct StuckIo {
+        initial_read: Option<Vec<u8>>,
+        write_attempted: bool,
+        shutdown_attempted: bool,
+    }
+
+    impl AsyncRead for StuckIo {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            if let Some(data) = self.initial_read.take() {
+                buf.put_slice(&data);
+                return std::task::Poll::Ready(Ok(()));
+            }
+            std::task::Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for StuckIo {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            self.write_attempted = true;
+            std::task::Poll::Pending
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+
+        fn poll_shutdown(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            self.shutdown_attempted = true;
+            std::task::Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_copy_times_out_on_stuck_write() {
+        // `a` produces one chunk of data; `b` accepts writes but never
+        // completes them. The copy must return TimedOut from the per-write
+        // timeout rather than waiting forever.
+        let mut a = StuckIo {
+            initial_read: Some(b"hello".to_vec()),
+            write_attempted: false,
+            shutdown_attempted: false,
+        };
+        let mut b =
+            StuckIo { initial_read: None, write_attempted: false, shutdown_attempted: false };
+        let err = copy_bidirectional_idle(&mut a, &mut b, Duration::from_secs(30))
+            .await
+            .expect_err("expected write timeout");
+        assert!(b.write_attempted, "write should have been attempted before timing out");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[tokio::test]
+    async fn idle_copy_times_out_on_stuck_shutdown() {
+        // `a` reaches EOF immediately (empty read), which triggers a shutdown
+        // on `b`. When `b` never completes shutdown, the copy must give up
+        // from the bounded shutdown timeout rather than waiting forever. The
+        // remaining idle timeout is kept short so the test finishes quickly.
+        let mut a = StuckIo {
+            initial_read: Some(vec![]),
+            write_attempted: false,
+            shutdown_attempted: false,
+        };
+        let mut b =
+            StuckIo { initial_read: None, write_attempted: false, shutdown_attempted: false };
+        let err = copy_bidirectional_idle(&mut a, &mut b, Duration::from_millis(50))
+            .await
+            .expect_err("expected timeout");
+        assert!(b.shutdown_attempted, "shutdown should have been attempted before timing out");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
     }
 }

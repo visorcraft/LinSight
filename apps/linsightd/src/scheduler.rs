@@ -31,6 +31,10 @@ impl Subscription {
     pub fn sensor(&self) -> &SensorId {
         &self.sensor
     }
+
+    pub fn period_micros(&self) -> u64 {
+        self.period_micros
+    }
 }
 
 struct Entry {
@@ -49,6 +53,10 @@ struct Entry {
     /// a removed/hotplugged-out device doesn't log-spam every tick. Reset
     /// on any successful sample. Cap is applied in `tick()`.
     unsupported_strikes: u32,
+    /// Consecutive `PluginError::Timeout` results, used to back off sensors
+    /// whose blocking external calls (NFS `statvfs`, D-Bus, NVML, etc.)
+    /// repeatedly miss their deadline. Reset on any successful sample.
+    timeout_strikes: u32,
 }
 
 pub struct Scheduler {
@@ -156,6 +164,7 @@ impl Scheduler {
                 last_sampled_at_micros: None,
                 is_static,
                 unsupported_strikes: 0,
+                timeout_strikes: 0,
             });
         Ok(subscription)
     }
@@ -233,6 +242,7 @@ impl Scheduler {
             match result {
                 Ok(sample) => {
                     entry.unsupported_strikes = 0;
+                    entry.timeout_strikes = 0;
                     entry.last_sampled_at_micros = Some(now_micros);
                     if let Some(history) = &self.history {
                         history.record(sample.clone());
@@ -251,6 +261,18 @@ impl Scheduler {
                         warn!(sensor = %item.id, "plugin no longer supports sensor; backing off");
                     }
                     let backoff_factor = 1u64 << entry.unsupported_strikes.min(8);
+                    entry.next_due_at_micros =
+                        now_micros + entry.period_micros.saturating_mul(backoff_factor);
+                }
+                Err(PluginError::Timeout(_)) => {
+                    // A sample that missed its wall-clock deadline is treated
+                    // like an unsupported sensor: back off exponentially so a
+                    // stuck NFS / GPU / D-Bus call cannot stall every tick.
+                    entry.timeout_strikes = entry.timeout_strikes.saturating_add(1);
+                    if entry.timeout_strikes == 1 {
+                        warn!(sensor = %item.id, "sample timed out; backing off");
+                    }
+                    let backoff_factor = 1u64 << entry.timeout_strikes.min(8);
                     entry.next_due_at_micros =
                         now_micros + entry.period_micros.saturating_mul(backoff_factor);
                 }
@@ -520,5 +542,36 @@ mod tests {
         let mut sched = Scheduler::new(host);
         let err = sched.subscribe(&SensorId::new("ghost"), None).unwrap_err();
         assert!(err.to_string().contains("ghost"));
+    }
+
+    #[test]
+    fn timeout_backs_off_and_resets_on_success() {
+        let host = PluginHost::with_builtins();
+        let mut sched = Scheduler::new(host);
+        let id = SensorId::new("cpu.util");
+        sched.subscribe(&id, None).unwrap();
+
+        // Simulate a timed-out sample.
+        let plan = sched.tick_plan(1_000_000);
+        assert_eq!(plan.len(), 1);
+        let item = plan.into_iter().next().unwrap();
+        let results = vec![(item, Err(PluginError::Timeout("hung".into())))];
+        assert!(sched.tick_commit(results, 1_000_000).is_empty());
+
+        // The next tick at the normal cadence must be skipped because the
+        // timeout strike backed the sensor off.
+        assert!(sched.tick_plan(2_000_000).is_empty(), "sensor should be backed off");
+
+        // After the backoff window the sensor is due again; a successful
+        // sample resets the strike counter so future ticks resume normally.
+        let plan = sched.tick_plan(3_000_000);
+        assert_eq!(plan.len(), 1);
+        let item = plan.into_iter().next().unwrap();
+        let host = sched.host();
+        let sample = host.sample_to(&item.id, 3_000_000).unwrap();
+        let samples = sched.tick_commit(vec![(item, Ok(sample))], 3_000_000);
+        assert_eq!(samples.len(), 1);
+        // Next normal period should produce a sample again.
+        assert_eq!(sched.tick_plan(4_000_000).len(), 1);
     }
 }

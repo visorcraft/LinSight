@@ -29,8 +29,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -50,6 +50,14 @@ const MAX_CONCURRENT_WEBHOOKS: usize = 8;
 /// pruned. The cap is deliberately generous (10× a typical catalogue) so this
 /// path never fires in practice.
 const VALUES_CAP: usize = 4096;
+/// Number of worker threads used for timeboxed alert expression evaluation.
+const EVAL_POOL_SIZE: usize = 4;
+/// Number of worker threads used for async desktop/exec notification dispatch.
+const NOTIFY_POOL_SIZE: usize = 4;
+/// Wall-clock timeout for desktop and `exec:` notify targets. A stuck D-Bus
+/// daemon or hanging notify script cannot stall the sampler path longer than
+/// this.
+const NOTIFY_TIMEOUT: Duration = Duration::from_secs(5);
 
 use linsight_core::{Reading, Sample};
 use linsight_protocol::AlertRuleJson;
@@ -81,17 +89,87 @@ pub enum EvalOutcome {
     Panic,
 }
 
-/// Evaluate a rewritten alert expression **inline**, with no worker thread.
-///
-/// Used by the alert engine's per-tick [`AlertEngine::evaluate_rule`], which
-/// runs on the daemon's synchronous sample path. Spawning a thread and
-/// cloning the whole context for every rule on every tick (as
-/// [`eval_limited`] does) is exactly the hot-path churn the daemon avoids.
-/// Config rules come from a same-user `alerts.toml`, so they are trusted; the
-/// `MAX_EXPR_LEN` cap plus `catch_unwind` (effective under the daemon's
-/// `panic = "unwind"` build) bound the worst case without needing a timeout.
-/// This path therefore never yields [`EvalOutcome::Timeout`].
-pub(crate) fn eval_inline(rewritten_expr: &str, ctx: &HashMapContext) -> EvalOutcome {
+/// Bounded thread pool used for timeboxed alert expression evaluation and
+/// async notification dispatch. Keeps the daemon sampler path from blocking
+/// on D-Bus, hanging exec scripts, or pathological expressions.
+struct WorkerPool {
+    sender: mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>,
+}
+
+impl WorkerPool {
+    fn new(size: usize) -> Self {
+        let (sender, receiver) = mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        for id in 0..size {
+            let rx = Arc::clone(&receiver);
+            std::thread::Builder::new()
+                .name(format!("linsight-alert-{id}"))
+                .spawn(move || {
+                    loop {
+                        let job = rx.lock().unwrap().recv();
+                        match job {
+                            Ok(job) => job(),
+                            Err(_) => break,
+                        }
+                    }
+                })
+                .expect("failed to spawn alert worker");
+        }
+        Self { sender }
+    }
+
+    /// Fire-and-forget job submission.
+    fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let _ = self.sender.send(Box::new(f));
+    }
+
+    /// Submit a job and wait for its result up to `timeout`. A timed-out job
+    /// is abandoned; its worker may still be running until the expression or
+    /// syscall completes, but the caller is never blocked longer than
+    /// `timeout`.
+    #[cfg(test)]
+    fn run_with_timeout<F, T>(&self, f: F, timeout: Duration) -> TimedResult<T>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        let _ = self.sender.send(Box::new(move || {
+            let result = f();
+            let _ = tx.send(result);
+        }));
+        match rx.recv_timeout(timeout) {
+            Ok(v) => TimedResult::Ok(v),
+            Err(_) => TimedResult::Timeout,
+        }
+    }
+}
+
+#[cfg(test)]
+enum TimedResult<T> {
+    Ok(T),
+    Timeout,
+}
+
+/// A notification that must be dispatched asynchronously so the sampler path
+/// is not blocked.
+enum NotifyJob {
+    Desktop { name: String, expr: String },
+    Exec { name: String, target: String, argv: Vec<String> },
+}
+
+/// Work item for evaluating one rule outside the engine lock.
+struct EvalJob {
+    idx: usize,
+    rewritten_expr: String,
+    ctx: HashMapContext,
+}
+
+/// Evaluate a single rewritten expression. Runs inside the worker pool.
+fn eval_single(rewritten_expr: String, ctx: HashMapContext) -> EvalOutcome {
     if rewritten_expr.len() > MAX_EXPR_LEN {
         return EvalOutcome::Err(format!(
             "expression too long ({} bytes, limit {MAX_EXPR_LEN})",
@@ -99,7 +177,7 @@ pub(crate) fn eval_inline(rewritten_expr: &str, ctx: &HashMapContext) -> EvalOut
         ));
     }
     match std::panic::catch_unwind(AssertUnwindSafe(|| {
-        eval_boolean_with_context(rewritten_expr, ctx)
+        eval_boolean_with_context(&rewritten_expr, &ctx)
     })) {
         Ok(Ok(b)) => EvalOutcome::Ok(b),
         Ok(Err(e)) => EvalOutcome::Err(e.to_string()),
@@ -108,11 +186,11 @@ pub(crate) fn eval_inline(rewritten_expr: &str, ctx: &HashMapContext) -> EvalOut
 }
 
 /// Evaluate a rewritten expression in a worker thread with a wall-clock
-/// timeout. Used only by the `TestAlertExpr` RPC, where the expression is
-/// supplied ad hoc by a client (not from trusted config) and the call is
-/// occasional, so a thread + timeout is affordable and guarantees a bounded
-/// response even for a pathological expression. The per-tick alert engine
-/// uses [`eval_inline`] instead, to stay off the daemon hot path.
+/// timeout. Used by the `TestAlertExpr` RPC, where the expression is supplied
+/// ad hoc by a client (not from trusted config) and the call is occasional,
+/// so a thread + timeout is affordable and guarantees a bounded response even
+/// for a pathological expression. The per-tick alert engine uses the shared
+/// worker pool via [`eval_single`] instead.
 ///
 /// Note: a timed-out evaluation leaves its worker thread running until the
 /// expression finishes on its own — Rust cannot cancel a thread — so the
@@ -201,21 +279,57 @@ pub struct AlertEngine {
     event_writer: Option<HistoryWriter>,
 }
 
+struct HandleInner {
+    engine: Mutex<AlertEngine>,
+    eval_pool: WorkerPool,
+    notify_pool: WorkerPool,
+}
+
 #[derive(Clone)]
 pub struct AlertEngineHandle {
-    inner: Arc<Mutex<AlertEngine>>,
+    inner: Arc<HandleInner>,
 }
 
 impl AlertEngineHandle {
     pub fn on_sample(&self, sample: &Sample) {
-        let mut eng = self.inner.lock().unwrap();
-        eng.observe(sample);
+        // Phase 1: update values/context and collect evaluation jobs while
+        // holding the engine lock. Phase 2: evaluate each rule on a bounded
+        // worker pool with a wall-clock timeout, WITHOUT holding the lock, so
+        // a pathological expression cannot block RPCs or other rules. Phase 3:
+        // apply the result under the lock and enqueue notifications. Phase 4:
+        // dispatch notifications asynchronously.
+        let jobs = {
+            let mut eng = self.inner.engine.lock().unwrap();
+            eng.observe(sample)
+        };
+
+        let mut notifications = Vec::new();
+        let mut rxs = Vec::with_capacity(jobs.len());
+        for job in jobs {
+            let (tx, rx) = mpsc::channel();
+            self.inner.eval_pool.execute(move || {
+                let _ = tx.send(eval_single(job.rewritten_expr, job.ctx));
+            });
+            rxs.push((job.idx, rx));
+        }
+        for (idx, rx) in rxs {
+            let outcome = match rx.recv_timeout(EVAL_TIMEOUT) {
+                Ok(o) => o,
+                Err(_) => EvalOutcome::Timeout,
+            };
+            let mut eng = self.inner.engine.lock().unwrap();
+            notifications.extend(eng.apply_eval_result(idx, outcome, Instant::now()));
+        }
+
+        for job in notifications {
+            dispatch_notify(&self.inner.notify_pool, job);
+        }
     }
 
     /// Attach a history writer so alert fire/clear events are persisted
     /// alongside samples.
     pub fn set_event_writer(&self, writer: Option<HistoryWriter>) {
-        let mut eng = self.inner.lock().unwrap();
+        let mut eng = self.inner.engine.lock().unwrap();
         eng.event_writer = writer;
     }
 
@@ -223,7 +337,7 @@ impl AlertEngineHandle {
     /// `limit` caps the number of entries returned; `None` returns all (up to
     /// [`EVENT_CAPACITY`]).
     pub fn list_events_json(&self, limit: Option<u32>) -> String {
-        let eng = self.inner.lock().unwrap();
+        let eng = self.inner.engine.lock().unwrap();
         let cap = limit.map(|n| n as usize).unwrap_or(usize::MAX);
         let slice: Vec<&AlertEvent> = eng.events.iter().take(cap).collect();
         serde_json::to_string(&slice).unwrap_or_else(|_| "[]".to_owned())
@@ -231,7 +345,7 @@ impl AlertEngineHandle {
 
     /// Return a snapshot of all current rules for RPC dispatch.
     pub fn list_rules_json(&self) -> Vec<AlertRuleJson> {
-        let eng = self.inner.lock().unwrap();
+        let eng = self.inner.engine.lock().unwrap();
         eng.rules
             .iter()
             .map(|r| AlertRuleJson {
@@ -257,7 +371,7 @@ impl AlertEngineHandle {
     ) -> Result<(), String> {
         let for_duration = opt_parse_duration(for_duration).map_err(|e| e.to_string())?;
         let cooldown = opt_parse_duration(cooldown).map_err(|e| e.to_string())?;
-        let mut eng = self.inner.lock().unwrap();
+        let mut eng = self.inner.engine.lock().unwrap();
         let referenced_sensors = extract_sensor_refs(expr);
         if let Some(existing) = eng.rules.iter_mut().find(|r| r.name == name) {
             existing.expr = expr.to_string();
@@ -292,7 +406,7 @@ impl AlertEngineHandle {
 
     /// Delete a rule by name. Returns Ok(true) if found and removed, Ok(false) if not found.
     pub fn delete_rule(&self, name: &str) -> Result<bool, String> {
-        let mut eng = self.inner.lock().unwrap();
+        let mut eng = self.inner.engine.lock().unwrap();
         let before = eng.rules.len();
         eng.rules.retain(|r| r.name != name);
         Ok(eng.rules.len() < before)
@@ -301,7 +415,7 @@ impl AlertEngineHandle {
     /// Persist current rules to the alerts TOML config file.
     pub fn save_config(&self, path: &std::path::Path) -> Result<(), String> {
         let config = {
-            let eng = self.inner.lock().unwrap();
+            let eng = self.inner.engine.lock().unwrap();
             AlertsConfig {
                 rules: eng
                     .rules
@@ -376,15 +490,21 @@ impl AlertEngine {
     }
 
     pub fn into_handle(self) -> AlertEngineHandle {
-        AlertEngineHandle { inner: Arc::new(Mutex::new(self)) }
+        AlertEngineHandle {
+            inner: Arc::new(HandleInner {
+                engine: Mutex::new(self),
+                eval_pool: WorkerPool::new(EVAL_POOL_SIZE),
+                notify_pool: WorkerPool::new(NOTIFY_POOL_SIZE),
+            }),
+        }
     }
 
-    fn observe(&mut self, sample: &Sample) {
+    fn observe(&mut self, sample: &Sample) -> Vec<EvalJob> {
         let id = sample.sensor.as_str().to_string();
         let val = match &sample.reading {
             Reading::Scalar(v) => *v,
             Reading::Counter(v) => *v as f64,
-            _ => return,
+            _ => return Vec::new(),
         };
         // Defensive cap: a misbehaving plugin emitting transient sensor IDs
         // could grow `values` without bound. When the cap is exceeded, prune
@@ -397,19 +517,20 @@ impl AlertEngine {
         // sample) instead of rebuilding the full context per rule eval.
         let _ = self.ctx.set_value(id.replace('.', "__"), Value::Float(val));
 
-        let now = Instant::now();
-        let mut to_eval: Vec<usize> = Vec::new();
+        let mut jobs = Vec::new();
         for (i, rule) in self.rules.iter().enumerate() {
             if !rule.enabled {
                 continue;
             }
             if rule.referenced_sensors.iter().any(|s| s == &id) {
-                to_eval.push(i);
+                jobs.push(EvalJob {
+                    idx: i,
+                    rewritten_expr: rule.rewritten_expr.clone(),
+                    ctx: self.ctx.clone(),
+                });
             }
         }
-        for i in to_eval {
-            self.evaluate_rule(i, now);
-        }
+        jobs
     }
 
     /// Drop all `values` entries that are not referenced by any enabled rule.
@@ -436,63 +557,54 @@ impl AlertEngine {
         }
     }
 
-    fn evaluate_rule(&mut self, idx: usize, now: Instant) {
-        // Read rule metadata without holding a mutable borrow on self.rules,
-        // so we can also write to self.events after evaluation.
-        let (
-            name,
-            rewritten_expr,
-            expr,
-            for_duration,
-            cooldown,
-            notify,
-            prev_fired,
-            triggered_at,
-            last_fired_at,
-        ) = {
-            let rule = &self.rules[idx];
-            (
-                rule.name.clone(),
-                rule.rewritten_expr.clone(),
-                rule.expr.clone(),
-                rule.for_duration,
-                rule.cooldown,
-                rule.notify.clone(),
-                rule.fired,
-                rule.triggered_at,
-                rule.last_fired_at,
-            )
-        };
-        // The context is maintained incrementally in observe() — no per-eval
-        // rebuild needed. Inline (no per-tick worker thread) — see
-        // `eval_inline`. Trusted config + length cap + catch_unwind; never
-        // returns `Timeout`.
-        let truthy = match eval_inline(&rewritten_expr, &self.ctx) {
+    /// Apply the boolean outcome of a single rule evaluation. Returns any
+    /// desktop/exec notification jobs that must be dispatched asynchronously.
+    fn apply_eval_result(
+        &mut self,
+        idx: usize,
+        outcome: EvalOutcome,
+        now: Instant,
+    ) -> Vec<NotifyJob> {
+        let rule = &self.rules[idx];
+        let prev_fired = rule.fired;
+        let truthy = match outcome {
             EvalOutcome::Ok(b) => b,
             EvalOutcome::Err(e) => {
-                warn!(rule = %name, error = %e, "alert expression failed to evaluate");
-                return;
+                warn!(rule = %rule.name, error = %e, "alert expression failed to evaluate");
+                return Vec::new();
             }
             EvalOutcome::Timeout => {
-                warn!(rule = %name, "alert expression timed out");
-                return;
+                warn!(rule = %rule.name, "alert expression timed out");
+                return Vec::new();
             }
             EvalOutcome::Panic => {
-                warn!(rule = %name, "alert expression panicked");
-                return;
+                warn!(rule = %rule.name, "alert expression panicked");
+                return Vec::new();
             }
         };
 
+        // Clone rule metadata before mutating so we can build notifications
+        // without holding a borrow on self.rules.
+        let name = rule.name.clone();
+        let expr = rule.expr.clone();
+        let for_duration = rule.for_duration;
+        let cooldown = rule.cooldown;
+        let notify = rule.notify.clone();
+        let triggered_at = rule.triggered_at;
+        let last_fired_at = rule.last_fired_at;
+        let rule = &mut self.rules[idx];
+
+        let mut notifications = Vec::new();
         if truthy {
             let new_triggered_at = triggered_at.unwrap_or(now);
-            self.rules[idx].triggered_at = Some(new_triggered_at);
+            rule.triggered_at = Some(new_triggered_at);
             if !prev_fired && now.duration_since(new_triggered_at) >= for_duration {
                 let within_cooldown =
                     last_fired_at.is_some_and(|last| now.duration_since(last) < cooldown);
                 if !within_cooldown {
-                    self.rules[idx].fired = true;
-                    self.rules[idx].last_fired_at = Some(now);
-                    fire(&name, &expr, &notify);
+                    rule.fired = true;
+                    rule.last_fired_at = Some(now);
+                    notifications.extend(build_notifications(&name, &expr, &notify));
                     self.push_event(AlertEvent {
                         rule: name,
                         ts_micros: wall_micros(),
@@ -501,8 +613,8 @@ impl AlertEngine {
                 }
             }
         } else {
-            self.rules[idx].triggered_at = None;
-            self.rules[idx].fired = false;
+            rule.triggered_at = None;
+            rule.fired = false;
             if prev_fired {
                 self.push_event(AlertEvent {
                     rule: name,
@@ -511,6 +623,7 @@ impl AlertEngine {
                 });
             }
         }
+        notifications
     }
 
     /// Push an event to the front of the ring buffer (newest-first), evicting
@@ -539,17 +652,15 @@ fn wall_micros() -> u64 {
     }
 }
 
-fn fire(name: &str, expr: &str, notify: &[String]) {
+/// Build async notification jobs for desktop/exec targets. Webhook targets are
+/// already asynchronous and bounded, so they are fired inline; `shell:` and
+/// unknown targets are logged and dropped.
+fn build_notifications(name: &str, expr: &str, notify: &[String]) -> Vec<NotifyJob> {
     debug!(rule = %name, expr = %expr, "alert firing");
+    let mut jobs = Vec::new();
     for target in notify {
         if target == "desktop" {
-            if let Err(e) = notify_rust::Notification::new()
-                .summary(&format!("LinSight: {name}"))
-                .body(&format!("Condition true: {expr}"))
-                .show()
-            {
-                warn!(error = ?e, "desktop notification failed");
-            }
+            jobs.push(NotifyJob::Desktop { name: name.to_owned(), expr: expr.to_owned() });
         } else if let Some(cmd) = target.strip_prefix("exec:") {
             // Argv-split + direct exec. No shell. See module docs for
             // rationale; this replaces the previous `shell:<cmd>` target
@@ -560,18 +671,11 @@ fn fire(name: &str, expr: &str, notify: &[String]) {
                     warn!(target = %target, "exec notify target is empty");
                 }
                 Ok(argv) => {
-                    // Don't leak the daemon's optional auth token (or any
-                    // other LinSight-specific env) into an external notify
-                    // program. PATH, HOME, etc. are preserved so common
-                    // helpers like `notify-send` still work.
-                    let result = Command::new(&argv[0])
-                        .args(&argv[1..])
-                        .env_remove("LINSIGHT_AUTH_TOKEN")
-                        .env_remove("LINSIGHT_PROM_BIND")
-                        .status();
-                    if let Err(e) = result {
-                        warn!(target = %target, error = ?e, "exec notify failed");
-                    }
+                    jobs.push(NotifyJob::Exec {
+                        name: name.to_owned(),
+                        target: target.to_owned(),
+                        argv,
+                    });
                 }
                 Err(e) => warn!(target = %target, error = %e, "exec notify: bad quoting"),
             }
@@ -590,6 +694,97 @@ fn fire(name: &str, expr: &str, notify: &[String]) {
             );
         } else {
             warn!(target = %target, "unknown notify target");
+        }
+    }
+    jobs
+}
+
+/// Dispatch a notification job asynchronously on a bounded worker pool. Each
+/// job has a hard wall-clock timeout; `exec:` children are killed on timeout
+/// and their stdio is redirected so they cannot inherit daemon fds.
+fn dispatch_notify(pool: &WorkerPool, job: NotifyJob) {
+    match job {
+        NotifyJob::Desktop { name, expr } => {
+            pool.execute(move || {
+                show_desktop(&name, &expr, NOTIFY_TIMEOUT);
+            });
+        }
+        NotifyJob::Exec { name: _name, target, argv } => {
+            pool.execute(move || {
+                run_exec(&argv, &target, NOTIFY_TIMEOUT);
+            });
+        }
+    }
+}
+
+/// Show a desktop notification with a wall-clock timeout. Runs on the
+/// notification worker pool; spawns a short-lived helper thread for the
+/// blocking D-Bus call so a stuck notification daemon cannot pin the worker
+/// forever.
+fn show_desktop(name: &str, expr: &str, timeout: Duration) {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn({
+        let name = name.to_owned();
+        let expr = expr.to_owned();
+        move || {
+            let result = notify_rust::Notification::new()
+                .summary(&format!("LinSight: {name}"))
+                .body(&format!("Condition true: {expr}"))
+                .show();
+            let _ = tx.send(result);
+        }
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => warn!(error = ?e, "desktop notification failed"),
+        Err(_) => warn!("desktop notification timed out"),
+    }
+}
+
+/// Run an `exec:` argv with redirected stdio and a wall-clock timeout.
+/// Returns the child pid on successful spawn so callers can observe cleanup.
+fn run_exec(argv: &[String], target: &str, timeout: Duration) -> Option<u32> {
+    let mut child = match Command::new(&argv[0])
+        .args(&argv[1..])
+        .env_remove("LINSIGHT_AUTH_TOKEN")
+        .env_remove("LINSIGHT_PROM_BIND")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(target = %target, error = ?e, "exec notify failed to spawn");
+            return None;
+        }
+    };
+    let pid = child.id();
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    warn!(target = %target, status = ?status, "exec notify exited non-zero");
+                }
+                return Some(pid);
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    if let Err(e) = child.kill() {
+                        warn!(target = %target, error = ?e, "exec notify: failed to kill timed-out child");
+                    } else {
+                        warn!(target = %target, "exec notify timed out and was killed");
+                    }
+                    let _ = child.wait();
+                    return Some(pid);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                warn!(target = %target, error = ?e, "exec notify wait failed");
+                return Some(pid);
+            }
         }
     }
 }
@@ -909,18 +1104,30 @@ impl AlertEngine {
     }
 
     /// Feed a scalar sample directly into the engine (bypasses on_sample
-    /// indirection for test convenience).
+    /// indirection for test convenience). Evaluates affected rules synchronously
+    /// so tests that assert on events keep working.
     fn push_scalar(&mut self, sensor: &str, val: f64) {
         use linsight_core::{Reading, SensorId};
         let s =
             Sample { sensor: SensorId::new(sensor), ts_micros: 0, reading: Reading::Scalar(val) };
-        self.observe(&s);
+        let jobs = self.observe(&s);
+        let now = Instant::now();
+        for job in jobs {
+            let outcome = eval_single(job.rewritten_expr, job.ctx);
+            self.apply_eval_result(job.idx, outcome, now);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// True if a process with `pid` is still alive. Uses `kill(pid, 0)`, which
+    /// is POSIX-safe and does not send a signal.
+    fn process_exists(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
 
     #[test]
     fn extract_refs_finds_dotted_tokens() {
@@ -1191,5 +1398,75 @@ mod tests {
         let loaded = AlertEngine::load(&path).unwrap();
         assert_eq!(loaded.rules.len(), 1);
         assert_eq!(loaded.rules[0].cooldown, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn worker_pool_run_with_timeout_honors_deadline() {
+        let pool = WorkerPool::new(2);
+        let fast = pool.run_with_timeout(|| 42, Duration::from_millis(100));
+        assert!(matches!(fast, TimedResult::Ok(42)));
+
+        let slow = pool.run_with_timeout(
+            || {
+                std::thread::sleep(Duration::from_millis(500));
+                42
+            },
+            Duration::from_millis(50),
+        );
+        assert!(matches!(slow, TimedResult::Timeout));
+    }
+
+    #[test]
+    fn eval_single_evaluates_boolean_expression() {
+        let ctx = HashMapContext::new();
+        assert!(matches!(eval_single("1 == 1".to_string(), ctx.clone()), EvalOutcome::Ok(true)));
+        assert!(matches!(eval_single("1 == 2".to_string(), ctx.clone()), EvalOutcome::Ok(false)));
+    }
+
+    #[test]
+    fn exec_notify_times_out_and_kills_child() {
+        let pid = run_exec(
+            &["sleep".to_string(), "100".to_string()],
+            "exec:sleep 100",
+            Duration::from_millis(100),
+        );
+        let pid = pid.expect("sleep should spawn");
+        // Give the kill branch time to run.
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(!process_exists(pid), "timed-out exec child should be killed");
+    }
+
+    #[test]
+    fn on_sample_does_not_block_on_exec_notification() {
+        let mut eng = AlertEngine::new_test("high-cpu", "cpu.util > 50");
+        eng.rules[0].notify = vec!["exec:sleep 10".to_string()];
+        let handle = eng.into_handle();
+
+        let start = Instant::now();
+        handle.on_sample(&linsight_core::Sample {
+            sensor: linsight_core::SensorId::new("cpu.util"),
+            ts_micros: 0,
+            reading: linsight_core::Reading::Scalar(90.0),
+        });
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "on_sample blocked {elapsed:?} waiting for exec notification"
+        );
+    }
+
+    #[test]
+    fn eval_timeout_is_reported_without_hanging() {
+        // A pathological expression may not be easy to construct in evalexpr,
+        // but we can verify the timeout path by making the worker pool busy
+        // and using the same machinery as the per-sample path.
+        let pool = WorkerPool::new(1);
+        // Occupy the single worker with a long sleep.
+        pool.execute(|| std::thread::sleep(Duration::from_millis(500)));
+        let result = pool.run_with_timeout(
+            || eval_single("1 == 1".to_string(), HashMapContext::new()),
+            Duration::from_millis(50),
+        );
+        assert!(matches!(result, TimedResult::Timeout));
     }
 }
