@@ -249,7 +249,7 @@ Kirigami.Page {
                                         delegate: Controls.Label {
                                             text: modelData
                                             font.pixelSize: app.tokens.textCaption
-                                            color: app.tokens.accent || "#4fc3f7"
+                                            color: app.tokens.accent
                                         }
                                     }
                                 }
@@ -342,7 +342,7 @@ Kirigami.Page {
                                         height: 8
                                         radius: 4
                                         color: modelData.kind === "fired"
-                                               ? app.tokens.accent || "#4fc3f7"
+                                               ? app.tokens.accent
                                                : app.tokens.textSecondary
                                     }
 
@@ -359,7 +359,7 @@ Kirigami.Page {
                                         font.pixelSize: app.tokens.textCaption
                                         font.weight: app.tokens.weightBold
                                         color: modelData.kind === "fired"
-                                               ? app.tokens.accent || "#4fc3f7"
+                                               ? app.tokens.accent
                                                : app.tokens.textSecondary
                                     }
 

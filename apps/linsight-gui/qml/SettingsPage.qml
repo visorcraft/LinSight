@@ -300,7 +300,7 @@ Kirigami.ScrollablePage {
                 content: ColumnLayout {
                     spacing: app.tokens.spaceS
                     Controls.Label {
-                        text: qsTr("Toggle subsystems at runtime. Changes take effect immediately on the daemon.")
+                        text: qsTr("Toggle subsystems at runtime. History and alerts take effect immediately; Prometheus requires a daemon restart.")
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                         opacity: 0.85
@@ -319,18 +319,44 @@ Kirigami.ScrollablePage {
                                 return page.daemonSettings[key] === true
                             }
                             readonly property bool canToggle: modelData.key !== "prom"
-                            Controls.Switch {
-                                checked: parent.isOn
-                                enabled: parent.canToggle && page.dashModel !== null
-                                onToggled: {
-                                    if (!page.dashModel) return
-                                    var result = page.dashModel.setDaemonSetting(
-                                        modelData.key, checked
-                                    ).toString()
-                                    if (result.indexOf("error:") === 0) {
-                                        app.showPassiveNotification(result, 4000)
+                            Item {
+                                id: switchContainer
+                                Layout.alignment: Qt.AlignVCenter
+                                implicitWidth: switchImpl.implicitWidth
+                                implicitHeight: switchImpl.implicitHeight
+
+                                Controls.Switch {
+                                    id: switchImpl
+                                    anchors.fill: parent
+                                    checked: parent.parent.isOn
+                                    enabled: parent.parent.canToggle && page.dashModel !== null
+                                    onToggled: {
+                                        if (!page.dashModel) return
+                                        var result = page.dashModel.setDaemonSetting(
+                                            modelData.key, checked
+                                        ).toString()
+                                        if (result.indexOf("error:") === 0) {
+                                            app.showPassiveNotification(result, 4000)
+                                        }
+                                        page.refreshDaemonSettings()
                                     }
-                                    page.refreshDaemonSettings()
+                                }
+
+                                MouseArea {
+                                    id: switchHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                    enabled: !parent.parent.canToggle
+                                }
+
+                                Controls.ToolTip {
+                                    readonly property bool show: !parent.parent.canToggle
+                                    text: show
+                                        ? qsTr("Set LINSIGHT_PROM_BIND and restart the daemon to change the Prometheus bind address.")
+                                        : ""
+                                    visible: show && switchHover.containsMouse
+                                    delay: 400
                                 }
                             }
                             Controls.Label {

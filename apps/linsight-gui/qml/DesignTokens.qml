@@ -107,6 +107,11 @@ QtObject {
         _pickColor("surface_sidebar", Qt.darker(Kirigami.Theme.backgroundColor, 1.08))
     readonly property color textPrimary:
         _pickColor("text_primary", Kirigami.Theme.textColor)
+    readonly property color textSecondary:
+        _pickColor("text_secondary",
+            Qt.rgba(Kirigami.Theme.textColor.r,
+                    Kirigami.Theme.textColor.g,
+                    Kirigami.Theme.textColor.b, 0.65))
     readonly property color separator: {
         const _ = _activeTheme
         const c = app.preferences ? app.preferences.color("separator_rgba") : ""

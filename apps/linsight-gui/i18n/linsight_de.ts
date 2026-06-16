@@ -1381,7 +1381,7 @@ Add one using the button above.</source>
         <translation>Sensor-ID kopieren</translation>
     </message>
     <message>
-        <location filename="../qml/SensorTile.qml" line="319"/>
+        <location filename="../qml/SensorTile.qml" line="318"/>
         <source>Copied sensor ID</source>
         <translation>Sensor-ID kopiert</translation>
     </message>
@@ -1389,172 +1389,181 @@ Add one using the button above.</source>
 <context>
     <name>SettingsPage</name>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="76"/>
+        <location filename="../qml/SettingsPage.qml" line="80"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="82"/>
+        <location filename="../qml/SettingsPage.qml" line="86"/>
         <source>Daemon behavior, sensors, and always-on subsystems.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="94"/>
+        <location filename="../qml/SettingsPage.qml" line="98"/>
         <source>Reload</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="96"/>
+        <location filename="../qml/SettingsPage.qml" line="100"/>
         <source>Re-read preferences.json from disk.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="123"/>
+        <location filename="../qml/SettingsPage.qml" line="127"/>
         <source>Start page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="124"/>
+        <location filename="../qml/SettingsPage.qml" line="128"/>
         <source>Which page LinSight opens on launch. A deleted dashboard falls back to Overview automatically.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="129"/>
+        <location filename="../qml/SettingsPage.qml" line="133"/>
         <source>Sample interval</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="130"/>
+        <location filename="../qml/SettingsPage.qml" line="134"/>
         <source>How often the daemon checks for new sensor data. Lower values feel smoother; higher values reduce daemon CPU usage. The setting is per-client — changing it only affects this LinSight window.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="185"/>
+        <location filename="../qml/SettingsPage.qml" line="189"/>
         <source>Default is 150 ms. The daemon clamps to %1–%2 ms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="192"/>
+        <location filename="../qml/SettingsPage.qml" line="196"/>
         <source>Tile sparklines</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="193"/>
+        <location filename="../qml/SettingsPage.qml" line="197"/>
         <source>Show a mini trend chart inside each scalar sensor tile.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="211"/>
+        <location filename="../qml/SettingsPage.qml" line="215"/>
         <source>Enabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="211"/>
+        <location filename="../qml/SettingsPage.qml" line="215"/>
         <source>Disabled</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="220"/>
+        <location filename="../qml/SettingsPage.qml" line="224"/>
         <source>Remote hosts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="221"/>
+        <location filename="../qml/SettingsPage.qml" line="225"/>
         <source>Saved SSH targets for in-app switching. Key-based SSH authentication is assumed; the trust model is the same as launching with --connect ssh://....</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="246"/>
+        <location filename="../qml/SettingsPage.qml" line="250"/>
         <source>Remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="259"/>
+        <location filename="../qml/SettingsPage.qml" line="263"/>
         <source>Name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="264"/>
+        <location filename="../qml/SettingsPage.qml" line="268"/>
         <source>ssh://user@host:port</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="267"/>
+        <location filename="../qml/SettingsPage.qml" line="271"/>
         <source>Add</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="294"/>
+        <location filename="../qml/SettingsPage.qml" line="298"/>
         <source>Always-on mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="295"/>
+        <location filename="../qml/SettingsPage.qml" line="299"/>
         <source>History, alerts, and Prometheus continue running after the GUI closes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="299"/>
-        <source>Toggle subsystems at runtime. Changes take effect immediately on the daemon.</source>
-        <translation>Subsysteme zur Laufzeit umschalten. Änderungen werden sofort im Daemon wirksam.</translation>
+        <location filename="../qml/SettingsPage.qml" line="303"/>
+        <source>Toggle subsystems at runtime. History and alerts take effect immediately; Prometheus requires a daemon restart.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="306"/>
+        <source>Toggle subsystems at runtime. Changes take effect immediately on the daemon.</source>
+        <translation type="vanished">Subsysteme zur Laufzeit umschalten. Änderungen werden sofort im Daemon wirksam.</translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="310"/>
         <source>SQLite history</source>
         <translation>SQLite-Verlauf</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="307"/>
+        <location filename="../qml/SettingsPage.qml" line="311"/>
         <source>Alert rules</source>
         <translation>Alarmregeln</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="308"/>
+        <location filename="../qml/SettingsPage.qml" line="312"/>
         <source>Prometheus exporter</source>
         <translation>Prometheus-Exporter</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="337"/>
+        <location filename="../qml/SettingsPage.qml" line="356"/>
+        <source>Set LINSIGHT_PROM_BIND and restart the daemon to change the Prometheus bind address.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/SettingsPage.qml" line="367"/>
         <source>On</source>
         <translation>Ein</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="337"/>
+        <location filename="../qml/SettingsPage.qml" line="367"/>
         <source>Off</source>
         <translation>Aus</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="346"/>
+        <location filename="../qml/SettingsPage.qml" line="376"/>
         <source>Prometheus exporter is bound to %1. To change the bind address, set LINSIGHT_PROM_BIND and restart the daemon.</source>
         <translation>Prometheus-Exporter ist an %1 gebunden. Ändere die Bind-Adresse mit LINSIGHT_PROM_BIND und starte den Daemon neu.</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="347"/>
+        <location filename="../qml/SettingsPage.qml" line="377"/>
         <source>Prometheus exporter is not configured. Set LINSIGHT_PROM_BIND and restart the daemon to enable it.</source>
         <translation>Prometheus-Exporter ist nicht konfiguriert. Setze LINSIGHT_PROM_BIND und starte den Daemon neu, um ihn zu aktivieren.</translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="359"/>
+        <location filename="../qml/SettingsPage.qml" line="389"/>
         <source>Command-line tools</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="360"/>
+        <location filename="../qml/SettingsPage.qml" line="390"/>
         <source>The CLI and daemon ship alongside the GUI.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="364"/>
+        <location filename="../qml/SettingsPage.qml" line="394"/>
         <source>&lt;code&gt;linsight-cli list&lt;/code&gt; shows every sensor the daemon advertises.&lt;br&gt;&lt;code&gt;linsight-cli read &amp;lt;sensor&amp;gt; --count N&lt;/code&gt; streams live values.&lt;br&gt;&lt;code&gt;linsight-cli plugin new &amp;lt;name&amp;gt;&lt;/code&gt; scaffolds a third-party plugin crate.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="117"/>
+        <location filename="../qml/SettingsPage.qml" line="121"/>
         <source>Appearance</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/SettingsPage.qml" line="118"/>
+        <location filename="../qml/SettingsPage.qml" line="122"/>
         <source>Pick a built-in palette or follow your KDE Plasma color scheme.</source>
         <translation type="unfinished"></translation>
     </message>
