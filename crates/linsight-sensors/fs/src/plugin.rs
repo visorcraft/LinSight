@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
@@ -18,6 +18,9 @@ use linsight_plugin_sdk::{
 
 const CACHE_TTL: Duration = Duration::from_millis(50);
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONCURRENT_STATVFS: usize = 8;
+const BACKOFF_BASE: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(300);
 
 const PSEUDO_FS: &[&str] = &[
     "proc",
@@ -52,9 +55,9 @@ pub struct FsPlugin {
     inner: Mutex<Inner>,
 }
 
-type FsStats = HashMap<String, (u64, u64, u64, u64)>;
+type FsStat = (u64, u64, u64, u64);
+type FsStats = HashMap<String, FsStat>;
 
-#[derive(Default)]
 struct Inner {
     sysroot: Option<PathBuf>,
     /// (mountpoint, disambiguated_safekey) pairs. The safekey is what the
@@ -63,6 +66,64 @@ struct Inner {
     /// [`mount_safekey`].
     mounts: Vec<(String, String)>,
     cache: Option<linsight_core::SnapshotCache<FsStats>>,
+    /// Mountpoints that recently timed out; keyed by mountpoint with the
+    /// instant after which we will try again.
+    backoff: HashMap<String, Instant>,
+    /// Consecutive timeout strikes per mountpoint, used to escalate backoff.
+    strikes: HashMap<String, u32>,
+    /// Limits how many statvfs worker threads can be in flight at once so a
+    /// cluster of hung NFS mounts cannot spawn an unbounded number of threads.
+    sem: Arc<Semaphore>,
+}
+
+impl Default for Inner {
+    fn default() -> Self {
+        Self {
+            sysroot: None,
+            mounts: Vec::new(),
+            cache: None,
+            backoff: HashMap::new(),
+            strikes: HashMap::new(),
+            sem: Arc::new(Semaphore::new(MAX_CONCURRENT_STATVFS)),
+        }
+    }
+}
+
+/// A counting semaphore implemented with std primitives. Permits are held by
+/// the caller (not the worker thread) so a hung blocking call releases its
+/// slot as soon as the timeout fires, preventing a small set of stuck mounts
+/// from permanently exhausting the concurrency budget.
+struct Semaphore {
+    permits: Mutex<usize>,
+    cvar: Condvar,
+    max: usize,
+}
+
+struct SemaphorePermit<'a> {
+    sem: &'a Semaphore,
+}
+
+impl Semaphore {
+    fn new(max: usize) -> Self {
+        Self { permits: Mutex::new(max), cvar: Condvar::new(), max }
+    }
+
+    fn acquire(&self) -> SemaphorePermit<'_> {
+        let mut permits = self.permits.lock().expect("fs semaphore poisoned");
+        while *permits == 0 {
+            permits = self.cvar.wait(permits).expect("fs semaphore poisoned");
+        }
+        *permits -= 1;
+        SemaphorePermit { sem: self }
+    }
+}
+
+impl Drop for SemaphorePermit<'_> {
+    fn drop(&mut self) {
+        let mut permits = self.sem.permits.lock().expect("fs semaphore poisoned");
+        *permits = self.sem.max.min(*permits + 1);
+        self.sem.cvar.notify_one();
+    }
 }
 
 fn mount_safekey(mountpoint: &str) -> String {
@@ -319,42 +380,98 @@ impl FsPlugin {
     }
 
     fn snapshot(inner: &mut Inner) -> Result<FsStats, PluginError> {
-        if let Some(cache) = &inner.cache
-            && let Some(stats) = cache.get(CACHE_TTL)
-        {
-            return Ok(stats);
-        }
+        snapshot_with(inner, statvfs64_sync, SNAPSHOT_TIMEOUT)
+    }
+}
 
-        // Run the whole mount sweep in a worker thread with a timeout.
-        // `statvfs64()` can hang indefinitely on a stuck NFS mount; without
-        // this, the daemon's sampler thread would stall forever.
-        let mounts = inner.mounts.clone();
+fn snapshot_with(
+    inner: &mut Inner,
+    stat_fn: fn(&str) -> Result<FsStat, PluginError>,
+    timeout: Duration,
+) -> Result<FsStats, PluginError> {
+    if let Some(cache) = &inner.cache
+        && let Some(stats) = cache.get(CACHE_TTL)
+    {
+        return Ok(stats);
+    }
+
+    let now = Instant::now();
+    let mounts: Vec<(String, String)> = inner
+        .mounts
+        .iter()
+        .filter(|(mp, _)| inner.backoff.get(mp).is_none_or(|until| now >= *until))
+        .cloned()
+        .collect();
+
+    if mounts.is_empty() {
+        return Err(PluginError::Unsupported(
+            "all filesystem mounts backed off after timeouts".into(),
+        ));
+    }
+
+    // Spawn each statvfs call in its own worker thread, capped by a
+    // semaphore. A hung mount only blocks its own recv timeout; the
+    // permit is released immediately so other mounts can proceed.
+    let deadline = Instant::now() + timeout;
+    let mut pending = Vec::with_capacity(mounts.len());
+    for (mountpoint, _) in mounts {
+        let permit = inner.sem.acquire();
+        let mp = mountpoint.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let mut stats = HashMap::with_capacity(mounts.len());
-            let mut calls = 0usize;
-            for (mountpoint, _) in &mounts {
-                if let Ok(v) = statvfs64_sync(mountpoint) {
-                    stats.insert(mountpoint.clone(), v);
-                    calls += 1;
-                }
-            }
-            let _ = tx.send((stats, calls));
+            let _ = tx.send(stat_fn(&mp));
         });
-        let (stats, calls) = match rx.recv_timeout(SNAPSHOT_TIMEOUT) {
-            Ok(r) => r,
-            Err(_) => {
-                // Return Unsupported so the scheduler backs off exponentially
-                // instead of retrying every tick and stalling the sampler.
-                return Err(PluginError::Unsupported(format!(
-                    "fs snapshot timed out after {SNAPSHOT_TIMEOUT:?}"
-                )));
-            }
-        };
-        tracing::debug!(target: "linsight_sensors::reads", plugin = "fs", statvfs_calls = calls);
-        inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
-        Ok(stats)
+        pending.push((mountpoint, rx, permit));
     }
+
+    let mut stats = HashMap::with_capacity(pending.len());
+    let mut outcomes = Vec::with_capacity(pending.len());
+    for (mountpoint, rx, permit) in pending {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        outcomes.push((mountpoint, rx.recv_timeout(remaining)));
+        drop(permit);
+    }
+
+    for (mountpoint, outcome) in outcomes {
+        match outcome {
+            Ok(Ok(v)) => {
+                stats.insert(mountpoint.clone(), v);
+                clear_backoff(inner, &mountpoint);
+            }
+            Ok(Err(_)) => {
+                // statvfs returned an error (mount vanished, permission
+                // denied, etc.). Leave it out of the snapshot; the
+                // per-sensor lookup will return Unsupported and the
+                // scheduler will back off.
+            }
+            Err(_) => mark_backoff(inner, &mountpoint),
+        }
+    }
+
+    if stats.is_empty() {
+        return Err(PluginError::Unsupported("fs snapshot: all available mounts timed out".into()));
+    }
+
+    tracing::debug!(
+        target: "linsight_sensors::reads",
+        plugin = "fs",
+        statvfs_calls = stats.len()
+    );
+    inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
+    Ok(stats)
+}
+
+fn mark_backoff(inner: &mut Inner, mountpoint: &str) {
+    let strikes = inner.strikes.entry(mountpoint.to_owned()).or_default();
+    *strikes = strikes.saturating_add(1);
+    let factor = 1u64 << (*strikes).min(8);
+    let backoff = BACKOFF_BASE.saturating_mul(factor as u32).min(BACKOFF_MAX);
+    inner.backoff.insert(mountpoint.to_owned(), Instant::now() + backoff);
+}
+
+fn clear_backoff(inner: &mut Inner, mountpoint: &str) {
+    inner.strikes.remove(mountpoint);
+    inner.backoff.remove(mountpoint);
 }
 
 impl LinsightPlugin for FsPlugin {
@@ -374,7 +491,7 @@ impl LinsightPlugin for FsPlugin {
     }
 }
 
-fn statvfs_raw(path_str: &str) -> Result<(u64, u64, u64, u64), PluginError> {
+fn statvfs_raw(path_str: &str) -> Result<FsStat, PluginError> {
     let path = path_str.to_owned();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -385,7 +502,7 @@ fn statvfs_raw(path_str: &str) -> Result<(u64, u64, u64, u64), PluginError> {
     })?
 }
 
-fn statvfs64_sync(path_str: &str) -> Result<(u64, u64, u64, u64), PluginError> {
+fn statvfs64_sync(path_str: &str) -> Result<FsStat, PluginError> {
     #[cfg(target_os = "linux")]
     {
         use std::mem::MaybeUninit;
@@ -640,5 +757,97 @@ mod tests {
         let r2 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
         let Reading::Scalar(v2) = r2 else { panic!("expected scalar") };
         assert_eq!(v1, v2); // total_bytes shouldn't change, but cache should have expired and refreshed
+    }
+
+    #[test]
+    fn semaphore_caps_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let sem = Arc::new(Semaphore::new(2));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::with_capacity(10);
+        for _ in 0..10 {
+            let sem = Arc::clone(&sem);
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            handles.push(std::thread::spawn(move || {
+                let _permit = sem.acquire();
+                let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                max_active.fetch_max(n, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(10));
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(max_active.load(Ordering::SeqCst), 2);
+    }
+
+    fn ok_statvfs(_path: &str) -> Result<FsStat, PluginError> {
+        Ok((1000, 500, 10000, 5000))
+    }
+
+    fn hang_forever(_path: &str) -> Result<FsStat, PluginError> {
+        std::thread::sleep(Duration::from_secs(60));
+        Ok((0, 0, 0, 0))
+    }
+
+    fn mixed_statvfs(path: &str) -> Result<FsStat, PluginError> {
+        if path == "/hang" {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+        Ok((1000, 500, 10000, 5000))
+    }
+
+    #[test]
+    fn snapshot_marks_timeout_mount_backoff() {
+        let mut inner = Inner::default();
+        inner.mounts = vec![("/hang".into(), "hang".into())];
+        let err = snapshot_with(&mut inner, hang_forever, Duration::from_millis(50)).unwrap_err();
+        assert!(matches!(err, PluginError::Unsupported(_)), "unexpected error: {err}");
+        assert!(inner.backoff.contains_key("/hang"), "mount should be backed off");
+        assert_eq!(inner.strikes.get("/hang").copied().unwrap_or(0), 1);
+    }
+
+    #[test]
+    fn snapshot_clears_backoff_on_success() {
+        let mut inner = Inner::default();
+        inner.mounts = vec![("/ok".into(), "ok".into())];
+        // Put the mount in a backed-off state that has already expired so the
+        // snapshot actually attempts it and the success path clears it.
+        inner.strikes.insert("/ok".into(), 1);
+        inner.backoff.insert("/ok".into(), Instant::now() - Duration::from_millis(1));
+        let stats = snapshot_with(&mut inner, ok_statvfs, Duration::from_millis(50)).unwrap();
+        assert!(stats.contains_key("/ok"));
+        assert!(!inner.backoff.contains_key("/ok"));
+        assert!(!inner.strikes.contains_key("/ok"));
+    }
+
+    #[test]
+    fn snapshot_returns_partial_results_on_timeout() {
+        let mut inner = Inner::default();
+        inner.mounts = vec![("/ok".into(), "ok".into()), ("/hang".into(), "hang".into())];
+        let stats = snapshot_with(&mut inner, mixed_statvfs, Duration::from_millis(100)).unwrap();
+        assert!(stats.contains_key("/ok"), "successful mount must appear in snapshot");
+        assert!(!stats.contains_key("/hang"), "timed-out mount must not appear");
+        assert!(inner.backoff.contains_key("/hang"), "timed-out mount must be backed off");
+    }
+
+    #[test]
+    fn backoff_escalates_and_expires() {
+        let mut inner = Inner::default();
+        super::mark_backoff(&mut inner, "/mp");
+        let first = *inner.backoff.get("/mp").unwrap();
+        super::mark_backoff(&mut inner, "/mp");
+        let second = *inner.backoff.get("/mp").unwrap();
+        assert!(second > first, "backoff should escalate with consecutive strikes");
+
+        // Simulate expiry and verify the mount is sampled again.
+        inner.backoff.insert("/mp".into(), Instant::now() - Duration::from_millis(1));
+        inner.mounts = vec![("/mp".into(), "mp".into())];
+        let stats = snapshot_with(&mut inner, ok_statvfs, Duration::from_millis(50)).unwrap();
+        assert!(stats.contains_key("/mp"));
     }
 }
