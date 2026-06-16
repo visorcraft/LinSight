@@ -25,7 +25,7 @@
 //! false again. Scalar samples are eligible inputs; Counter, State, and
 //! Table samples are skipped (could be revisited later).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -43,11 +43,18 @@ pub const EVENT_CAPACITY: usize = 512;
 /// Cap on concurrent webhook POST threads. Without this, a flapping rule that
 /// fires frequently can spawn an unbounded number of detached threads.
 const MAX_CONCURRENT_WEBHOOKS: usize = 8;
+/// Defensive cap on the `values` map. In normal operation the map is bounded
+/// by the daemon's static sensor catalogue, but a misbehaving plugin emitting
+/// transient sensor IDs could grow it without limit. When this cap is exceeded,
+/// only entries referenced by at least one rule are retained; the rest are
+/// pruned. The cap is deliberately generous (10× a typical catalogue) so this
+/// path never fires in practice.
+const VALUES_CAP: usize = 4096;
 
 use linsight_core::{Reading, Sample};
 use linsight_protocol::AlertRuleJson;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::history::HistoryWriter;
 
@@ -366,6 +373,12 @@ impl AlertEngine {
             Reading::Counter(v) => *v as f64,
             _ => return,
         };
+        // Defensive cap: a misbehaving plugin emitting transient sensor IDs
+        // could grow `values` without bound. When the cap is exceeded, prune
+        // entries not referenced by any rule so evaluation stays correct.
+        if !self.values.contains_key(&id) && self.values.len() >= VALUES_CAP {
+            self.prune_unreferenced_values();
+        }
         self.values.insert(id.clone(), val);
 
         let now = Instant::now();
@@ -380,6 +393,23 @@ impl AlertEngine {
         }
         for i in to_eval {
             self.evaluate_rule(i, now);
+        }
+    }
+
+    /// Drop all `values` entries that are not referenced by any enabled rule.
+    /// Called only when `VALUES_CAP` is exceeded — a defensive measure against
+    /// plugins that emit transient sensor IDs.
+    fn prune_unreferenced_values(&mut self) {
+        let referenced: HashSet<&str> = self
+            .rules
+            .iter()
+            .flat_map(|r| r.referenced_sensors.iter().map(String::as_str))
+            .collect();
+        let before = self.values.len();
+        self.values.retain(|k, _| referenced.contains(k.as_str()));
+        let pruned = before - self.values.len();
+        if pruned > 0 {
+            warn!(pruned, remaining = self.values.len(), "pruned unreferenced sensor values");
         }
     }
 
@@ -480,7 +510,7 @@ fn wall_micros() -> u64 {
 }
 
 fn fire(name: &str, expr: &str, notify: &[String]) {
-    info!(rule = %name, expr = %expr, "alert firing");
+    debug!(rule = %name, expr = %expr, "alert firing");
     for target in notify {
         if target == "desktop" {
             if let Err(e) = notify_rust::Notification::new()

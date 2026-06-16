@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -15,6 +15,17 @@ use crate::client::{Client, ClientHandle, RpcError};
 
 type SampleBridge = (u64, Sample);
 type CatalogueBridge = (u64, Vec<SensorInfo>);
+
+/// Bound on the forwarder→pump sample bridge channel. This is the GUI's
+/// last line of defense against unbounded memory growth: when the Qt
+/// thread stalls (complex render, modal dialog, host switch), the pump
+/// thread can't drain samples fast enough, and without a bound this
+/// channel — and then the dispatch→forwarder channel behind it — would
+/// accumulate samples until OOM. With a bound, backpressure propagates
+/// all the way back to the daemon, which drops samples for the slow
+/// client (its own `OUTBOUND_QUEUE_CAP` already handles this gracefully).
+/// The cap holds roughly two pump ticks so normal jitter never blocks.
+const BRIDGE_CHANNEL_CAP: usize = 512;
 
 /// Resolve `XDG_RUNTIME_DIR/linsight.sock` per the daemon's default.
 pub fn default_socket_path() -> anyhow::Result<PathBuf> {
@@ -38,12 +49,12 @@ pub struct Workspace {
     /// once via `take_sample_rx`. Each underlying client forwards its
     /// samples into this sender; when a client is replaced, its forwarder
     /// exits and a new one is spawned for the next client.
-    sample_tx: Sender<SampleBridge>,
+    sample_tx: SyncSender<SampleBridge>,
     /// Receiver side of the bridge. `take()` returns `Some` exactly once.
     sample_rx: Mutex<Option<Receiver<SampleBridge>>>,
     /// Stable sender for catalogue broadcasts. A matching receiver is
     /// handed to `OverviewModel` once via `take_catalogue_rx`.
-    catalogue_tx: Sender<CatalogueBridge>,
+    catalogue_tx: SyncSender<CatalogueBridge>,
     catalogue_rx: Mutex<Option<Receiver<CatalogueBridge>>>,
     /// Sensors the GUI currently wants subscribed. Replayed against a
     /// new client after reconnect so tile streams resume automatically.
@@ -71,8 +82,8 @@ impl Workspace {
         let client_rx = client
             .take_sample_rx()
             .ok_or_else(|| anyhow::anyhow!("client sample receiver already taken"))?;
-        let (sample_tx, sample_rx) = channel::<SampleBridge>();
-        let (catalogue_tx, catalogue_rx) = channel::<CatalogueBridge>();
+        let (sample_tx, sample_rx) = sync_channel::<SampleBridge>(BRIDGE_CHANNEL_CAP);
+        let (catalogue_tx, catalogue_rx) = sync_channel::<CatalogueBridge>(BRIDGE_CHANNEL_CAP);
         let connection_generation = Arc::new(AtomicU64::new(1));
         let connection_alive = Arc::new(AtomicBool::new(true));
         spawn_sample_forwarder(
@@ -177,6 +188,29 @@ impl Workspace {
         self.client().unsubscribe(sensors)
     }
 
+    /// Atomically replace the entire subscription set with `sensors`.
+    /// Used by the pump thread after a reconnect so the replay set
+    /// reflects the new host's catalogue instead of accumulating every
+    /// previous host's sensor IDs (which caused unbounded Vec growth and
+    /// increasingly slow reconnects after many host switches).
+    pub fn replace_subscriptions(&self, sensors: Vec<SensorId>) -> anyhow::Result<()> {
+        let old: Vec<SensorId> = {
+            let mut subs = self.subscriptions.lock().expect("subscriptions poisoned");
+            std::mem::take(&mut *subs)
+        };
+        if !old.is_empty() {
+            let _ = self.client().unsubscribe(old);
+        }
+        if sensors.is_empty() {
+            return Ok(());
+        }
+        {
+            let mut subs = self.subscriptions.lock().expect("subscriptions poisoned");
+            *subs = sensors.clone();
+        }
+        self.client().subscribe(sensors)
+    }
+
     /// Apply the pump interval to the current client and remember it for
     /// reconnect replay.
     pub fn set_pump_interval_ms(&self, ms: u32, timeout: Duration) -> Result<u32, RpcError> {
@@ -274,7 +308,7 @@ impl Workspace {
 
 fn spawn_sample_forwarder(
     client_rx: Receiver<Sample>,
-    bridge_tx: Sender<SampleBridge>,
+    bridge_tx: SyncSender<SampleBridge>,
     generation: Arc<AtomicU64>,
     alive: Arc<AtomicBool>,
     my_generation: u64,
@@ -296,7 +330,7 @@ fn spawn_sample_forwarder(
 
 fn spawn_catalogue_forwarder(
     client_rx: Receiver<Vec<SensorInfo>>,
-    bridge_tx: Sender<CatalogueBridge>,
+    bridge_tx: SyncSender<CatalogueBridge>,
     my_generation: u64,
 ) {
     thread::spawn(move || {

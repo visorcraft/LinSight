@@ -12,7 +12,7 @@
 //!
 //! `save_layout` / `load_layout` / `layout_path` back the canvas editor.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::RecvTimeoutError;
@@ -152,8 +152,8 @@ struct TileJson {
     value: String,
     kind: String,
     unit: String,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    sparkline: Vec<f64>,
+    #[serde(skip_serializing_if = "VecDeque::is_empty", default)]
+    sparkline: VecDeque<f64>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     rows: Vec<Vec<serde_json::Value>>,
     #[serde(skip)]
@@ -185,22 +185,15 @@ struct SampleState {
     /// values for these render as a rounded whole-GB capacity (e.g.
     /// "32 GB") rather than a fractional binary size ("31.84 GiB").
     static_ids: HashSet<String>,
-    /// Rolling scalar window per sensor (max 30 points) for sparkline rendering.
-    sparklines: HashMap<String, Vec<f64>>,
     /// Previous raw counter sample per net sensor, keyed by sensor id.
     net_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
 }
 
-impl SampleState {
-    fn push_sparkline(&mut self, sensor: &str, value: f64) {
-        const MAX_POINTS: usize = 30;
-        let buf = self.sparklines.entry(sensor.to_string()).or_default();
-        buf.push(value);
-        if buf.len() > MAX_POINTS {
-            buf.remove(0);
-        }
-    }
-}
+/// Maximum number of points retained in a tile's rolling sparkline
+/// window. Each new scalar sample pushes to the back; when the window
+/// exceeds this cap the oldest point is popped from the front (O(1) via
+/// `VecDeque`, vs. the O(n) `Vec::remove(0)` this replaced).
+const SPARKLINE_MAX_POINTS: usize = 30;
 
 /// Apply a single sample to the in-memory tile state: format its value,
 /// update the matching tile's text + rows, and push its scalar onto the
@@ -221,9 +214,12 @@ fn apply_sample(state: &mut SampleState, sample: &linsight_core::Sample) {
         if let linsight_core::Reading::Counter(v) = &sample.reading {
             tile.last_raw_value = *v;
         }
-    }
-    if let linsight_core::Reading::Scalar(v) = &sample.reading {
-        state.push_sparkline(&sensor_id, *v);
+        if let linsight_core::Reading::Scalar(v) = &sample.reading {
+            tile.sparkline.push_back(*v);
+            if tile.sparkline.len() > SPARKLINE_MAX_POINTS {
+                tile.sparkline.pop_front();
+            }
+        }
     }
 }
 
@@ -443,8 +439,10 @@ impl ffi::OverviewModel {
                             if g > current_g {
                                 // The Workspace reconnected to a different
                                 // daemon. Rebuild the tile catalogue from the
-                                // new host's sensor list and auto-subscribe to
-                                // its sensors so pages repopulate correctly.
+                                // new host's sensor list and replace the
+                                // subscription set so pages repopulate correctly
+                                // and the replay Vec doesn't accumulate stale
+                                // sensor IDs from previous hosts.
                                 current_g = g;
                                 let sensor_infos = ws_for_pump.sensor_infos();
                                 if sensor_infos.is_empty() {
@@ -457,10 +455,10 @@ impl ffi::OverviewModel {
                                     .map(|s| s.id.clone())
                                     .filter(|id| id.as_str() != "proc.list")
                                     .collect();
-                                if let Err(e) = ws_for_pump.subscribe(auto_subs) {
+                                if let Err(e) = ws_for_pump.replace_subscriptions(auto_subs) {
                                     tracing::warn!(
                                         error = ?e,
-                                        "auto-subscribe after reconnect failed"
+                                        "replace_subscriptions after reconnect failed"
                                     );
                                 }
                                 let json = {
@@ -492,17 +490,6 @@ impl ffi::OverviewModel {
                                 // batch) into the in-memory state. Non-blocking;
                                 // returns once the channel is empty.
                                 drain_into_state(&rx, &mut guard, first, &mut current_g);
-                                // Now snapshot sparklines and re-apply to tiles. Only
-                                // need to do this once per batch since all samples
-                                // share the same destination state.
-                                let sparklines_snapshot: HashMap<String, Vec<f64>> =
-                                    guard.sparklines.clone();
-                                for tile in guard.tiles.values_mut() {
-                                    tile.sparkline = sparklines_snapshot
-                                        .get(&tile.id)
-                                        .cloned()
-                                        .unwrap_or_default();
-                                }
                                 let json = serialize_tiles(&guard.id_order, &guard.tiles);
                                 let network_json = compute_network_rates(&mut guard);
                                 let cpu = guard.tiles.get("cpu.util").map(|t| t.value.clone());
@@ -880,21 +867,14 @@ fn build_sample_state(sensor_infos: &[SensorInfo]) -> SampleState {
                 value: "…".into(),
                 kind,
                 unit: info.unit.symbol().to_string(),
-                sparkline: vec![],
+                sparkline: VecDeque::new(),
                 rows: vec![],
                 last_raw_value: 0,
                 last_ts_micros: 0,
             },
         );
     }
-    SampleState {
-        tiles,
-        id_order,
-        units,
-        static_ids,
-        sparklines: HashMap::new(),
-        net_prev: HashMap::new(),
-    }
+    SampleState { tiles, id_order, units, static_ids, net_prev: HashMap::new() }
 }
 
 /// Compute per-interface network rates from the latest counter samples.
@@ -1164,7 +1144,7 @@ mod tests {
                         value: String::new(),
                         kind: "scalar".into(),
                         unit: "count".into(),
-                        sparkline: vec![],
+                        sparkline: VecDeque::new(),
                         rows: vec![],
                         last_raw_value: 0,
                         last_ts_micros: 0,
@@ -1177,14 +1157,7 @@ mod tests {
         for id in ids {
             units.insert((*id).to_string(), Unit::Count);
         }
-        SampleState {
-            tiles,
-            id_order,
-            units,
-            static_ids: HashSet::new(),
-            sparklines: HashMap::new(),
-            net_prev: HashMap::new(),
-        }
+        SampleState { tiles, id_order, units, static_ids: HashSet::new(), net_prev: HashMap::new() }
     }
 
     fn scalar_sample(id: &str, value: f64) -> linsight_core::Sample {
@@ -1237,7 +1210,7 @@ mod tests {
             value: "…".into(),
             kind: "scalar".into(),
             unit: String::new(),
-            sparkline: vec![],
+            sparkline: VecDeque::new(),
             rows: vec![],
             last_raw_value: 0,
             last_ts_micros: 0,
@@ -1466,7 +1439,10 @@ mod tests {
         // Establishes a baseline before the batch-drain test below.
         let mut state = empty_state_with_tiles(&["sensor.a"]);
         apply_sample(&mut state, &scalar_sample("sensor.a", 42.0));
-        assert_eq!(state.sparklines.get("sensor.a").map(|v| v.as_slice()), Some(&[42.0_f64][..]));
+        assert_eq!(
+            state.tiles.get("sensor.a").map(|t| t.sparkline.iter().copied().collect::<Vec<_>>()),
+            Some(vec![42.0_f64])
+        );
         assert!(!state.tiles.get("sensor.a").unwrap().value.is_empty());
     }
 
@@ -1495,7 +1471,7 @@ mod tests {
         assert_eq!(count, 5, "all five queued samples must be drained in one call");
         for id in ["s.a", "s.b", "s.c", "s.d", "s.e"] {
             assert_eq!(
-                state.sparklines.get(id).map(Vec::len),
+                state.tiles.get(id).map(|t| t.sparkline.len()),
                 Some(1),
                 "sparkline buffer for {id} must contain the one sample"
             );
@@ -1512,7 +1488,7 @@ mod tests {
         let mut current_g = 1;
         let count = drain_into_state(&rx, &mut state, scalar_sample("s.only", 7.0), &mut current_g);
         assert_eq!(count, 1);
-        assert_eq!(state.sparklines.get("s.only").map(Vec::len), Some(1));
+        assert_eq!(state.tiles.get("s.only").map(|t| t.sparkline.len()), Some(1));
     }
 
     #[test]

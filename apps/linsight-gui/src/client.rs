@@ -24,7 +24,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -38,6 +38,14 @@ use linsight_protocol::{
 use tracing::{info, warn};
 
 pub type ClientHandle = Arc<Client>;
+
+/// Bound on the dispatch→forwarder sample channel. When the GUI pump
+/// thread stalls (Qt busy, slow render), backpressure propagates through
+/// this bounded channel to the OS socket buffer and then to the daemon,
+/// which drops samples for the slow client instead of letting the GUI
+/// accumulate unbounded samples into OOM. The cap holds roughly two pump
+/// ticks (~230 sensors/tick) so normal jitter never triggers drops.
+const SAMPLE_CHANNEL_CAP: usize = 512;
 
 /// Error type for the v2 request/response RPCs (`get_hardware`,
 /// `set_nickname`). The reader thread parks the caller on an
@@ -197,7 +205,7 @@ impl Client {
         };
         info!(count = sensors.len(), "sensor catalogue cached");
 
-        let (tx, rx) = channel::<Sample>();
+        let (tx, rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let catalogue = Arc::new(Mutex::new(sensors));
         let inflight: Arc<Mutex<HashMap<u32, ResponseSender>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -573,12 +581,12 @@ fn discover_remote_socket(target: &str) -> Result<String> {
 /// variant — that worked when the protocol only had Samples to push.
 /// v2 added `Response` (correlated by `req_id`) and `SensorListBroadcast`
 /// (catalogue refresh), so we now branch on every variant. Samples
-/// continue to flow through the existing `Sender<Sample>`; everything
+/// continue to flow through the existing `SyncSender<Sample>`; everything
 /// else is handed off via the shared `inflight` table or the
 /// `catalogue_listeners` fan-out.
 fn dispatch(
     mut reader: FrameReader<UnixStream>,
-    sample_tx: Sender<Sample>,
+    sample_tx: SyncSender<Sample>,
     catalogue: Arc<Mutex<Vec<SensorInfo>>>,
     inflight: Arc<Mutex<HashMap<u32, ResponseSender>>>,
     catalogue_listeners: Arc<Mutex<Vec<Sender<Vec<SensorInfo>>>>>,
@@ -671,7 +679,7 @@ mod tests {
     impl DispatchRunner {
         /// Spawn `dispatch` on a fake Unix socket pair and return the test-side
         /// writer plus all shared state.
-        fn spawn(sample_tx: Sender<Sample>) -> Self {
+        fn spawn(sample_tx: SyncSender<Sample>) -> Self {
             let (client_sock, server_sock) = UnixStream::pair().unwrap();
             let catalogue = Arc::new(Mutex::new(vec![]));
             let inflight = Arc::new(Mutex::new(HashMap::new()));
@@ -754,7 +762,7 @@ mod tests {
 
     #[test]
     fn dispatch_forwards_samples() {
-        let (sample_tx, sample_rx) = channel::<Sample>();
+        let (sample_tx, sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
 
         let sample = Sample {
@@ -774,7 +782,7 @@ mod tests {
 
     #[test]
     fn dispatch_routes_response_by_req_id() {
-        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
 
         let (resp_tx, resp_rx) = channel::<Result<ResponsePayload, ProtoError>>();
@@ -796,7 +804,7 @@ mod tests {
         // spawned threads do not inherit the per-thread default subscriber.
         let logs = capture_logs(|| {
             let (client_sock, server_sock) = UnixStream::pair().unwrap();
-            let (sample_tx, _sample_rx) = channel::<Sample>();
+            let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
             let catalogue = Arc::new(Mutex::new(vec![]));
             let inflight = Arc::new(Mutex::new(HashMap::new()));
             let listeners = Arc::new(Mutex::new(vec![]));
@@ -819,7 +827,7 @@ mod tests {
 
     #[test]
     fn dispatch_broadcasts_catalogue_to_listeners() {
-        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
 
         let (cat_tx, cat_rx) = channel::<Vec<SensorInfo>>();
@@ -840,7 +848,7 @@ mod tests {
 
     #[test]
     fn dispatch_prunes_dropped_catalogue_listeners() {
-        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
 
         let (cat_tx, cat_rx) = channel::<Vec<SensorInfo>>();
@@ -865,7 +873,7 @@ mod tests {
 
     #[test]
     fn dispatch_exits_on_bye() {
-        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
         runner.send(&ServerMsg::Bye { reason: "shutdown".into() });
         runner.join();
@@ -873,7 +881,7 @@ mod tests {
 
     #[test]
     fn dispatch_exits_on_eof() {
-        let (sample_tx, _sample_rx) = channel::<Sample>();
+        let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let runner = DispatchRunner::spawn(sample_tx);
         // Dropping the runner closes the server-side socket, producing EOF.
         runner.join();
