@@ -7,6 +7,28 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.16.0] — 2026-06-16
+
+- **Hardened sensor plugins against blocking leaks.** `fs`, `smart`, and `nvml`
+  sensor calls now run inside time-boxed worker threads with exponential
+  backoff for repeatedly timed-out mounts/devices. The `fs` plugin also caps
+  concurrent `statvfs` workers so hung FUSE/NFS mounts cannot spawn an
+  unbounded number of threads.
+- **Asynchronous alert notifications.** Desktop and `exec:` notify targets run
+  on a dedicated worker pool with hard timeouts; `exec:` children have closed
+  inherited FDs and are killed on timeout. Per-sample rule evaluation is
+  time-boxed so a pathological expression cannot stall the sampler.
+- **Transport and client timeouts.** Daemon client sockets get idle read/write
+  timeouts after the handshake; the GUI client sets socket timeouts and kills
+  its spawned `linsightd`/`ssh` children on setup timeout or drop. The tunnel
+  now times out `write_all`/`shutdown`, and the Prometheus exporter times out
+  scrape writes.
+- **Idempotent subscriptions.** Duplicate `(sensor, period)` subscriptions from
+  the same client are deduplicated so the scheduler refcount no longer grows
+  without bound on reconnect/replay.
+- **Fixed a scheduler deadlock** where sampling more filesystem mounts than the
+  concurrency cap could stall the daemon forever.
+
 ## [1.15.0] — 2026-06-14
 
 - **Criterion benchmarks.** Added `just bench` with benchmarks for

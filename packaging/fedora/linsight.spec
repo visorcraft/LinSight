@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.15.0
+Version:        1.16.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Tue Jun 16 2026 VisorCraft LLC <support@visorcraft.com> - 1.16.0-1
+- v1.16.0 release. Harden daemon and GUI against hangs and leaks: capped,
+  time-boxed sensor worker threads, async alert notifications, transport and
+  client socket timeouts, idempotent subscriptions, and tunnel/Prometheus
+  write-timeouts.
+
 * Sun Jun 14 2026 VisorCraft LLC <support@visorcraft.com> - 1.15.0-1
 - v1.15.0 release. Criterion benchmarks, proptest round-trips, daemon transport
   unit tests, GUI smoke in CI, plugin sandbox design groundwork.

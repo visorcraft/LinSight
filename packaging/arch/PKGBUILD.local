@@ -18,7 +18,7 @@ pkgname=linsight
 # ../../Cargo.toml. (The built binaries report their real CARGO_PKG_VERSION
 # regardless; deriving this in pkgver() is unreliable because $startdir is
 # empty during `makepkg --printsrcinfo`.)
-pkgver=1.15.0
+pkgver=1.16.0
 pkgrel=1
 pkgdesc='Fast, beautiful Linux system-monitoring dashboard with multi-GPU support'
 arch=('x86_64')
