@@ -50,14 +50,16 @@ compatibility on every CI run.
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `nvml-wrapper` | MIT OR Apache-2.0 | [Cldfire/nvml-wrapper](https://github.com/Cldfire/nvml-wrapper) |
+| `zbus` (D-Bus client for SMART disk health via udisks2) | MIT | [dbus2/zbus](https://github.com/dbus2/zbus) |
 
 ### Daemon ↔ client wire protocol
 
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `postcard` (compact serde wire format) | MIT OR Apache-2.0 | [jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
-| `polling` (epoll/kqueue wrapper for the sync daemon hot path) | Apache-2.0 OR MIT | [smol-rs/polling](https://github.com/smol-rs/polling) |
 | `signal-hook` | Apache-2.0 OR MIT | [vorner/signal-hook](https://github.com/vorner/signal-hook) |
+| `subtle` (constant-time comparison for auth-token checks) | BSD-3-Clause | [dalek-cryptography/subtle](https://github.com/dalek-cryptography/subtle) |
+| `libc` (Unix `SO_PEERCRED` auth, `statvfs` filesystem stats) | MIT OR Apache-2.0 | [rust-lang/libc](https://github.com/rust-lang/libc) |
 
 ### Optional always-on subsystems
 
@@ -66,19 +68,21 @@ compatibility on every CI run.
 | `rusqlite` (SQLite for opt-in history) | MIT | [rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
 | `evalexpr` (alert expression engine) | MIT | [ISibboI/evalexpr](https://github.com/ISibboI/evalexpr) |
 | `notify-rust` (desktop notifications for alerts) | MIT OR Apache-2.0 | [hoodie/notify-rust](https://github.com/hoodie/notify-rust) |
+| `ureq` (HTTP client for alert webhook notifications) | MIT OR Apache-2.0 | [algesten/ureq](https://github.com/algesten/ureq) |
 
 ### mTLS remote tunnel (`linsight-tunnel`)
 
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `tokio`, `tokio-rustls` | MIT | [tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
-| `rustls`, `rustls-pki-types` | Apache-2.0 OR ISC OR MIT | [rustls/rustls](https://github.com/rustls/rustls) |
+| `rustls` | Apache-2.0 OR ISC OR MIT | [rustls/rustls](https://github.com/rustls/rustls) |
+| `x509-parser` (client certificate parsing for mTLS) | MIT OR Apache-2.0 | [rusticata/x509-parser](https://github.com/rusticata/x509-parser) |
 
 ### Serialization + CLI plumbing
 
 | Crate | License | Project |
 | ----- | ------- | ------- |
-| `serde`, `serde_derive`, `serde_json` | MIT OR Apache-2.0 | [serde-rs/serde](https://github.com/serde-rs/serde) |
+| `serde`, `serde_json` | MIT OR Apache-2.0 | [serde-rs/serde](https://github.com/serde-rs/serde) |
 | `clap` | MIT OR Apache-2.0 | [clap-rs/clap](https://github.com/clap-rs/clap) |
 | `toml` | MIT OR Apache-2.0 | [toml-rs/toml](https://github.com/toml-rs/toml) |
 | `anyhow`, `thiserror` | MIT OR Apache-2.0 | [dtolnay/anyhow](https://github.com/dtolnay/anyhow), [dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
@@ -95,9 +99,11 @@ compatibility on every CI run.
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `proptest` | MIT OR Apache-2.0 | [proptest-rs/proptest](https://github.com/proptest-rs/proptest) |
+| `criterion` (benchmark harness for core + protocol) | MIT OR Apache-2.0 | [bheisrow/criterion](https://github.com/bheisrow/criterion) |
 | `tempfile` | MIT OR Apache-2.0 | [Stebalien/tempfile](https://github.com/Stebalien/tempfile) |
 | `assert_cmd`, `predicates` | MIT OR Apache-2.0 | [assert-rs](https://github.com/assert-rs) |
 | `escargot` (rebuilds the example plugin under `tests/dynamic_load.rs`) | MIT OR Apache-2.0 | [assert-rs/escargot](https://github.com/assert-rs/escargot) |
+| `rcgen` (test certificate generation for mTLS smoke tests) | MIT OR Apache-2.0 | [est31/rcgen](https://github.com/est31/rcgen) |
 
 ## License compatibility
 
