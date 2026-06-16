@@ -11,7 +11,8 @@
 //! than a hard error.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
 
@@ -28,19 +29,68 @@ use nvml_wrapper::Nvml;
 use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
 use tracing::{info, warn};
 
+const NVML_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONCURRENT_NVML: usize = 4;
+const BACKOFF_BASE: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(300);
+
 #[derive(Default)]
 pub struct NvmlPlugin {
     state: Mutex<Option<NvmlState>>,
 }
 
 struct NvmlState {
-    nvml: Nvml,
+    /// Wrapped in an Option so test code can construct an NvmlState without a
+    /// real NVML handle. Production code always keeps this as Some after init.
+    nvml: Option<Arc<Nvml>>,
     /// Count of devices enumerated at init time.
     device_count: u32,
     /// Optional sysroot override threaded through from PluginCtx. Used
     /// (only) to locate `/proc/<pid>/comm` when populating the per-process
     /// table so synthetic-fixture tests don't have to mock the real /proc.
     sysroot: Option<PathBuf>,
+    /// GPU index → instant after which we may retry a timed-out device.
+    backoff_until: HashMap<u32, Instant>,
+    /// Consecutive timeout strikes per GPU, used to escalate backoff.
+    strikes: HashMap<u32, u32>,
+    /// Limits concurrent NVML worker threads.
+    sem: Arc<Semaphore>,
+}
+
+/// Counting semaphore implemented with std primitives. The permit is held by
+/// the caller and released as soon as the timeout fires, so a stuck NVML
+/// device cannot permanently exhaust the concurrency budget.
+struct Semaphore {
+    permits: Mutex<usize>,
+    cvar: Condvar,
+    max: usize,
+}
+
+struct SemaphorePermit<'a> {
+    sem: &'a Semaphore,
+}
+
+impl Semaphore {
+    fn new(max: usize) -> Self {
+        Self { permits: Mutex::new(max), cvar: Condvar::new(), max }
+    }
+
+    fn acquire(&self) -> SemaphorePermit<'_> {
+        let mut permits = self.permits.lock().expect("nvml semaphore poisoned");
+        while *permits == 0 {
+            permits = self.cvar.wait(permits).expect("nvml semaphore poisoned");
+        }
+        *permits -= 1;
+        SemaphorePermit { sem: self }
+    }
+}
+
+impl Drop for SemaphorePermit<'_> {
+    fn drop(&mut self) {
+        let mut permits = self.sem.permits.lock().expect("nvml semaphore poisoned");
+        *permits = self.sem.max.min(*permits + 1);
+        self.sem.cvar.notify_one();
+    }
 }
 
 impl NvmlPlugin {
@@ -55,7 +105,7 @@ impl NvmlPlugin {
         let sysroot = ctx.sysroot().map(|p| p.to_path_buf());
         let (nvml_ref, device_count) = if let Some(state) = guard.as_mut() {
             state.sysroot = sysroot.clone();
-            (&state.nvml, state.device_count)
+            (Arc::clone(state.nvml.as_ref().expect("nvml present after init")), state.device_count)
         } else {
             let nvml = match Nvml::init() {
                 Ok(n) => n,
@@ -84,9 +134,16 @@ impl NvmlPlugin {
                 }
             }
             let device_count = nvml.device_count().map_err(|e| PluginError::Io(e.to_string()))?;
-            *guard = Some(NvmlState { nvml, device_count, sysroot: sysroot.clone() });
-            let state = guard.as_ref().expect("just inserted");
-            (&state.nvml, state.device_count)
+            let nvml = Arc::new(nvml);
+            *guard = Some(NvmlState {
+                nvml: Some(Arc::clone(&nvml)),
+                device_count,
+                sysroot: sysroot.clone(),
+                backoff_until: HashMap::new(),
+                strikes: HashMap::new(),
+                sem: Arc::new(Semaphore::new(MAX_CONCURRENT_NVML)),
+            });
+            (nvml, device_count)
         };
 
         let mut sensors = Vec::with_capacity((device_count as usize) * 5);
@@ -216,104 +273,173 @@ impl NvmlPlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let guard = self.state.lock().expect("NvmlPlugin poisoned");
+        let mut guard = self.state.lock().expect("NvmlPlugin poisoned");
         let state =
-            guard.as_ref().ok_or_else(|| PluginError::Transient("NVML not initialized".into()))?;
+            guard.as_mut().ok_or_else(|| PluginError::Transient("NVML not initialized".into()))?;
         let (idx, metric) = parse_sensor_id(sensor.as_str())
             .ok_or_else(|| PluginError::Unsupported(sensor.to_string()))?;
         if idx >= state.device_count {
             return Err(PluginError::Unsupported(sensor.to_string()));
         }
-        let dev = state.nvml.device_by_index(idx).map_err(|e| PluginError::Io(e.to_string()))?;
-        match metric {
-            "util" => {
-                let u = dev.utilization_rates().map_err(|e| PluginError::Io(e.to_string()))?;
-                Ok(Reading::Scalar(u.gpu as f64))
-            }
-            "mem_used_bytes" => {
-                let m = dev.memory_info().map_err(|e| PluginError::Io(e.to_string()))?;
-                Ok(Reading::Scalar(m.used as f64))
-            }
-            "mem_total_bytes" => {
-                let m = dev.memory_info().map_err(|e| PluginError::Io(e.to_string()))?;
-                Ok(Reading::Scalar(m.total as f64))
-            }
-            "temp_c" => {
-                let t = dev
-                    .temperature(TemperatureSensor::Gpu)
-                    .map_err(|e| PluginError::Io(e.to_string()))?;
-                Ok(Reading::Scalar(t as f64))
-            }
-            "power_w" => match dev.power_usage() {
-                Ok(mw) => Ok(Reading::Scalar(mw as f64 / 1000.0)),
-                Err(e) => {
-                    warn!(error = ?e, "power_usage failed");
-                    Err(PluginError::Transient(format!("{e}")))
-                }
-            },
-            "processes" => {
-                // NVML splits this into compute and graphics buckets; we
-                // dedup by pid so a process showing up in both is
-                // reported once with the higher of the two memory
-                // readings.
-                let mut by_pid: HashMap<u32, u64> = HashMap::new();
-                let compute_res = dev.running_compute_processes();
-                let graphics_res = dev.running_graphics_processes();
-                let mut any_ok = false;
-                if let Ok(procs) = &compute_res {
-                    any_ok = true;
-                    for p in procs {
-                        let mem = match p.used_gpu_memory {
-                            nvml_wrapper::enums::device::UsedGpuMemory::Used(b) => b,
-                            nvml_wrapper::enums::device::UsedGpuMemory::Unavailable => 0,
-                        };
-                        by_pid.entry(p.pid).and_modify(|m| *m = (*m).max(mem)).or_insert(mem);
-                    }
-                }
-                if let Ok(procs) = &graphics_res {
-                    any_ok = true;
-                    for p in procs {
-                        let mem = match p.used_gpu_memory {
-                            nvml_wrapper::enums::device::UsedGpuMemory::Used(b) => b,
-                            nvml_wrapper::enums::device::UsedGpuMemory::Unavailable => 0,
-                        };
-                        by_pid.entry(p.pid).and_modify(|m| *m = (*m).max(mem)).or_insert(mem);
-                    }
-                }
-                // If BOTH calls failed, the operator gets an explicit
-                // error rather than an empty table that's
-                // indistinguishable from "no processes running". MIG
-                // mode, exclusive-compute, or a driver that lacks the
-                // graphics query are all real conditions where this
-                // arm used to silently lie.
-                if !any_ok {
-                    let c = compute_res.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
-                    let g = graphics_res.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
-                    return Err(PluginError::Io(format!(
-                        "NVML process enumeration failed: compute=[{c}] graphics=[{g}]",
-                    )));
-                }
-                if let Err(e) = &compute_res {
-                    warn!(error = %e, "NVML compute-process enumeration failed; reporting graphics-only");
-                }
-                if let Err(e) = &graphics_res {
-                    warn!(error = %e, "NVML graphics-process enumeration failed; reporting compute-only");
-                }
-                let mut entries: Vec<(u32, u64)> = by_pid.into_iter().collect();
-                // Sort by memory descending so the GUI shows the biggest
-                // tenant first.
-                entries.sort_by_key(|(_, mem)| std::cmp::Reverse(*mem));
-                let mut rows: Vec<TableRow> = Vec::with_capacity(entries.len());
-                for (pid, mem) in entries {
-                    let comm = comm_for_pid(state.sysroot.as_deref(), pid);
-                    rows.push(TableRow {
-                        cells: vec![Cell::Number(pid as f64), Cell::Text(comm), Cell::Bytes(mem)],
-                    });
-                }
-                Ok(Reading::Table(rows))
-            }
-            _ => Err(PluginError::Unsupported(sensor.to_string())),
+        let nvml = state
+            .nvml
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| PluginError::Transient("NVML not initialized".into()))?;
+        let sysroot = state.sysroot.clone();
+        let metric = metric.to_owned();
+        self.sample_inner_with(
+            state,
+            idx,
+            move || sample_device(&nvml, idx, &metric, sysroot.as_deref()),
+            NVML_TIMEOUT,
+        )
+    }
+
+    fn sample_inner_with<F>(
+        &self,
+        state: &mut NvmlState,
+        idx: u32,
+        sample_fn: F,
+        timeout: Duration,
+    ) -> Result<Reading, PluginError>
+    where
+        F: FnOnce() -> Result<Reading, PluginError> + Send + 'static,
+    {
+        if let Some(until) = state.backoff_until.get(&idx)
+            && Instant::now() < *until
+        {
+            return Err(PluginError::Unsupported(format!(
+                "nvml gpu{idx} backed off after timeout"
+            )));
         }
+
+        let permit = state.sem.acquire();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(sample_fn());
+        });
+        let recv_result = rx.recv_timeout(timeout);
+        drop(permit);
+        let result = recv_result.map_err(|_| {
+            mark_backoff(state, idx);
+            PluginError::Unsupported(format!("nvml gpu{idx} timed out after {timeout:?}"))
+        });
+        if let Ok(Ok(_)) = &result {
+            clear_backoff(state, idx);
+        }
+        result?
+    }
+}
+
+fn mark_backoff(state: &mut NvmlState, idx: u32) {
+    let strikes = state.strikes.entry(idx).or_default();
+    *strikes = strikes.saturating_add(1);
+    let factor = 1u64 << (*strikes).min(8);
+    let backoff = BACKOFF_BASE.saturating_mul(factor as u32).min(BACKOFF_MAX);
+    state.backoff_until.insert(idx, Instant::now() + backoff);
+}
+
+fn clear_backoff(state: &mut NvmlState, idx: u32) {
+    state.strikes.remove(&idx);
+    state.backoff_until.remove(&idx);
+}
+
+fn sample_device(
+    nvml: &Nvml,
+    idx: u32,
+    metric: &str,
+    sysroot: Option<&std::path::Path>,
+) -> Result<Reading, PluginError> {
+    let dev = nvml.device_by_index(idx).map_err(|e| PluginError::Io(e.to_string()))?;
+    match metric {
+        "util" => {
+            let u = dev.utilization_rates().map_err(|e| PluginError::Io(e.to_string()))?;
+            Ok(Reading::Scalar(u.gpu as f64))
+        }
+        "mem_used_bytes" => {
+            let m = dev.memory_info().map_err(|e| PluginError::Io(e.to_string()))?;
+            Ok(Reading::Scalar(m.used as f64))
+        }
+        "mem_total_bytes" => {
+            let m = dev.memory_info().map_err(|e| PluginError::Io(e.to_string()))?;
+            Ok(Reading::Scalar(m.total as f64))
+        }
+        "temp_c" => {
+            let t = dev
+                .temperature(TemperatureSensor::Gpu)
+                .map_err(|e| PluginError::Io(e.to_string()))?;
+            Ok(Reading::Scalar(t as f64))
+        }
+        "power_w" => match dev.power_usage() {
+            Ok(mw) => Ok(Reading::Scalar(mw as f64 / 1000.0)),
+            Err(e) => {
+                warn!(error = ?e, "power_usage failed");
+                Err(PluginError::Transient(format!("{e}")))
+            }
+        },
+        "processes" => {
+            // NVML splits this into compute and graphics buckets; we
+            // dedup by pid so a process showing up in both is
+            // reported once with the higher of the two memory
+            // readings.
+            let mut by_pid: HashMap<u32, u64> = HashMap::new();
+            let compute_res = dev.running_compute_processes();
+            let graphics_res = dev.running_graphics_processes();
+            let mut any_ok = false;
+            if let Ok(procs) = &compute_res {
+                any_ok = true;
+                for p in procs {
+                    let mem = match p.used_gpu_memory {
+                        nvml_wrapper::enums::device::UsedGpuMemory::Used(b) => b,
+                        nvml_wrapper::enums::device::UsedGpuMemory::Unavailable => 0,
+                    };
+                    by_pid.entry(p.pid).and_modify(|m| *m = (*m).max(mem)).or_insert(mem);
+                }
+            }
+            if let Ok(procs) = &graphics_res {
+                any_ok = true;
+                for p in procs {
+                    let mem = match p.used_gpu_memory {
+                        nvml_wrapper::enums::device::UsedGpuMemory::Used(b) => b,
+                        nvml_wrapper::enums::device::UsedGpuMemory::Unavailable => 0,
+                    };
+                    by_pid.entry(p.pid).and_modify(|m| *m = (*m).max(mem)).or_insert(mem);
+                }
+            }
+            // If BOTH calls failed, the operator gets an explicit
+            // error rather than an empty table that's
+            // indistinguishable from "no processes running". MIG
+            // mode, exclusive-compute, or a driver that lacks the
+            // graphics query are all real conditions where this
+            // arm used to silently lie.
+            if !any_ok {
+                let c = compute_res.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+                let g = graphics_res.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+                return Err(PluginError::Io(format!(
+                    "NVML process enumeration failed: compute=[{c}] graphics=[{g}]",
+                )));
+            }
+            if let Err(e) = &compute_res {
+                warn!(error = %e, "NVML compute-process enumeration failed; reporting graphics-only");
+            }
+            if let Err(e) = &graphics_res {
+                warn!(error = %e, "NVML graphics-process enumeration failed; reporting compute-only");
+            }
+            let mut entries: Vec<(u32, u64)> = by_pid.into_iter().collect();
+            // Sort by memory descending so the GUI shows the biggest
+            // tenant first.
+            entries.sort_by_key(|(_, mem)| std::cmp::Reverse(*mem));
+            let mut rows: Vec<TableRow> = Vec::with_capacity(entries.len());
+            for (pid, mem) in entries {
+                let comm = comm_for_pid(sysroot, pid);
+                rows.push(TableRow {
+                    cells: vec![Cell::Number(pid as f64), Cell::Text(comm), Cell::Bytes(mem)],
+                });
+            }
+            Ok(Reading::Table(rows))
+        }
+        _ => Err(PluginError::Unsupported(format!("nvml.gpu{idx}.{metric}"))),
     }
 }
 
@@ -444,5 +570,105 @@ mod tests {
         std::fs::write(p.join("comm"), "my-process\n").unwrap();
         let comm = comm_for_pid(Some(dir.path()), 4242);
         assert_eq!(comm, "my-process");
+    }
+
+    fn test_state() -> NvmlState {
+        NvmlState {
+            nvml: None,
+            device_count: 2,
+            sysroot: None,
+            backoff_until: HashMap::new(),
+            strikes: HashMap::new(),
+            sem: Arc::new(Semaphore::new(MAX_CONCURRENT_NVML)),
+        }
+    }
+
+    fn ok_sample() -> Result<Reading, PluginError> {
+        Ok(Reading::Scalar(42.0))
+    }
+
+    fn hang_sample() -> Result<Reading, PluginError> {
+        std::thread::sleep(Duration::from_secs(60));
+        Ok(Reading::Scalar(0.0))
+    }
+
+    #[test]
+    fn timeout_marks_gpu_backoff() {
+        let plugin = NvmlPlugin::default();
+        let mut state = test_state();
+        let err = plugin
+            .sample_inner_with(&mut state, 0, hang_sample, Duration::from_millis(50))
+            .unwrap_err();
+        assert!(matches!(err, PluginError::Unsupported(_)), "unexpected error: {err}");
+        assert!(state.backoff_until.contains_key(&0), "gpu0 should be backed off");
+        assert_eq!(state.strikes.get(&0).copied().unwrap_or(0), 1);
+    }
+
+    #[test]
+    fn success_clears_gpu_backoff() {
+        let plugin = NvmlPlugin::default();
+        let mut state = test_state();
+        state.strikes.insert(0, 1);
+        state.backoff_until.insert(0, Instant::now() - Duration::from_millis(1));
+        let reading =
+            plugin.sample_inner_with(&mut state, 0, ok_sample, Duration::from_millis(50)).unwrap();
+        assert_eq!(reading, Reading::Scalar(42.0));
+        assert!(!state.backoff_until.contains_key(&0));
+        assert!(!state.strikes.contains_key(&0));
+    }
+
+    #[test]
+    fn active_backoff_returns_unsupported_immediately() {
+        let plugin = NvmlPlugin::default();
+        let mut state = test_state();
+        state.backoff_until.insert(0, Instant::now() + Duration::from_secs(60));
+        let err = plugin
+            .sample_inner_with(&mut state, 0, hang_sample, Duration::from_millis(50))
+            .unwrap_err();
+        assert!(matches!(err, PluginError::Unsupported(_)), "unexpected error: {err}");
+        assert_eq!(state.strikes.get(&0).copied().unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn backoff_escalates_with_each_timeout() {
+        let plugin = NvmlPlugin::default();
+        let mut state = test_state();
+        let _ = plugin
+            .sample_inner_with(&mut state, 0, hang_sample, Duration::from_millis(20))
+            .unwrap_err();
+        let first = *state.backoff_until.get(&0).unwrap();
+        state.backoff_until.insert(0, Instant::now() - Duration::from_millis(1));
+        let _ = plugin
+            .sample_inner_with(&mut state, 0, hang_sample, Duration::from_millis(20))
+            .unwrap_err();
+        let second = *state.backoff_until.get(&0).unwrap();
+        assert!(second > first, "backoff should escalate");
+        assert_eq!(state.strikes.get(&0).copied().unwrap_or(0), 2);
+    }
+
+    #[test]
+    fn semaphore_caps_nvml_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let sem = Arc::new(Semaphore::new(2));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::with_capacity(10);
+        for _ in 0..10 {
+            let sem = Arc::clone(&sem);
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            handles.push(std::thread::spawn(move || {
+                let _permit = sem.acquire();
+                let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                max_active.fetch_max(n, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(10));
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(max_active.load(Ordering::SeqCst), 2);
     }
 }
