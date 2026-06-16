@@ -17,6 +17,7 @@ use linsight_plugin_sdk::{
 };
 
 const CACHE_TTL: Duration = Duration::from_millis(50);
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
 
 const PSEUDO_FS: &[&str] = &[
     "proc",
@@ -324,14 +325,32 @@ impl FsPlugin {
             return Ok(stats);
         }
 
-        let mut stats = HashMap::with_capacity(inner.mounts.len());
-        let mut calls = 0usize;
-        for (mountpoint, _) in &inner.mounts {
-            if let Ok(v) = statvfs_raw(mountpoint) {
-                stats.insert(mountpoint.clone(), v);
-                calls += 1;
+        // Run the whole mount sweep in a worker thread with a timeout.
+        // `statvfs64()` can hang indefinitely on a stuck NFS mount; without
+        // this, the daemon's sampler thread would stall forever.
+        let mounts = inner.mounts.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut stats = HashMap::with_capacity(mounts.len());
+            let mut calls = 0usize;
+            for (mountpoint, _) in &mounts {
+                if let Ok(v) = statvfs64_sync(mountpoint) {
+                    stats.insert(mountpoint.clone(), v);
+                    calls += 1;
+                }
             }
-        }
+            let _ = tx.send((stats, calls));
+        });
+        let (stats, calls) = match rx.recv_timeout(SNAPSHOT_TIMEOUT) {
+            Ok(r) => r,
+            Err(_) => {
+                // Return Unsupported so the scheduler backs off exponentially
+                // instead of retrying every tick and stalling the sampler.
+                return Err(PluginError::Unsupported(format!(
+                    "fs snapshot timed out after {SNAPSHOT_TIMEOUT:?}"
+                )));
+            }
+        };
         tracing::debug!(target: "linsight_sensors::reads", plugin = "fs", statvfs_calls = calls);
         inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
         Ok(stats)
@@ -356,6 +375,17 @@ impl LinsightPlugin for FsPlugin {
 }
 
 fn statvfs_raw(path_str: &str) -> Result<(u64, u64, u64, u64), PluginError> {
+    let path = path_str.to_owned();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(statvfs64_sync(&path));
+    });
+    rx.recv_timeout(SNAPSHOT_TIMEOUT).map_err(|_| {
+        PluginError::Io(format!("statvfs {path_str} timed out after {SNAPSHOT_TIMEOUT:?}"))
+    })?
+}
+
+fn statvfs64_sync(path_str: &str) -> Result<(u64, u64, u64, u64), PluginError> {
     #[cfg(target_os = "linux")]
     {
         use std::mem::MaybeUninit;

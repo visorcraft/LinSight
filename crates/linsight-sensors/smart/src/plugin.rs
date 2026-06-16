@@ -22,10 +22,30 @@ use tracing::{info, warn};
 use crate::udisks;
 
 const CACHE_TTL: Duration = Duration::from_secs(30);
+const UDISKS_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
 pub struct SmartPlugin {
     inner: Mutex<Inner>,
+}
+
+/// Fetch SMART drive data from udisks2 with a wall-clock timeout. The D-Bus
+/// call can hang if udisks2 itself is wedged; without this, the daemon's
+/// sampler thread stalls on every SMART sample.
+fn fetch_smart_drives_timeout() -> Result<
+    std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+    >,
+    PluginError,
+> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::udisks::fetch_smart_drives());
+    });
+    rx.recv_timeout(UDISKS_TIMEOUT)
+        .map_err(|_| PluginError::Io(format!("udisks2 fetch timed out after {UDISKS_TIMEOUT:?}")))?
+        .map_err(PluginError::Io)
 }
 
 #[derive(Default)]
@@ -43,7 +63,7 @@ impl SmartPlugin {
         let mut inner = self.inner.lock().expect("SmartPlugin poisoned");
         inner.cache.clear();
 
-        let drives = match crate::udisks::fetch_smart_drives() {
+        let drives = match fetch_smart_drives_timeout() {
             Ok(d) => d,
             Err(e) => {
                 if !inner.warned {
@@ -118,25 +138,36 @@ impl SmartPlugin {
             return Ok(reading.clone());
         }
 
-        // Cache miss or expiry — refresh all SMART data
-        let drives = match crate::udisks::fetch_smart_drives() {
+        // Cache miss or expiry — refresh all SMART data.
+        let drives = match fetch_smart_drives_timeout() {
             Ok(d) => d,
             Err(e) => {
                 if !inner.sample_warned {
-                    warn!("udisks2 fetch failed: {e}; sampling disabled");
+                    warn!("udisks2 fetch failed: {e}; reusing stale cache if present");
                     inner.sample_warned = true;
                 }
-                return Err(PluginError::Io(format!("udisks2 fetch failed: {e}")));
+                // Serve stale cached data rather than erroring every SMART tile
+                // when D-Bus is slow or briefly hung.
+                if let Some((_, readings)) = inner.cache.get(name)
+                    && let Some((_, reading)) = readings.iter().find(|(sid, _)| sid == &sensor)
+                {
+                    return Ok(reading.clone());
+                }
+                return Err(e);
             }
         };
         inner.sample_warned = false;
 
+        // Rebuild the cache from the current drive set so removed/hot-unplugged
+        // drives don't leak memory forever.
+        let mut new_cache = HashMap::new();
         for (disk_name, props) in &drives {
             let sensor_list = udisks::sensors_from_drive(disk_name, props)?;
             let readings: Vec<(SensorId, Reading)> =
                 sensor_list.into_iter().map(|(id, _, reading)| (id, reading)).collect();
-            inner.cache.insert(disk_name.clone(), (Instant::now(), readings));
+            new_cache.insert(disk_name.clone(), (Instant::now(), readings));
         }
+        inner.cache = new_cache;
 
         // Try again after refresh
         if let Some((_, readings)) = inner.cache.get(name)

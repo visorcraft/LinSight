@@ -40,6 +40,9 @@ const MAX_EXPR_LEN: usize = 4096;
 const EVAL_TIMEOUT: Duration = Duration::from_millis(500);
 /// Maximum number of alert events retained in the ring buffer.
 pub const EVENT_CAPACITY: usize = 512;
+/// Cap on concurrent webhook POST threads. Without this, a flapping rule that
+/// fires frequently can spawn an unbounded number of detached threads.
+const MAX_CONCURRENT_WEBHOOKS: usize = 8;
 
 use linsight_core::{Reading, Sample};
 use linsight_protocol::AlertRuleJson;
@@ -635,12 +638,25 @@ fn fire_webhook(name: &str, expr: &str, url: &str) -> Result<(), String> {
     });
     let body = serde_json::to_string(&payload).map_err(|e| format!("serialize: {e}"))?;
     let url = url.to_owned();
-    let body_clone = body.clone();
-    std::thread::spawn(move || {
-        if let Err(e) = do_webhook_post(&url, &body_clone) {
+
+    // Bound concurrent webhook POST threads and reap finished ones so a
+    // frequently-firing rule cannot leak threads indefinitely.
+    static ACTIVE_WEBHOOKS: std::sync::LazyLock<
+        std::sync::Mutex<Vec<std::thread::JoinHandle<()>>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+    let mut active = ACTIVE_WEBHOOKS.lock().unwrap();
+    active.retain(|h| !h.is_finished());
+    if active.len() >= MAX_CONCURRENT_WEBHOOKS {
+        return Err(format!(
+            "dropping webhook for {name}: already at {MAX_CONCURRENT_WEBHOOKS} concurrent POSTs"
+        ));
+    }
+    let handle = std::thread::spawn(move || {
+        if let Err(e) = do_webhook_post(&url, &body) {
             tracing::warn!(url = %url, error = %e, "webhook POST failed");
         }
     });
+    active.push(handle);
     Ok(())
 }
 

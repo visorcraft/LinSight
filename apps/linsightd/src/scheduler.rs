@@ -9,6 +9,7 @@ use thiserror::Error;
 use tracing::warn;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::alerts::AlertEngineHandle;
 use crate::history::HistoryWriter;
@@ -51,7 +52,7 @@ struct Entry {
 }
 
 pub struct Scheduler {
-    host: PluginHost,
+    host: Arc<PluginHost>,
     entries: HashMap<SensorId, Entry>,
     history: Option<HistoryWriter>,
     history_db_path: Option<PathBuf>,
@@ -60,10 +61,18 @@ pub struct Scheduler {
     prom_running: bool,
 }
 
+/// One item produced by [`Scheduler::tick_plan`] and consumed by
+/// [`Scheduler::tick_commit`]. Currently just the sensor id; the commit phase
+/// looks up the live entry to apply state updates.
+#[derive(Debug)]
+pub struct TickItem {
+    pub id: SensorId,
+}
+
 impl Scheduler {
     pub fn new(host: PluginHost) -> Self {
         Self {
-            host,
+            host: Arc::new(host),
             entries: HashMap::new(),
             history: None,
             history_db_path: None,
@@ -180,13 +189,48 @@ impl Scheduler {
         }
     }
 
-    pub fn tick(&mut self, now_micros: u64) -> Vec<Sample> {
-        let mut out = Vec::new();
+    /// Borrow the plugin host. The sampler clones this `Arc` and samples
+    /// outside the scheduler mutex so a slow/hung plugin cannot stall
+    /// subscriptions, RPCs, or other sensors.
+    pub fn host(&self) -> Arc<PluginHost> {
+        Arc::clone(&self.host)
+    }
+
+    /// First phase of a scheduler tick: decide which sensors are due and
+    /// optimistically advance their `next_due_at_micros` so a slow sampler
+    /// does not double-sample. Returns a list that the caller samples while
+    /// NOT holding the scheduler mutex.
+    pub fn tick_plan(&mut self, now_micros: u64) -> Vec<TickItem> {
+        let mut due = Vec::new();
         for (id, entry) in self.entries.iter_mut() {
             if now_micros < entry.next_due_at_micros {
                 continue;
             }
-            match self.host.sample_to(id, now_micros) {
+            due.push(TickItem { id: id.clone() });
+            // Static sensors (total capacity, etc.) never change — park
+            // indefinitely after the first reading instead of re-polling on
+            // the native cadence. On error, tick_commit overwrites this.
+            entry.next_due_at_micros =
+                if entry.is_static { u64::MAX } else { now_micros + entry.period_micros };
+        }
+        due
+    }
+
+    /// Second phase of a scheduler tick: apply sampling results produced by
+    /// the caller while the scheduler mutex was released. Records history,
+    /// feeds alerts, and returns the successfully produced samples.
+    pub fn tick_commit(
+        &mut self,
+        results: Vec<(TickItem, Result<Sample, PluginError>)>,
+        now_micros: u64,
+    ) -> Vec<Sample> {
+        let mut out = Vec::with_capacity(results.len());
+        for (item, result) in results {
+            let Some(entry) = self.entries.get_mut(&item.id) else {
+                // Sensor was unsubscribed between plan and commit.
+                continue;
+            };
+            match result {
                 Ok(sample) => {
                     entry.unsupported_strikes = 0;
                     entry.last_sampled_at_micros = Some(now_micros);
@@ -197,11 +241,6 @@ impl Scheduler {
                         alerts.on_sample(&sample);
                     }
                     out.push(sample);
-                    // Static sensors (total capacity, etc.) never change —
-                    // park indefinitely after the first reading instead of
-                    // re-polling on the native cadence.
-                    entry.next_due_at_micros =
-                        if entry.is_static { u64::MAX } else { now_micros + entry.period_micros };
                 }
                 Err(PluginError::Unsupported(_)) => {
                     // Back off and quiet down. First strike logs; subsequent
@@ -209,14 +248,14 @@ impl Scheduler {
                     // hot-unplugged device doesn't fill the log per tick.
                     entry.unsupported_strikes = entry.unsupported_strikes.saturating_add(1);
                     if entry.unsupported_strikes == 1 {
-                        warn!(sensor = %id, "plugin no longer supports sensor; backing off");
+                        warn!(sensor = %item.id, "plugin no longer supports sensor; backing off");
                     }
                     let backoff_factor = 1u64 << entry.unsupported_strikes.min(8);
                     entry.next_due_at_micros =
                         now_micros + entry.period_micros.saturating_mul(backoff_factor);
                 }
                 Err(e) => {
-                    warn!(sensor = %id, error = ?e, "sample failed");
+                    warn!(sensor = %item.id, error = ?e, "sample failed");
                     entry.next_due_at_micros = now_micros + entry.period_micros;
                 }
             }
@@ -355,13 +394,27 @@ mod tests {
 
     use super::*;
 
+    /// Test helper that runs a full tick synchronously under the lock.
+    fn tick(sched: &mut Scheduler, now_micros: u64) -> Vec<Sample> {
+        let plan = sched.tick_plan(now_micros);
+        let host = sched.host();
+        let results: Vec<_> = plan
+            .into_iter()
+            .map(|item| {
+                let sample = host.sample_to(&item.id, now_micros);
+                (item, sample)
+            })
+            .collect();
+        sched.tick_commit(results, now_micros)
+    }
+
     #[test]
     fn subscribe_once_then_tick_yields_sample() {
         let host = PluginHost::with_builtins();
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("cpu.util");
         sched.subscribe(&id, None).unwrap();
-        let samples = sched.tick(1_000);
+        let samples = tick(&mut sched, 1_000);
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].sensor, id);
     }
@@ -374,9 +427,9 @@ mod tests {
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("mem.total_bytes");
         sched.subscribe(&id, None).unwrap();
-        assert_eq!(sched.tick(1_000).len(), 1, "first tick should sample once");
-        assert!(sched.tick(60_000_000).is_empty(), "must not re-poll at +60s");
-        assert!(sched.tick(3_600_000_000).is_empty(), "must not re-poll at +1h");
+        assert_eq!(tick(&mut sched, 1_000).len(), 1, "first tick should sample once");
+        assert!(tick(&mut sched, 60_000_000).is_empty(), "must not re-poll at +60s");
+        assert!(tick(&mut sched, 3_600_000_000).is_empty(), "must not re-poll at +1h");
     }
 
     #[test]
@@ -387,10 +440,10 @@ mod tests {
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("mem.total_bytes");
         sched.subscribe(&id, None).unwrap();
-        assert_eq!(sched.tick(1_000).len(), 1);
-        assert!(sched.tick(60_000_000).is_empty(), "parked after first sample");
+        assert_eq!(tick(&mut sched, 1_000).len(), 1);
+        assert!(tick(&mut sched, 60_000_000).is_empty(), "parked after first sample");
         sched.subscribe(&id, None).unwrap(); // new client
-        assert_eq!(sched.tick(70_000_000).len(), 1, "new subscriber gets one reading");
+        assert_eq!(tick(&mut sched, 70_000_000).len(), 1, "new subscriber gets one reading");
     }
 
     #[test]
@@ -399,8 +452,8 @@ mod tests {
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("cpu.util");
         sched.subscribe(&id, None).unwrap();
-        let _ = sched.tick(1_000_000);
-        let samples = sched.tick(1_500_000);
+        let _ = tick(&mut sched, 1_000_000);
+        let samples = tick(&mut sched, 1_500_000);
         assert!(samples.is_empty());
     }
 
@@ -411,7 +464,7 @@ mod tests {
         let id = SensorId::new("cpu.util");
         let sub = sched.subscribe(&id, None).unwrap();
         sched.unsubscribe(&sub);
-        let samples = sched.tick(10_000_000);
+        let samples = tick(&mut sched, 10_000_000);
         assert!(samples.is_empty());
     }
 
@@ -423,9 +476,9 @@ mod tests {
         let first = sched.subscribe(&id, None).unwrap();
         let second = sched.subscribe(&id, None).unwrap();
         sched.unsubscribe(&first);
-        assert_eq!(sched.tick(10_000_000).len(), 1);
+        assert_eq!(tick(&mut sched, 10_000_000).len(), 1);
         sched.unsubscribe(&second);
-        assert!(sched.tick(20_000_000).is_empty());
+        assert!(tick(&mut sched, 20_000_000).is_empty());
     }
 
     #[test]
@@ -434,8 +487,8 @@ mod tests {
         let mut sched = Scheduler::new(host);
         let id = SensorId::new("cpu.util");
         sched.subscribe(&id, Some(99.0)).unwrap();
-        let _ = sched.tick(0);
-        let samples_at_500ms = sched.tick(500_000);
+        let _ = tick(&mut sched, 0);
+        let samples_at_500ms = tick(&mut sched, 500_000);
         assert!(samples_at_500ms.is_empty(), "should still be once per second");
     }
 
@@ -447,18 +500,18 @@ mod tests {
         let slow = sched.subscribe(&id, Some(0.5)).unwrap();
         let fast = sched.subscribe(&id, None).unwrap();
 
-        assert_eq!(sched.tick(0).len(), 1);
-        assert_eq!(sched.tick(1_000_000).len(), 1);
+        assert_eq!(tick(&mut sched, 0).len(), 1);
+        assert_eq!(tick(&mut sched, 1_000_000).len(), 1);
 
         sched.unsubscribe(&fast);
         assert!(
-            sched.tick(2_000_000).is_empty(),
+            tick(&mut sched, 2_000_000).is_empty(),
             "slow subscriber should not inherit fast cadence"
         );
-        assert_eq!(sched.tick(3_000_000).len(), 1);
+        assert_eq!(tick(&mut sched, 3_000_000).len(), 1);
 
         sched.unsubscribe(&slow);
-        assert!(sched.tick(5_000_000).is_empty());
+        assert!(tick(&mut sched, 5_000_000).is_empty());
     }
 
     #[test]

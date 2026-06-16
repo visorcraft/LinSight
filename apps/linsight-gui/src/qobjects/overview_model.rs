@@ -976,6 +976,12 @@ fn compute_network_rates(state: &mut SampleState) -> String {
         }
     }
 
+    // Prune entries for network sensors that have disappeared (interface
+    // removed/renamed) so net_prev doesn't grow unboundedly over long runs.
+    let active_net_ids: std::collections::HashSet<String> =
+        state.tiles.keys().filter(|id| id.starts_with("net.")).cloned().collect();
+    state.net_prev.retain(|id, _| active_net_ids.contains(id));
+
     let ordered: Vec<&NetworkInterfaceJson> = by_iface.values().collect();
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
 }
@@ -1432,6 +1438,26 @@ mod tests {
         assert_eq!(iface["link_state"], "up");
         assert_eq!(iface["speed_mbps"], 1000.0);
         assert_eq!(iface["rx_bytes_per_sec"], 1_000_000.0);
+    }
+
+    #[test]
+    fn network_rate_prunes_stale_prev_entries() {
+        // When a network interface disappears, its net_prev entry must be
+        // removed so the map doesn't grow unboundedly over a long session.
+        let mut state = empty_state_with_tiles(&["net.eth0.rx_bytes", "net.eth1.rx_bytes"]);
+        apply_sample(&mut state, &counter_sample("net.eth0.rx_bytes", 0, 1_000_000));
+        apply_sample(&mut state, &counter_sample("net.eth1.rx_bytes", 0, 2_000_000));
+        let _ = compute_network_rates(&mut state);
+        assert!(state.net_prev.contains_key("net.eth0.rx_bytes"));
+        assert!(state.net_prev.contains_key("net.eth1.rx_bytes"));
+
+        // Simulate eth1 disappearing from the sensor catalogue.
+        state.tiles.remove("net.eth1.rx_bytes");
+        state.id_order.retain(|id| id != "net.eth1.rx_bytes");
+        let _ = compute_network_rates(&mut state);
+
+        assert!(state.net_prev.contains_key("net.eth0.rx_bytes"));
+        assert!(!state.net_prev.contains_key("net.eth1.rx_bytes"));
     }
 
     #[test]

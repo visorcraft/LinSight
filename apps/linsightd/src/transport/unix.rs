@@ -44,6 +44,15 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// peers while staying well under the typical 1024 fd soft limit.
 const MAX_CLIENT_SESSIONS: usize = 64;
 
+/// Per-client outbound queue capacity. A slow client (e.g. a GUI whose event
+/// loop is backlogged) cannot be allowed to push an unbounded number of
+/// `ServerMsg`s into memory. 1024 samples is ~150 s of backlog at the default
+/// 150 ms tick with a single subscription, or several seconds with many
+/// subscriptions — long enough to survive transient stalls, small enough to
+/// cap RSS growth. When full, samples are dropped rather than disconnecting,
+/// so a laggy client recovers live data once it catches up.
+const OUTBOUND_QUEUE_CAP: usize = 1024;
+
 /// Sentinel returned by [`now_micros`] when the system clock is before
 /// `UNIX_EPOCH`. Distinguishable from real timestamps for downstream code.
 const TS_SENTINEL_BAD_CLOCK: u64 = u64::MAX;
@@ -52,7 +61,7 @@ const TS_SENTINEL_BAD_CLOCK: u64 = u64::MAX;
 type ClientSubscriptions = HashMap<SensorId, Vec<Subscription>>;
 
 struct ClientSink {
-    tx: std::sync::mpsc::Sender<ServerMsg>,
+    tx: std::sync::mpsc::SyncSender<ServerMsg>,
     subscriptions: Arc<Mutex<ClientSubscriptions>>,
 }
 
@@ -272,9 +281,25 @@ fn spawn_sampler(
             // global due times. Use the protocol minimum so clients that ask
             // for lower latency are not capped by the shared sampler.
             thread::sleep(Duration::from_millis(linsight_protocol::PUMP_INTERVAL_MIN_MS as u64));
+
+            // Phase 1: plan under lock; phase 2: sample WITHOUT the lock so a
+            // slow/hung plugin cannot block subscriptions, RPCs, or other
+            // sensors. Phase 3: commit under lock.
+            let now = now_micros();
+            let (host, plan) = {
+                let mut s = sched.lock().unwrap();
+                (s.host(), s.tick_plan(now))
+            };
+            let results: Vec<_> = plan
+                .into_iter()
+                .map(|item| {
+                    let sample = host.sample_to(&item.id, now);
+                    (item, sample)
+                })
+                .collect();
             let samples = {
                 let mut s = sched.lock().unwrap();
-                s.tick(now_micros())
+                s.tick_commit(results, now)
             };
             if samples.is_empty() {
                 continue;
@@ -291,8 +316,15 @@ fn spawn_sampler(
                 drop(subscriptions);
 
                 for sample in interested {
-                    if sink.tx.send(ServerMsg::Sample(sample)).is_err() {
-                        return false;
+                    match sink.tx.try_send(ServerMsg::Sample(sample)) {
+                        Ok(()) => {}
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // Slow client: drop the sample so the daemon's
+                            // memory doesn't grow without bound. The client
+                            // recovers live data once its pump catches up.
+                            tracing::debug!("outbound queue full; dropping sample for slow client");
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return false,
                     }
                 }
                 true
@@ -429,7 +461,7 @@ fn serve(
     // connection identities.
     let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
     let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
-    let (outbound_tx, outbound_rx) = std::sync::mpsc::channel::<ServerMsg>();
+    let (outbound_tx, outbound_rx) = std::sync::mpsc::sync_channel::<ServerMsg>(OUTBOUND_QUEUE_CAP);
     clients.lock().unwrap().insert(
         client_id,
         ClientSink { tx: outbound_tx, subscriptions: Arc::clone(&subscriptions) },
@@ -997,7 +1029,15 @@ fn handle_request(
 fn broadcast_sensor_list(clients: &ClientMap, infos: Vec<linsight_protocol::SensorInfo>) {
     let msg = ServerMsg::SensorListBroadcast(infos);
     let mut map = clients.lock().unwrap();
-    map.retain(|_id, sink| sink.tx.send(msg.clone()).is_ok());
+    map.retain(|_id, sink| match sink.tx.try_send(msg.clone()) {
+        Ok(()) => true,
+        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+            // Same backpressure policy as samples: drop rather than disconnect.
+            tracing::debug!("outbound queue full; dropping sensor-list broadcast for slow client");
+            true
+        }
+        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
+    });
 }
 
 #[cfg(test)]
@@ -1080,7 +1120,7 @@ mod tests {
     #[test]
     fn broadcast_sensor_list_reaches_subscribed_clients() {
         let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::sync_channel(16);
         let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
         clients
             .lock()
@@ -1111,7 +1151,7 @@ mod tests {
     #[test]
     fn broadcast_sensor_list_drops_disconnected_clients() {
         let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = std::sync::mpsc::channel::<ServerMsg>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<ServerMsg>(16);
         drop(rx);
         let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
         clients
