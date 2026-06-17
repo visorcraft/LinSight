@@ -1,3 +1,11 @@
+linsight (1.17.1-1) unstable; urgency=medium
+
+  * Fix packaged GUI failing to launch (no window): QML pages imported
+    shared JS helpers via an absolute qrc:/qml/Shared.js URL the older
+    Qt bundled in the AppImage could not resolve. Import them relatively.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 17 Jun 2026 13:00:00 +0000
+
 linsight (1.17.0-1) unstable; urgency=medium
 
   * v1.17.0 release. Performance and UI polish: Arc-shared samples and

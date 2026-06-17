@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.17.0
+Version:        1.17.1
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Wed Jun 17 2026 VisorCraft LLC <support@visorcraft.com> - 1.17.1-1
+- Fix packaged GUI failing to launch (no window): QML pages imported shared JS
+  helpers via an absolute qrc:/qml/Shared.js URL the older Qt bundled in the
+  AppImage could not resolve. Import them relatively.
+
 * Wed Jun 17 2026 VisorCraft LLC <support@visorcraft.com> - 1.17.0-1
 - v1.17.0 release. Performance and UI polish: Arc-shared samples/catalogues,
   reusable serialization buffers, dirty-delta GUI tile updates, lightweight

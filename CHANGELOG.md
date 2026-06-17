@@ -7,6 +7,18 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.17.1] — 2026-06-17
+
+- **Fix: packaged GUI failed to launch (blank, no window).** The QML pages
+  imported the shared JS helpers via an absolute `qrc:/qml/Shared.js` URL.
+  cxx-qt-build registers secondary qrc resources under the module prefix, so
+  the file actually lives beside the `.qml` files at
+  `qrc:/qt/qml/com/visorcraft/LinSight/qml/Shared.js`. The newer Qt in dev
+  builds resolved the wrong absolute path leniently, but the older Qt bundled
+  in the AppImage (and other packaged formats) did not, so `Main.qml` failed to
+  load and no window appeared. Import the helpers by relative path
+  (`import "Shared.js"`), which resolves correctly on every Qt 6.x.
+
 ## [1.17.0] — 2026-06-17
 
 - **Performance: shared allocations in the hot path.** Daemon sample fan-out and
