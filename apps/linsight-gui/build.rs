@@ -99,9 +99,15 @@ fn main() {
                     QResourceFile::new("resources/linsight-512.png")
                         .alias("resources/linsight-512.png"),
                 )
-                // Shared JS helpers used by several QML files. Bundled as a
-                // qrc resource so the files can import it with a stable
-                // `qrc:/qml/Shared.js` URL regardless of install layout.
+                // Shared JS helpers (`.pragma library`) imported by several
+                // .qml files. cxx-qt-build auto-prefixes secondary qrc
+                // resources with the module path, so this alias resolves to
+                // `qrc:/qt/qml/com/visorcraft/LinSight/qml/Shared.js` — beside
+                // the .qml files — letting them use a relative
+                // `import "Shared.js"`. The previous absolute
+                // `import "qrc:/qml/Shared.js"` pointed at the wrong path and
+                // only resolved under Qt 6.11; the AppImage's Qt 6.4 could
+                // not find it, so no window appeared.
                 .file(QResourceFile::new("qml/Shared.js").alias("qml/Shared.js")),
         ),
     );

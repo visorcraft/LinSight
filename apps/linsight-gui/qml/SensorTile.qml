@@ -5,7 +5,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import "qrc:/qml/Shared.js" as Shared
+import "Shared.js" as Shared
 
 Rectangle {
     id: root

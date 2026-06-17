@@ -18,7 +18,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import "qrc:/qml/Shared.js" as Shared
+import "Shared.js" as Shared
 
 Kirigami.Page {
     id: page
