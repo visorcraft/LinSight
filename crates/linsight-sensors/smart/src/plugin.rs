@@ -8,7 +8,7 @@
 //! registers zero sensors — never an error loop.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use linsight_core::{HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId};
@@ -23,7 +23,6 @@ use crate::udisks;
 
 const CACHE_TTL: Duration = Duration::from_secs(30);
 const UDISKS_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_CONCURRENT_UDISKS: usize = 2;
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(300);
 
@@ -56,7 +55,6 @@ where
         return Err(PluginError::Unsupported("udisks2 backed off after repeated timeouts".into()));
     }
 
-    let permit = inner.sem.acquire();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(fetch());
@@ -68,7 +66,6 @@ where
             Some(Instant::now() + BACKOFF_BASE.saturating_mul(factor as u32).min(BACKOFF_MAX));
         PluginError::Unsupported(format!("udisks2 fetch timed out after {timeout:?}"))
     });
-    drop(permit);
 
     if result.is_ok() {
         inner.timeout_strikes = 0;
@@ -77,6 +74,7 @@ where
     result?.map_err(PluginError::Io)
 }
 
+#[derive(Default)]
 struct Inner {
     /// Disk name → cached sensor readings.
     cache: HashMap<String, (Instant, Vec<(SensorId, Reading)>)>,
@@ -88,57 +86,6 @@ struct Inner {
     backoff_until: Option<Instant>,
     /// Consecutive timeout strikes, used to escalate backoff.
     timeout_strikes: u32,
-    /// Limits concurrent udisks2 worker threads.
-    sem: Arc<Semaphore>,
-}
-
-impl Default for Inner {
-    fn default() -> Self {
-        Self {
-            cache: HashMap::new(),
-            warned: false,
-            sample_warned: false,
-            backoff_until: None,
-            timeout_strikes: 0,
-            sem: Arc::new(Semaphore::new(MAX_CONCURRENT_UDISKS)),
-        }
-    }
-}
-
-/// Counting semaphore implemented with std primitives. The permit is held by
-/// the caller and released as soon as the timeout fires, so a stuck udisks2
-/// call cannot permanently exhaust the concurrency budget.
-struct Semaphore {
-    permits: Mutex<usize>,
-    cvar: Condvar,
-    max: usize,
-}
-
-struct SemaphorePermit<'a> {
-    sem: &'a Semaphore,
-}
-
-impl Semaphore {
-    fn new(max: usize) -> Self {
-        Self { permits: Mutex::new(max), cvar: Condvar::new(), max }
-    }
-
-    fn acquire(&self) -> SemaphorePermit<'_> {
-        let mut permits = self.permits.lock().expect("smart semaphore poisoned");
-        while *permits == 0 {
-            permits = self.cvar.wait(permits).expect("smart semaphore poisoned");
-        }
-        *permits -= 1;
-        SemaphorePermit { sem: self }
-    }
-}
-
-impl Drop for SemaphorePermit<'_> {
-    fn drop(&mut self) {
-        let mut permits = self.sem.permits.lock().expect("smart semaphore poisoned");
-        *permits = self.sem.max.min(*permits + 1);
-        self.sem.cvar.notify_one();
-    }
 }
 
 impl SmartPlugin {
@@ -372,31 +319,5 @@ mod tests {
         let second = inner.backoff_until.unwrap();
         assert!(second > first, "backoff should escalate");
         assert_eq!(inner.timeout_strikes, 2);
-    }
-
-    #[test]
-    fn semaphore_caps_udisks_concurrency() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        let sem = Arc::new(Semaphore::new(2));
-        let active = Arc::new(AtomicUsize::new(0));
-        let max_active = Arc::new(AtomicUsize::new(0));
-        let mut handles = Vec::with_capacity(10);
-        for _ in 0..10 {
-            let sem = Arc::clone(&sem);
-            let active = Arc::clone(&active);
-            let max_active = Arc::clone(&max_active);
-            handles.push(std::thread::spawn(move || {
-                let _permit = sem.acquire();
-                let n = active.fetch_add(1, Ordering::SeqCst) + 1;
-                max_active.fetch_max(n, Ordering::SeqCst);
-                std::thread::sleep(Duration::from_millis(10));
-                active.fetch_sub(1, Ordering::SeqCst);
-            }));
-        }
-        for h in handles {
-            h.join().unwrap();
-        }
-        assert_eq!(max_active.load(Ordering::SeqCst), 2);
     }
 }

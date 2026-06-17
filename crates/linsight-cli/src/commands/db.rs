@@ -16,6 +16,8 @@ use anyhow::{Context, Result};
 use linsight_core::{history_db_path, parse_duration_dhm};
 use rusqlite::{Connection, OpenFlags};
 
+use super::csv_cell;
+
 // NOTE: The d/h/m integer-suffix grammar is shared with `apps/linsightd/src/history.rs`
 // `parse_retention` — both now delegate to `linsight_core::parse_duration_dhm`.
 // Two legacy float-grammar parsers remain local to their call sites:
@@ -200,88 +202,55 @@ pub fn export(
         ))
     };
 
+    // Build the params vector once: with a sensor filter we bind (sid, cutoff);
+    // without, just (cutoff,). A single iteration then feeds both formats.
+    let sensor_owned = sensor.map(str::to_owned);
+    let cutoff_i64 = cutoff_micros as i64;
+    let params: Vec<&dyn rusqlite::ToSql> = match &sensor_owned {
+        Some(sid) => vec![sid as &dyn rusqlite::ToSql, &cutoff_i64],
+        None => vec![&cutoff_i64],
+    };
+    let rows = stmt.query_map(params.as_slice(), map_row)?;
+
     match format {
         "csv" => {
             writeln!(out, "sensor_id,ts,scalar,counter,state")?;
-            if let Some(sid) = sensor {
-                let rows = stmt.query_map(rusqlite::params![sid, cutoff_micros as i64], map_row)?;
-                for row in rows {
-                    let (sid, ts, scalar, counter, state) = row?;
-                    let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
-                    let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
-                    let state_s = state.as_deref().unwrap_or("");
-                    writeln!(
-                        out,
-                        "{},{},{},{},{}",
-                        escape_csv(&sid),
-                        ts,
-                        scalar_s,
-                        counter_s,
-                        escape_csv(state_s),
-                    )?;
-                }
-            } else {
-                let rows = stmt.query_map(rusqlite::params![cutoff_micros as i64], map_row)?;
-                for row in rows {
-                    let (sid, ts, scalar, counter, state) = row?;
-                    let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
-                    let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
-                    let state_s = state.as_deref().unwrap_or("");
-                    writeln!(
-                        out,
-                        "{},{},{},{},{}",
-                        escape_csv(&sid),
-                        ts,
-                        scalar_s,
-                        counter_s,
-                        escape_csv(state_s),
-                    )?;
-                }
+            for row in rows {
+                let (sid, ts, scalar, counter, state) = row?;
+                let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
+                let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
+                let state_s = state.as_deref().unwrap_or("");
+                writeln!(
+                    out,
+                    "{},{},{},{},{}",
+                    csv_cell(&sid),
+                    ts,
+                    scalar_s,
+                    counter_s,
+                    csv_cell(state_s),
+                )?;
             }
         }
         "json" => {
             writeln!(out, "[")?;
             let mut first = true;
-            if let Some(sid) = sensor {
-                let rows = stmt.query_map(rusqlite::params![sid, cutoff_micros as i64], map_row)?;
-                for row in rows {
-                    let (sid, ts, scalar, counter, state) = row?;
-                    if !first {
-                        writeln!(out, ",")?;
-                    }
-                    first = false;
-                    write!(out, "  ")?;
-                    serde_json::to_writer(
-                        &mut out,
-                        &serde_json::json!({
-                            "sensor_id": sid,
-                            "ts": ts,
-                            "scalar": scalar,
-                            "counter": counter,
-                            "state": state,
-                        }),
-                    )?;
+            for row in rows {
+                let (sid, ts, scalar, counter, state) = row?;
+                if !first {
+                    writeln!(out, ",")?;
                 }
-            } else {
-                let rows = stmt.query_map(rusqlite::params![cutoff_micros as i64], map_row)?;
-                for row in rows {
-                    let (sid, ts, scalar, counter, state) = row?;
-                    if !first {
-                        writeln!(out, ",")?;
-                    }
-                    first = false;
-                    write!(out, "  ")?;
-                    serde_json::to_writer(
-                        &mut out,
-                        &serde_json::json!({
-                            "sensor_id": sid,
-                            "ts": ts,
-                            "scalar": scalar,
-                            "counter": counter,
-                            "state": state,
-                        }),
-                    )?;
-                }
+                first = false;
+                write!(out, "  ")?;
+                serde_json::to_writer(
+                    &mut out,
+                    &serde_json::json!({
+                        "sensor_id": sid,
+                        "ts": ts,
+                        "scalar": scalar,
+                        "counter": counter,
+                        "state": state,
+                    }),
+                )?;
             }
             if !first {
                 writeln!(out)?;
@@ -296,15 +265,6 @@ pub fn export(
     }
 
     Ok(())
-}
-
-fn escape_csv(s: &str) -> String {
-    if s.contains(",") || s.contains("\"") || s.contains("\n") {
-        let escaped = s.replace("\"", "\"\"");
-        format!("\"{}\"", escaped)
-    } else {
-        s.to_string()
-    }
 }
 
 #[cfg(test)]

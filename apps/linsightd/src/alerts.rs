@@ -656,8 +656,8 @@ fn wall_micros() -> u64 {
 }
 
 /// Build async notification jobs for desktop/exec targets. Webhook targets are
-/// already asynchronous and bounded, so they are fired inline; `shell:` and
-/// unknown targets are logged and dropped.
+/// already asynchronous and bounded, so they are fired inline; unknown targets
+/// are logged and dropped.
 fn build_notifications(name: &str, expr: &str, notify: &[String]) -> Vec<NotifyJob> {
     debug!(rule = %name, expr = %expr, "alert firing");
     let mut jobs = Vec::new();
@@ -686,15 +686,6 @@ fn build_notifications(name: &str, expr: &str, notify: &[String]) -> Vec<NotifyJ
             if let Err(e) = fire_webhook(name, expr, url) {
                 warn!(target = %target, error = %e, "webhook notify failed");
             }
-        } else if let Some(_cmd) = target.strip_prefix("shell:") {
-            // The old `shell:<cmd>` target was removed because it passed
-            // user-config strings to `sh -c` unescaped. Anyone able to
-            // write the alerts config (malicious dotfile, sync gone wrong)
-            // could execute arbitrary commands as the daemon's user.
-            warn!(
-                target = %target,
-                "the `shell:` notify target was removed for safety; use `exec:<argv>` instead",
-            );
         } else {
             warn!(target = %target, "unknown notify target");
         }

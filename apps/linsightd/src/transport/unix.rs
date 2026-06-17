@@ -170,50 +170,6 @@ fn auth_token_ok(expected: Option<&str>, provided: Option<&str>) -> bool {
     }
 }
 
-/// Simple token-bucket rate limiter for the accept loop.
-/// Refills one token per `interval` up to `capacity`. Enabled at 20/s
-/// by default; configurable via `LINSIGHT_ACCEPT_RATE` env var.
-struct AcceptRateLimiter {
-    tokens: f64,
-    capacity: f64,
-    refill_per_sec: f64,
-    last_refill: std::time::Instant,
-}
-
-impl AcceptRateLimiter {
-    fn new(rate: f64) -> Self {
-        let rate = rate.clamp(1.0, 200.0);
-        Self {
-            tokens: rate,
-            capacity: rate,
-            refill_per_sec: rate,
-            last_refill: std::time::Instant::now(),
-        }
-    }
-
-    fn from_env() -> Self {
-        let rate: f64 = std::env::var("LINSIGHT_ACCEPT_RATE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(20.0_f64)
-            .clamp(1.0, 200.0);
-        Self::new(rate)
-    }
-
-    fn acquire(&mut self) -> bool {
-        let now = std::time::Instant::now();
-        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
-        self.tokens = (self.tokens + elapsed * self.refill_per_sec).min(self.capacity);
-        self.last_refill = now;
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
-            true
-        } else {
-            false
-        }
-    }
-}
-
 pub fn accept_loop(
     listener: UnixListener,
     scheduler: Arc<Mutex<Scheduler>>,
@@ -230,13 +186,7 @@ pub fn accept_loop(
     let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
     let sampler = spawn_sampler(Arc::clone(&shared), Arc::clone(&clients), Arc::clone(&shutdown));
     let mut consecutive_err: u32 = 0;
-    let mut rate_limiter = AcceptRateLimiter::from_env();
     while !shutdown.load(Ordering::Relaxed) {
-        // Throttle accept rate: if tokens are exhausted, sleep ~50ms and retry.
-        if !rate_limiter.acquire() {
-            std::thread::sleep(Duration::from_millis(50));
-            continue;
-        }
         match listener.accept() {
             Ok((s, _addr)) => {
                 consecutive_err = 0;
@@ -1368,34 +1318,6 @@ mod tests {
     use super::*;
     use crate::plugin_host::PluginHost;
     use crate::scheduler::{Scheduler, TickItem};
-
-    #[test]
-    fn rate_limiter_allows_burst_up_to_capacity() {
-        let mut lim = AcceptRateLimiter::new(10.0);
-        for _ in 0..10 {
-            assert!(lim.acquire(), "should consume token from full bucket");
-        }
-        assert!(!lim.acquire(), "bucket should be empty after burst");
-    }
-
-    #[test]
-    fn rate_limiter_refills_over_time() {
-        let mut lim = AcceptRateLimiter::new(100.0);
-        // Drain.
-        while lim.acquire() {}
-        assert!(!lim.acquire());
-        // Wait for one token.
-        thread::sleep(Duration::from_millis(15));
-        assert!(lim.acquire(), "token should refill");
-    }
-
-    #[test]
-    fn rate_limiter_clamps_rate() {
-        let lim = AcceptRateLimiter::new(0.5);
-        assert_eq!(lim.capacity, 1.0);
-        let lim = AcceptRateLimiter::new(500.0);
-        assert_eq!(lim.capacity, 200.0);
-    }
 
     #[test]
     fn session_guard_decrements_on_drop() {

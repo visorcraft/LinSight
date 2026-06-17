@@ -47,6 +47,18 @@ pub(crate) fn connect_and_hello(socket: &Path) -> Result<Session> {
     Ok(Session { reader, writer })
 }
 
+/// Escape a string for safe CSV output (RFC 4180): wraps in double quotes
+/// when the value contains `,`, `"`, `\n`, or `\r`, and doubles any embedded
+/// `"`. Shared by `db::export --format csv` and `history --format csv`.
+pub(crate) fn csv_cell(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        let escaped = s.replace('"', "\"\"");
+        format!("\"{escaped}\"")
+    } else {
+        s.to_string()
+    }
+}
+
 /// Send a RequestOp RPC and return the matching ResponsePayload.
 pub(crate) fn request_rpc(
     session: &mut Session,

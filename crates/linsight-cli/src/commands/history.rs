@@ -7,34 +7,7 @@ use anyhow::Result;
 use linsight_core::{Reading, SensorId};
 use linsight_protocol::{RequestOp, ResponsePayload};
 
-use crate::commands::{connect_and_hello, request_rpc};
-
-/// Escape a string for safe JSON string interpolation.
-fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Escape a string for safe CSV output (RFC 4180).
-fn csv_cell(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        let escaped = s.replace('"', "\"\"");
-        format!("\"{escaped}\"")
-    } else {
-        s.to_string()
-    }
-}
+use crate::commands::{connect_and_hello, csv_cell, request_rpc};
 
 /// Parse a simple duration string like "5m" or "1h" into microseconds.
 fn parse_duration_to_micros(s: &str) -> Result<u64> {
@@ -94,10 +67,10 @@ pub fn run(
                     println!("[");
                     let mut emitted = 0;
                     for s in &samples {
-                        let (value_str, kind) = match &s.reading {
+                        let (value, kind) = match &s.reading {
                             Reading::Scalar(v) => (format!("{v}"), "scalar"),
                             Reading::Counter(v) => (format!("{v}"), "counter"),
-                            Reading::State(v) => (format!("\"{}\"", json_escape(v)), "state"),
+                            Reading::State(v) => (serde_json::to_string(v).unwrap(), "state"),
                             Reading::Table(_) => {
                                 if !warned_table {
                                     eprintln!(
@@ -111,12 +84,10 @@ pub fn run(
                         if emitted > 0 {
                             println!(",")
                         }
+                        let sensor = serde_json::to_string(s.sensor.as_str()).unwrap();
                         print!(
-                            r#"  {{"ts":{},"sensor":"{}","value":{},"kind":"{}"}}"#,
-                            s.ts_micros,
-                            json_escape(s.sensor.as_str()),
-                            value_str,
-                            kind,
+                            "  {{\"ts\":{},\"sensor\":{},\"value\":{},\"kind\":\"{}\"}}",
+                            s.ts_micros, sensor, value, kind,
                         );
                         emitted += 1;
                     }
@@ -131,7 +102,7 @@ pub fn run(
                         let (value_str, kind) = match &s.reading {
                             Reading::Scalar(v) => (format!("{v}"), "scalar"),
                             Reading::Counter(v) => (format!("{v}"), "counter"),
-                            Reading::State(v) => (csv_cell(v).to_string(), "state"),
+                            Reading::State(v) => (csv_cell(v), "state"),
                             Reading::Table(_) => continue,
                         };
                         println!(
