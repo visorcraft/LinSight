@@ -311,13 +311,13 @@ where
     F: FnMut(&Mutex<Scheduler>),
 {
     let mut rows = Vec::with_capacity(targets.len());
+    // Snapshot the host Arc once. A slow/hung plugin only holds the
+    // (cloneable) host, not the scheduler mutex, during each sample.
+    let host = {
+        let s = scheduler.lock().unwrap();
+        s.host()
+    };
     for (descriptor, plugin_id) in targets {
-        // Sample through a cloned host Arc so a slow/hung plugin does not
-        // hold the scheduler mutex during the scrape.
-        let host = {
-            let s = scheduler.lock().unwrap();
-            s.host()
-        };
         let sample = host.sample_to(&descriptor.id, now).ok();
         rows.push((descriptor, sample, plugin_id, None));
         after_sample(scheduler);

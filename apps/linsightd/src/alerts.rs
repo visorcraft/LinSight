@@ -165,11 +165,11 @@ enum NotifyJob {
 struct EvalJob {
     idx: usize,
     rewritten_expr: String,
-    ctx: HashMapContext,
+    ctx: Arc<HashMapContext>,
 }
 
 /// Evaluate a single rewritten expression. Runs inside the worker pool.
-fn eval_single(rewritten_expr: String, ctx: HashMapContext) -> EvalOutcome {
+fn eval_single(rewritten_expr: String, ctx: &HashMapContext) -> EvalOutcome {
     if rewritten_expr.len() > MAX_EXPR_LEN {
         return EvalOutcome::Err(format!(
             "expression too long ({} bytes, limit {MAX_EXPR_LEN})",
@@ -177,7 +177,7 @@ fn eval_single(rewritten_expr: String, ctx: HashMapContext) -> EvalOutcome {
         ));
     }
     match std::panic::catch_unwind(AssertUnwindSafe(|| {
-        eval_boolean_with_context(&rewritten_expr, &ctx)
+        eval_boolean_with_context(&rewritten_expr, ctx)
     })) {
         Ok(Ok(b)) => EvalOutcome::Ok(b),
         Ok(Err(e)) => EvalOutcome::Err(e.to_string()),
@@ -272,7 +272,9 @@ pub struct AlertEngine {
     /// (`.` → `__`). Updated incrementally in `observe()` so the hot
     /// path is O(1) per sample instead of rebuilding the full context
     /// (O(N) String allocations) on every rule evaluation.
-    ctx: HashMapContext,
+    /// Stored behind an Arc so it can be shared across worker threads
+    /// without cloning the whole context for each triggered rule.
+    ctx: Arc<HashMapContext>,
     /// Ring buffer of recent fire/clear events; newest-first (front = newest).
     events: VecDeque<AlertEvent>,
     /// Optional history writer for persisting events to SQLite.
@@ -308,7 +310,7 @@ impl AlertEngineHandle {
         for job in jobs {
             let (tx, rx) = mpsc::channel();
             self.inner.eval_pool.execute(move || {
-                let _ = tx.send(eval_single(job.rewritten_expr, job.ctx));
+                let _ = tx.send(eval_single(job.rewritten_expr, &job.ctx));
             });
             rxs.push((job.idx, rx));
         }
@@ -483,7 +485,7 @@ impl AlertEngine {
         Ok(Self {
             rules: compiled,
             values: HashMap::new(),
-            ctx: HashMapContext::new(),
+            ctx: Arc::new(HashMapContext::new()),
             events: VecDeque::new(),
             event_writer: None,
         })
@@ -515,7 +517,7 @@ impl AlertEngine {
         self.values.insert(id.clone(), val);
         // Update the persistent evaluation context incrementally (O(1) per
         // sample) instead of rebuilding the full context per rule eval.
-        let _ = self.ctx.set_value(id.replace('.', "__"), Value::Float(val));
+        let _ = Arc::make_mut(&mut self.ctx).set_value(id.replace('.', "__"), Value::Float(val));
 
         let mut jobs = Vec::new();
         for (i, rule) in self.rules.iter().enumerate() {
@@ -526,7 +528,7 @@ impl AlertEngine {
                 jobs.push(EvalJob {
                     idx: i,
                     rewritten_expr: rule.rewritten_expr.clone(),
-                    ctx: self.ctx.clone(),
+                    ctx: Arc::clone(&self.ctx),
                 });
             }
         }
@@ -549,10 +551,11 @@ impl AlertEngine {
             // Rebuild the evaluation context from the surviving values.
             // This path only fires when VALUES_CAP is exceeded (a rare
             // defensive case), so the O(N) rebuild is acceptable.
-            self.ctx = HashMapContext::new();
+            let mut new_ctx = HashMapContext::new();
             for (k, v) in &self.values {
-                let _ = self.ctx.set_value(k.replace('.', "__"), Value::Float(*v));
+                let _ = new_ctx.set_value(k.replace('.', "__"), Value::Float(*v));
             }
+            self.ctx = Arc::new(new_ctx);
             warn!(pruned, remaining = self.values.len(), "pruned unreferenced sensor values");
         }
     }
@@ -1097,7 +1100,7 @@ impl AlertEngine {
                 referenced_sensors,
             }],
             values: HashMap::new(),
-            ctx: HashMapContext::new(),
+            ctx: Arc::new(HashMapContext::new()),
             events: VecDeque::new(),
             event_writer: None,
         }
@@ -1113,7 +1116,7 @@ impl AlertEngine {
         let jobs = self.observe(&s);
         let now = Instant::now();
         for job in jobs {
-            let outcome = eval_single(job.rewritten_expr, job.ctx);
+            let outcome = eval_single(job.rewritten_expr, &job.ctx);
             self.apply_eval_result(job.idx, outcome, now);
         }
     }
@@ -1419,8 +1422,8 @@ mod tests {
     #[test]
     fn eval_single_evaluates_boolean_expression() {
         let ctx = HashMapContext::new();
-        assert!(matches!(eval_single("1 == 1".to_string(), ctx.clone()), EvalOutcome::Ok(true)));
-        assert!(matches!(eval_single("1 == 2".to_string(), ctx.clone()), EvalOutcome::Ok(false)));
+        assert!(matches!(eval_single("1 == 1".to_string(), &ctx), EvalOutcome::Ok(true)));
+        assert!(matches!(eval_single("1 == 2".to_string(), &ctx), EvalOutcome::Ok(false)));
     }
 
     #[test]
@@ -1464,7 +1467,7 @@ mod tests {
         // Occupy the single worker with a long sleep.
         pool.execute(|| std::thread::sleep(Duration::from_millis(500)));
         let result = pool.run_with_timeout(
-            || eval_single("1 == 1".to_string(), HashMapContext::new()),
+            || eval_single("1 == 1".to_string(), &HashMapContext::new()),
             Duration::from_millis(50),
         );
         assert!(matches!(result, TimedResult::Timeout));

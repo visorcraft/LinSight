@@ -69,6 +69,12 @@ impl From<SensorId> for RSensorId {
     }
 }
 
+impl From<&SensorId> for RSensorId {
+    fn from(id: &SensorId) -> Self {
+        Self { value: id.as_str().into() }
+    }
+}
+
 impl From<RSensorId> for SensorId {
     fn from(r: RSensorId) -> Self {
         SensorId::new(r.value.as_str())

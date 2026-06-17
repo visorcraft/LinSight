@@ -14,7 +14,7 @@ use linsight_protocol::SensorInfo;
 use crate::client::{Client, ClientHandle, RpcError};
 
 type SampleBridge = (u64, Sample);
-type CatalogueBridge = (u64, Vec<SensorInfo>);
+type CatalogueBridge = (u64, Arc<Vec<SensorInfo>>);
 
 /// Bound on the forwarder→pump sample bridge channel. This is the GUI's
 /// last line of defense against unbounded memory growth: when the Qt
@@ -328,7 +328,7 @@ fn spawn_sample_forwarder(
 }
 
 fn spawn_catalogue_forwarder(
-    client_rx: Receiver<Vec<SensorInfo>>,
+    client_rx: Receiver<Arc<Vec<SensorInfo>>>,
     bridge_tx: SyncSender<CatalogueBridge>,
     my_generation: u64,
 ) {

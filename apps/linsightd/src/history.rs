@@ -43,8 +43,20 @@ const QUEUE_CAPACITY: usize = 16_384;
 
 /// Record type carried by the history channel. Samples are the hot path;
 /// alert events are rare (only on fire/clear transitions).
+/// Lightweight, persistable subset of a [`Sample`].
+///
+/// History only stores scalar / counter / state readings, so this struct
+/// avoids cloning large table-shaped samples on the hot path.
+struct HistoricSample {
+    sensor: SensorId,
+    ts_micros: u64,
+    scalar: Option<f64>,
+    counter: Option<u64>,
+    state: Option<String>,
+}
+
 enum HistoryRecord {
-    Sample(Sample),
+    Sample(HistoricSample),
     AlertEvent(AlertEvent),
 }
 
@@ -58,8 +70,35 @@ pub struct HistoryWriter {
 }
 
 impl HistoryWriter {
-    pub fn record(&self, sample: Sample) {
-        self.send(HistoryRecord::Sample(sample));
+    pub fn record(&self, sample: &Sample) {
+        let historic = match &sample.reading {
+            Reading::Scalar(v) => HistoricSample {
+                sensor: sample.sensor.clone(),
+                ts_micros: sample.ts_micros,
+                scalar: Some(*v),
+                counter: None,
+                state: None,
+            },
+            Reading::Counter(v) => HistoricSample {
+                sensor: sample.sensor.clone(),
+                ts_micros: sample.ts_micros,
+                scalar: None,
+                counter: Some(*v),
+                state: None,
+            },
+            Reading::State(v) => HistoricSample {
+                sensor: sample.sensor.clone(),
+                ts_micros: sample.ts_micros,
+                scalar: None,
+                counter: None,
+                state: Some(v.clone()),
+            },
+            // Tables are intentionally skipped — Phase 7 only persists
+            // scalar / counter / state. Per-process GPU tables stay
+            // ephemeral.
+            Reading::Table(_) => return,
+        };
+        self.send(HistoryRecord::Sample(historic));
     }
 
     pub fn record_alert_event(&self, event: AlertEvent) {
@@ -209,7 +248,7 @@ fn run_writer(
     dropped: Arc<AtomicU64>,
     retention: Option<Duration>,
 ) -> Result<()> {
-    let mut pending_samples: Vec<Sample> = Vec::with_capacity(MAX_BATCH);
+    let mut pending_samples: Vec<HistoricSample> = Vec::with_capacity(MAX_BATCH);
     let mut pending_events: Vec<AlertEvent> = Vec::with_capacity(64);
     let mut last_flush = Instant::now();
     let mut last_prune = Instant::now()
@@ -267,7 +306,7 @@ fn log_dropped_pressure(dropped: &AtomicU64) {
     }
 }
 
-fn flush_samples(conn: &mut Connection, batch: &[Sample]) -> Result<()> {
+fn flush_samples(conn: &mut Connection, batch: &[HistoricSample]) -> Result<()> {
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare_cached(
@@ -275,17 +314,14 @@ fn flush_samples(conn: &mut Connection, batch: &[Sample]) -> Result<()> {
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
         for s in batch {
-            let (scalar, counter, state): (Option<f64>, Option<i64>, Option<&str>) =
-                match &s.reading {
-                    Reading::Scalar(v) => (Some(*v), None, None),
-                    Reading::Counter(v) => (None, Some(*v as i64), None),
-                    Reading::State(v) => (None, None, Some(v.as_str())),
-                    // Tables are intentionally skipped — Phase 7 only persists
-                    // scalar / counter / state. Per-process GPU tables stay
-                    // ephemeral.
-                    Reading::Table(_) => continue,
-                };
-            stmt.execute(params![s.sensor.as_str(), s.ts_micros as i64, scalar, counter, state])?;
+            let counter = s.counter.map(|v| v as i64);
+            stmt.execute(params![
+                s.sensor.as_str(),
+                s.ts_micros as i64,
+                s.scalar,
+                counter,
+                s.state.as_deref()
+            ])?;
         }
     }
     tx.commit()?;
@@ -443,7 +479,7 @@ mod tests {
         let db = dir.path().join("h.db");
         let (writer, handle) = spawn(db.clone(), None).unwrap();
         for ts in 0..10 {
-            writer.record(Sample {
+            writer.record(&Sample {
                 sensor: SensorId::new("cpu.util"),
                 ts_micros: ts,
                 reading: Reading::Scalar(ts as f64),
@@ -464,7 +500,7 @@ mod tests {
         let writer = HistoryWriter { tx, dropped: Arc::new(AtomicU64::new(0)) };
         let sensor = SensorId::new("cpu.util");
 
-        writer.record(Sample {
+        writer.record(&Sample {
             sensor: sensor.clone(),
             ts_micros: 1,
             reading: Reading::Scalar(1.0),
@@ -474,7 +510,11 @@ mod tests {
         let writer2 = writer.clone();
         let sensor2 = sensor.clone();
         let thread = thread::spawn(move || {
-            writer2.record(Sample { sensor: sensor2, ts_micros: 2, reading: Reading::Scalar(2.0) });
+            writer2.record(&Sample {
+                sensor: sensor2,
+                ts_micros: 2,
+                reading: Reading::Scalar(2.0),
+            });
             done_tx.send(()).unwrap();
         });
 
@@ -493,12 +533,12 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let db = dir.path().join("h.db");
         let (writer, handle) = spawn(db.clone(), None).unwrap();
-        writer.record(Sample {
+        writer.record(&Sample {
             sensor: SensorId::new("cpu.util"),
             ts_micros: 1_000,
             reading: Reading::Scalar(1.0),
         });
-        writer.record(Sample {
+        writer.record(&Sample {
             sensor: SensorId::new("cpu.util"),
             ts_micros: 2_000_000,
             reading: Reading::Scalar(2.0),
@@ -649,7 +689,7 @@ mod tests {
         let (writer, handle) = spawn(db.clone(), None).unwrap();
 
         for ts in 0..103_u64 {
-            writer.record(Sample {
+            writer.record(&Sample {
                 sensor: SensorId::new("cpu.util"),
                 ts_micros: ts,
                 reading: Reading::Scalar(ts as f64),

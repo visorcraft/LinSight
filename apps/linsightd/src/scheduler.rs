@@ -245,7 +245,7 @@ impl Scheduler {
                     entry.timeout_strikes = 0;
                     entry.last_sampled_at_micros = Some(now_micros);
                     if let Some(history) = &self.history {
-                        history.record(sample.clone());
+                        history.record(&sample);
                     }
                     if let Some(alerts) = &self.alerts {
                         alerts.on_sample(&sample);

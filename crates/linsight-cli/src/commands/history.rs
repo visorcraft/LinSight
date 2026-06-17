@@ -88,25 +88,40 @@ pub fn run(
                 return Ok(());
             }
 
+            let mut warned_table = false;
             match fmt {
                 "json" => {
                     println!("[");
-                    for (i, s) in samples.iter().enumerate() {
-                        let comma = if i < samples.len() - 1 { "," } else { "" };
+                    let mut emitted = 0;
+                    for s in &samples {
                         let (value_str, kind) = match &s.reading {
                             Reading::Scalar(v) => (format!("{v}"), "scalar"),
                             Reading::Counter(v) => (format!("{v}"), "counter"),
                             Reading::State(v) => (format!("\"{}\"", json_escape(v)), "state"),
-                            Reading::Table(_) => continue,
+                            Reading::Table(_) => {
+                                if !warned_table {
+                                    eprintln!(
+                                        "warning: table-shaped history samples are omitted from JSON output"
+                                    );
+                                    warned_table = true;
+                                }
+                                continue;
+                            }
                         };
-                        println!(
-                            r#"  {{"ts":{},"sensor":"{}","value":{},"kind":"{}"}}{}"#,
+                        if emitted > 0 {
+                            println!(",")
+                        }
+                        print!(
+                            r#"  {{"ts":{},"sensor":"{}","value":{},"kind":"{}"}}"#,
                             s.ts_micros,
                             json_escape(s.sensor.as_str()),
                             value_str,
                             kind,
-                            comma
                         );
+                        emitted += 1;
+                    }
+                    if emitted > 0 {
+                        println!();
                     }
                     println!("]");
                 }

@@ -379,7 +379,7 @@ impl FsPlugin {
         Ok(Reading::Scalar(value))
     }
 
-    fn snapshot(inner: &mut Inner) -> Result<FsStats, PluginError> {
+    fn snapshot(inner: &mut Inner) -> Result<Arc<FsStats>, PluginError> {
         snapshot_with(inner, statvfs64_sync, SNAPSHOT_TIMEOUT)
     }
 }
@@ -388,7 +388,7 @@ fn snapshot_with(
     inner: &mut Inner,
     stat_fn: fn(&str) -> Result<FsStat, PluginError>,
     timeout: Duration,
-) -> Result<FsStats, PluginError> {
+) -> Result<Arc<FsStats>, PluginError> {
     if let Some(cache) = &inner.cache
         && let Some(stats) = cache.get(CACHE_TTL)
     {
@@ -471,7 +471,8 @@ fn snapshot_with(
         plugin = "fs",
         statvfs_calls = stats.len()
     );
-    inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
+    let stats = Arc::new(stats);
+    inner.cache = Some(linsight_core::SnapshotCache::new(Arc::clone(&stats)));
     Ok(stats)
 }
 
@@ -696,7 +697,7 @@ mod tests {
             .expect("expected a disambiguated root_<n> sensor id")
             .to_owned();
         // The actual sample call must succeed for the disambiguated id.
-        let result = host_sample(&p, SensorId::new(disambiguated_id.clone()));
+        let result = host_sample(&p, &SensorId::new(disambiguated_id.clone()));
         assert!(
             result.is_ok(),
             "sampling disambiguated sensor {disambiguated_id} must succeed: {result:?}"
@@ -731,7 +732,7 @@ mod tests {
         let p = FsPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(d.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        assert!(host_sample(&p, SensorId::new("fs.nope.total_bytes")).is_err());
+        assert!(host_sample(&p, &SensorId::new("fs.nope.total_bytes")).is_err());
     }
 
     #[test]
@@ -742,12 +743,12 @@ mod tests {
         host_init(&p, &ctx).unwrap();
 
         // First sample populates cache
-        let r1 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
+        let r1 = host_sample(&p, &SensorId::new("fs.root.total_bytes")).unwrap();
         let Reading::Scalar(v1) = r1 else { panic!("expected scalar") };
         assert!(v1 > 0.0);
 
         // Second sample immediately should return the same cached value
-        let r2 = host_sample(&p, SensorId::new("fs.root.avail_bytes")).unwrap();
+        let r2 = host_sample(&p, &SensorId::new("fs.root.avail_bytes")).unwrap();
         let Reading::Scalar(v2) = r2 else { panic!("expected scalar") };
         // avail_bytes should be the cached value from the same snapshot
         assert_eq!(v1, v2 + (v1 - v2)); // Just verify it doesn't panic — cache is working
@@ -761,14 +762,14 @@ mod tests {
         host_init(&p, &ctx).unwrap();
 
         // First sample
-        let r1 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
+        let r1 = host_sample(&p, &SensorId::new("fs.root.total_bytes")).unwrap();
         let Reading::Scalar(v1) = r1 else { panic!("expected scalar") };
 
         // Wait for cache expiry
         std::thread::sleep(std::time::Duration::from_millis(60));
 
         // Second sample should trigger a new statvfs call
-        let r2 = host_sample(&p, SensorId::new("fs.root.total_bytes")).unwrap();
+        let r2 = host_sample(&p, &SensorId::new("fs.root.total_bytes")).unwrap();
         let Reading::Scalar(v2) = r2 else { panic!("expected scalar") };
         assert_eq!(v1, v2); // total_bytes shouldn't change, but cache should have expired and refreshed
     }

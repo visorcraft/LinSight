@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.16.0
+Version:        1.17.0
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Wed Jun 17 2026 VisorCraft LLC <support@visorcraft.com> - 1.17.0-1
+- v1.17.0 release. Performance and UI polish: Arc-shared samples/catalogues,
+  reusable serialization buffers, dirty-delta GUI tile updates, lightweight
+  history records, shared alert context, stack-buffer sysfs reads, dashboard
+  import in Rust, mutable daemon settings toggles, and CLI format validation.
+
 * Tue Jun 16 2026 VisorCraft LLC <support@visorcraft.com> - 1.16.0-1
 - v1.16.0 release. Harden daemon and GUI against hangs and leaks: capped,
   time-boxed sensor worker threads, async alert notifications, transport and

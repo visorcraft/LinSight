@@ -171,13 +171,13 @@ fn dynamic_load_init_and_sample_round_trip() {
         "plugin:com.visorcraft.linsight.example.echo:demo"
     );
 
-    let reading = host_sample(&plugin, SensorId::new("example.echo.value")).expect("host_sample");
+    let reading = host_sample(&plugin, &SensorId::new("example.echo.value")).expect("host_sample");
     match reading {
         Reading::Scalar(v) => assert_eq!(v, 42.0, "echo plugin must return its constant 42.0"),
         other => panic!("expected Reading::Scalar(42.0), got {other:?}"),
     }
 
-    let unknown = host_sample(&plugin, SensorId::new("example.echo.absent"));
+    let unknown = host_sample(&plugin, &SensorId::new("example.echo.absent"));
     assert!(unknown.is_err(), "unknown sensor should error");
 
     // CRITICAL: do NOT explicit-drop `library` here. Rust drops local

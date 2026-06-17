@@ -415,7 +415,7 @@ mod tests {
         let plugin = HwmonPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("hwmon.nct6795.cpu_socket_temp_c")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("hwmon.nct6795.cpu_socket_temp_c")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 45.0).abs() < 1e-6));
     }
 
@@ -425,7 +425,7 @@ mod tests {
         let plugin = HwmonPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("hwmon.nct6795.cpu_fan_fan_rpm")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("hwmon.nct6795.cpu_fan_fan_rpm")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 1200.0));
     }
 
@@ -435,7 +435,7 @@ mod tests {
         let plugin = HwmonPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("hwmon.nct6795._12v_volts")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("hwmon.nct6795._12v_volts")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 12.0).abs() < 1e-6));
     }
 
@@ -445,7 +445,7 @@ mod tests {
         let plugin = HwmonPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("hwmon.acpi_power.power1_power_w")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("hwmon.acpi_power.power1_power_w")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 15.0).abs() < 1e-6));
     }
 }

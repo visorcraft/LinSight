@@ -254,11 +254,11 @@ mod tests {
         let p = ZramPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("zram.0.orig_data_bytes")).unwrap();
+        let r = host_sample(&p, &SensorId::new("zram.0.orig_data_bytes")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 1073741824.0));
-        let r = host_sample(&p, SensorId::new("zram.0.compr_data_bytes")).unwrap();
+        let r = host_sample(&p, &SensorId::new("zram.0.compr_data_bytes")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 536870912.0));
-        let r = host_sample(&p, SensorId::new("zram.1.mem_used_total_bytes")).unwrap();
+        let r = host_sample(&p, &SensorId::new("zram.1.mem_used_total_bytes")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 268435456.0));
     }
 
@@ -268,7 +268,7 @@ mod tests {
         let p = ZramPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let err = host_sample(&p, SensorId::new("zram.99.orig_data_bytes")).unwrap_err();
+        let err = host_sample(&p, &SensorId::new("zram.99.orig_data_bytes")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 

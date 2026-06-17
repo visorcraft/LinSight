@@ -8,7 +8,7 @@
 # that already build for v3.
 pkgname=linsight-v3
 _pkgname=linsight
-pkgver=1.16.0
+pkgver=1.17.0
 pkgrel=1
 pkgdesc='LinSight — x86_64-v3 tuned build'
 arch=('x86_64')

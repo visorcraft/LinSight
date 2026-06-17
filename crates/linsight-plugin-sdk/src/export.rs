@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn host_sample_round_trips() {
         let p = EchoPlugin;
-        let r = host_sample(&p, SensorId::new("anything")).unwrap();
+        let r = host_sample(&p, &SensorId::new("anything")).unwrap();
         assert!(matches!(r, linsight_core::Reading::Scalar(v) if v == 1.0));
         // Unused-by-this-test error type — keep the import live.
         let _ = std::any::TypeId::of::<PluginError>();

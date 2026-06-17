@@ -330,7 +330,7 @@ FRAG: inuse 0 memory 0\n";
         let p = SockPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
         // One ESTABLISHED in tcp4 + one in tcp6 = 2.
-        let r = host_sample(&p, SensorId::new("sock.tcp_established")).unwrap();
+        let r = host_sample(&p, &SensorId::new("sock.tcp_established")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 2.0), "got {r:?}");
     }
 
@@ -339,8 +339,8 @@ FRAG: inuse 0 memory 0\n";
         let dir = fake_sysroot(SOCKSTAT, TCP4, TCP6);
         let p = SockPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let listen = host_sample(&p, SensorId::new("sock.tcp_listen")).unwrap();
-        let tw = host_sample(&p, SensorId::new("sock.tcp_time_wait")).unwrap();
+        let listen = host_sample(&p, &SensorId::new("sock.tcp_listen")).unwrap();
+        let tw = host_sample(&p, &SensorId::new("sock.tcp_time_wait")).unwrap();
         assert!(matches!(listen, Reading::Scalar(v) if v == 1.0));
         assert!(matches!(tw, Reading::Scalar(v) if v == 1.0));
     }
@@ -350,7 +350,7 @@ FRAG: inuse 0 memory 0\n";
         let dir = fake_sysroot(SOCKSTAT, TCP4, TCP6);
         let p = SockPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let r = host_sample(&p, SensorId::new("sock.udp_inuse")).unwrap();
+        let r = host_sample(&p, &SensorId::new("sock.udp_inuse")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 8.0), "got {r:?}");
     }
 
@@ -359,7 +359,7 @@ FRAG: inuse 0 memory 0\n";
         let dir = fake_sysroot(SOCKSTAT, TCP4, TCP6);
         let p = SockPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let r = host_sample(&p, SensorId::new("sock.tcp_mem_bytes")).unwrap();
+        let r = host_sample(&p, &SensorId::new("sock.tcp_mem_bytes")).unwrap();
         // 7 pages * 4096 = 28672 bytes.
         assert!(matches!(r, Reading::Scalar(v) if v == 28672.0), "got {r:?}");
     }
@@ -369,7 +369,7 @@ FRAG: inuse 0 memory 0\n";
         let dir = fake_sysroot(SOCKSTAT, TCP4, TCP6);
         let p = SockPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let err = host_sample(&p, SensorId::new("sock.bogus")).unwrap_err();
+        let err = host_sample(&p, &SensorId::new("sock.bogus")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -379,8 +379,8 @@ FRAG: inuse 0 memory 0\n";
         let dir = tempfile::TempDir::new().unwrap();
         let p = SockPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let est = host_sample(&p, SensorId::new("sock.tcp_established")).unwrap();
-        let mem = host_sample(&p, SensorId::new("sock.tcp_mem_bytes")).unwrap();
+        let est = host_sample(&p, &SensorId::new("sock.tcp_established")).unwrap();
+        let mem = host_sample(&p, &SensorId::new("sock.tcp_mem_bytes")).unwrap();
         assert!(matches!(est, Reading::Scalar(v) if v == 0.0));
         assert!(matches!(mem, Reading::Scalar(v) if v == 0.0));
     }

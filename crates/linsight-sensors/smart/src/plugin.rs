@@ -302,7 +302,7 @@ mod tests {
         let plugin = SmartPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(std::path::PathBuf::from("/")).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("disk.nvme0n1.smart_temp_c")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("disk.nvme0n1.smart_temp_c")).unwrap_err();
         // May be Unsupported or Io depending on whether udisks2 is present.
         assert!(
             err.to_string().contains("unsupported") || err.to_string().contains("udisks2"),

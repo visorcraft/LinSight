@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use linsight_core::{
@@ -23,14 +23,43 @@ const CACHE_TTL: Duration = Duration::from_millis(50);
 // ---------------------------------------------------------------------------
 
 fn read_u64(path: &Path) -> Result<u64, PluginError> {
-    let s = std::fs::read_to_string(path)
+    read_int::<u64>(path)
+}
+
+/// Read a small sysfs/proc file into a stack buffer. Avoids the `String`
+/// allocation of `fs::read_to_string` for hot-path files that are typically
+/// a few bytes. Reads up to 256 bytes; truncates anything larger.
+fn read_small_file(path: &Path) -> Result<String, PluginError> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)
         .map_err(|e| PluginError::Io(format!("{}: {e}", path.display())))?;
-    s.trim().parse::<u64>().map_err(|e| PluginError::Parse(format!("{}: {e}", path.display())))
+    let mut buf = [0u8; 256];
+    let mut n = 0usize;
+    loop {
+        match file.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(m) => n += m,
+            Err(e) => return Err(PluginError::Io(format!("{}: {e}", path.display()))),
+        }
+        if n == buf.len() {
+            break;
+        }
+    }
+    std::str::from_utf8(&buf[..n])
+        .map(|s| s.to_owned())
+        .map_err(|e| PluginError::Parse(format!("{}: {e}", path.display())))
+}
+
+/// Read a small numeric sysfs/proc file into a stack buffer and parse it.
+fn read_int<T: std::str::FromStr>(path: &Path) -> Result<T, PluginError> {
+    let s = read_small_file(path)?;
+    s.trim()
+        .parse::<T>()
+        .map_err(|_| PluginError::Parse(format!("{}: invalid integer", path.display())))
 }
 
 fn read_line(path: &Path) -> Result<String, PluginError> {
-    let s = std::fs::read_to_string(path)
-        .map_err(|e| PluginError::Io(format!("{}: {e}", path.display())))?;
+    let s = read_small_file(path)?;
     Ok(s.trim().to_owned())
 }
 
@@ -542,7 +571,7 @@ impl SystemPlugin {
         }
     }
 
-    fn snapshot(inner: &mut Inner) -> Result<SystemSnapshot, PluginError> {
+    fn snapshot(inner: &mut Inner) -> Result<Arc<SystemSnapshot>, PluginError> {
         if let Some(cache) = &inner.cache
             && let Some(snap) = cache.get(CACHE_TTL)
         {
@@ -592,7 +621,8 @@ impl SystemPlugin {
             thermal,
         };
         tracing::debug!(target: "linsight_sensors::reads", plugin = "system", files_read);
-        inner.cache = Some(linsight_core::SnapshotCache::new(snapshot.clone()));
+        let snapshot = Arc::new(snapshot);
+        inner.cache = Some(linsight_core::SnapshotCache::new(Arc::clone(&snapshot)));
         Ok(snapshot)
     }
 }
@@ -761,7 +791,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.load_1m")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 1.23).abs() < 1e-6));
     }
 
@@ -771,7 +801,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.load_5m")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.load_5m")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 0.89).abs() < 1e-6));
     }
 
@@ -781,9 +811,9 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.procs_running")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.procs_running")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 3.0));
-        let t = host_sample(&p, SensorId::new("system.procs_total")).unwrap();
+        let t = host_sample(&p, &SensorId::new("system.procs_total")).unwrap();
         assert!(matches!(t, Reading::Scalar(v) if v == 456.0));
     }
 
@@ -793,7 +823,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.uptime_secs")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.uptime_secs")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 123456.78).abs() < 1e-6));
     }
 
@@ -803,7 +833,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.ctxt_switches")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.ctxt_switches")).unwrap();
         assert!(matches!(r, Reading::Counter(420000)));
     }
 
@@ -813,7 +843,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.procs_created")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.procs_created")).unwrap();
         assert!(matches!(r, Reading::Counter(50000)));
     }
 
@@ -823,7 +853,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("system.entropy_bits")).unwrap();
+        let r = host_sample(&p, &SensorId::new("system.entropy_bits")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 256.0));
     }
 
@@ -833,7 +863,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("psi.cpu_some_10")).unwrap();
+        let r = host_sample(&p, &SensorId::new("psi.cpu_some_10")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 0.42).abs() < 1e-6));
     }
 
@@ -843,7 +873,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("psi.mem_some_10")).unwrap();
+        let r = host_sample(&p, &SensorId::new("psi.mem_some_10")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 1.23).abs() < 1e-6));
     }
 
@@ -853,7 +883,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("psi.mem_full_10")).unwrap();
+        let r = host_sample(&p, &SensorId::new("psi.mem_full_10")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 0.10).abs() < 1e-6));
     }
 
@@ -863,7 +893,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("psi.io_some_10")).unwrap();
+        let r = host_sample(&p, &SensorId::new("psi.io_some_10")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 2.50).abs() < 1e-6));
     }
 
@@ -873,7 +903,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let r = host_sample(&p, SensorId::new("thermal.x86_pkg_temp.temp_c")).unwrap();
+        let r = host_sample(&p, &SensorId::new("thermal.x86_pkg_temp.temp_c")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 55.0).abs() < 1e-6));
     }
 
@@ -883,7 +913,7 @@ mod tests {
         let p = SystemPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
-        let err = host_sample(&p, SensorId::new("nope.nope")).unwrap_err();
+        let err = host_sample(&p, &SensorId::new("nope.nope")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -895,14 +925,14 @@ mod tests {
         host_init(&p, &ctx).unwrap();
 
         // First sample populates cache
-        let r1 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        let r1 = host_sample(&p, &SensorId::new("system.load_1m")).unwrap();
         assert!(matches!(r1, Reading::Scalar(v) if (v - 1.23).abs() < 1e-6));
 
         // Mutate loadavg
         fs::write(dir.path().join("proc/loadavg"), "9.99 9.99 9.99 99/999 99999\n").unwrap();
 
         // Second sample immediately should still see cached value
-        let r2 = host_sample(&p, SensorId::new("system.load_5m")).unwrap();
+        let r2 = host_sample(&p, &SensorId::new("system.load_5m")).unwrap();
         assert!(
             matches!(r2, Reading::Scalar(v) if (v - 0.89).abs() < 1e-6),
             "cache should serve stale value"
@@ -917,7 +947,7 @@ mod tests {
         host_init(&p, &ctx).unwrap();
 
         // First sample
-        let r1 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        let r1 = host_sample(&p, &SensorId::new("system.load_1m")).unwrap();
         assert!(matches!(r1, Reading::Scalar(v) if (v - 1.23).abs() < 1e-6));
 
         // Mutate loadavg
@@ -927,7 +957,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(60));
 
         // Second sample should see new value
-        let r2 = host_sample(&p, SensorId::new("system.load_1m")).unwrap();
+        let r2 = host_sample(&p, &SensorId::new("system.load_1m")).unwrap();
         assert!(
             matches!(r2, Reading::Scalar(v) if (v - 9.99).abs() < 1e-6),
             "cache should reflect new value after expiry"

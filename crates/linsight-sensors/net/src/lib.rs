@@ -24,6 +24,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -252,7 +253,7 @@ impl NetPlugin {
         }
     }
 
-    fn snapshot(inner: &mut Inner) -> Result<HashMap<String, NetIfaceStats>, PluginError> {
+    fn snapshot(inner: &mut Inner) -> Result<Arc<HashMap<String, NetIfaceStats>>, PluginError> {
         if let Some(cache) = &inner.cache
             && let Some(stats) = cache.get(CACHE_TTL)
         {
@@ -311,7 +312,8 @@ impl NetPlugin {
             );
         }
         tracing::debug!(target: "linsight_sensors::reads", plugin = "net", files_read);
-        inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
+        let stats = Arc::new(stats);
+        inner.cache = Some(linsight_core::SnapshotCache::new(Arc::clone(&stats)));
         Ok(stats)
     }
 }
@@ -369,17 +371,47 @@ fn enumerate(sysroot: Option<&Path>, exclude: &[String]) -> Result<Vec<String>, 
 }
 
 fn read_u64(p: &Path) -> Result<u64, PluginError> {
-    let s = fs::read_to_string(p).map_err(|e| PluginError::Io(format!("{}: {e}", p.display())))?;
-    s.trim().parse::<u64>().map_err(|e| PluginError::Parse(format!("{}: {e}", p.display())))
+    read_int::<u64>(p)
 }
 
 fn read_i64(p: &Path) -> Result<i64, PluginError> {
-    let s = fs::read_to_string(p).map_err(|e| PluginError::Io(format!("{}: {e}", p.display())))?;
-    s.trim().parse::<i64>().map_err(|e| PluginError::Parse(format!("{}: {e}", p.display())))
+    read_int::<i64>(p)
+}
+
+/// Read a small sysfs/proc file into a stack buffer. Avoids the `String`
+/// allocation of `fs::read_to_string` for hot-path files that are typically
+/// a few bytes. Reads up to 64 bytes; truncates anything larger.
+fn read_small_file(p: &Path) -> Result<String, PluginError> {
+    use std::io::Read;
+    let mut file =
+        fs::File::open(p).map_err(|e| PluginError::Io(format!("{}: {e}", p.display())))?;
+    let mut buf = [0u8; 64];
+    let mut n = 0usize;
+    loop {
+        match file.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(m) => n += m,
+            Err(e) => return Err(PluginError::Io(format!("{}: {e}", p.display()))),
+        }
+        if n == buf.len() {
+            break;
+        }
+    }
+    std::str::from_utf8(&buf[..n])
+        .map(|s| s.to_owned())
+        .map_err(|e| PluginError::Parse(format!("{}: {e}", p.display())))
+}
+
+/// Read a small numeric sysfs/proc file into a stack buffer and parse it.
+fn read_int<T: std::str::FromStr>(p: &Path) -> Result<T, PluginError> {
+    let s = read_small_file(p)?;
+    s.trim()
+        .parse::<T>()
+        .map_err(|_| PluginError::Parse(format!("{}: invalid integer", p.display())))
 }
 
 fn read_string(p: &Path) -> Result<String, PluginError> {
-    let s = fs::read_to_string(p).map_err(|e| PluginError::Io(format!("{}: {e}", p.display())))?;
+    let s = read_small_file(p)?;
     Ok(s.trim().to_owned())
 }
 
@@ -501,8 +533,8 @@ mod tests {
         let dir = fake_net_sysroot_legacy(&[("eth0", "12345", "67890", "up", "1000")]);
         let p = NetPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let rx = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
-        let tx = host_sample(&p, SensorId::new("net.eth0.tx_bytes")).unwrap();
+        let rx = host_sample(&p, &SensorId::new("net.eth0.rx_bytes")).unwrap();
+        let tx = host_sample(&p, &SensorId::new("net.eth0.tx_bytes")).unwrap();
         assert!(matches!(rx, Reading::Counter(12345)));
         assert!(matches!(tx, Reading::Counter(67890)));
     }
@@ -512,7 +544,7 @@ mod tests {
         let dir = fake_net_sysroot_legacy(&[("eth0", "0", "0", "down", "-1")]);
         let p = NetPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let s = host_sample(&p, SensorId::new("net.eth0.link_state")).unwrap();
+        let s = host_sample(&p, &SensorId::new("net.eth0.link_state")).unwrap();
         assert!(matches!(s, Reading::State(ref v) if v == "down"));
     }
 
@@ -521,7 +553,7 @@ mod tests {
         let dir = fake_net_sysroot_legacy(&[("eth0", "0", "0", "up", "-1")]);
         let p = NetPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let s = host_sample(&p, SensorId::new("net.eth0.speed_mbps")).unwrap();
+        let s = host_sample(&p, &SensorId::new("net.eth0.speed_mbps")).unwrap();
         assert!(matches!(s, Reading::Scalar(v) if v == -1.0));
     }
 
@@ -553,8 +585,8 @@ mod tests {
         )]);
         let p = NetPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let rx_p = host_sample(&p, SensorId::new("net.eth0.rx_packets")).unwrap();
-        let tx_p = host_sample(&p, SensorId::new("net.eth0.tx_packets")).unwrap();
+        let rx_p = host_sample(&p, &SensorId::new("net.eth0.rx_packets")).unwrap();
+        let tx_p = host_sample(&p, &SensorId::new("net.eth0.tx_packets")).unwrap();
         assert!(matches!(rx_p, Reading::Counter(42)));
         assert!(matches!(tx_p, Reading::Counter(99)));
     }
@@ -567,10 +599,10 @@ mod tests {
         )]);
         let p = NetPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let rx_e = host_sample(&p, SensorId::new("net.eth0.rx_errors")).unwrap();
-        let tx_e = host_sample(&p, SensorId::new("net.eth0.tx_errors")).unwrap();
-        let rx_d = host_sample(&p, SensorId::new("net.eth0.rx_dropped")).unwrap();
-        let tx_d = host_sample(&p, SensorId::new("net.eth0.tx_dropped")).unwrap();
+        let rx_e = host_sample(&p, &SensorId::new("net.eth0.rx_errors")).unwrap();
+        let tx_e = host_sample(&p, &SensorId::new("net.eth0.tx_errors")).unwrap();
+        let rx_d = host_sample(&p, &SensorId::new("net.eth0.rx_dropped")).unwrap();
+        let tx_d = host_sample(&p, &SensorId::new("net.eth0.tx_dropped")).unwrap();
         assert!(matches!(rx_e, Reading::Counter(3)));
         assert!(matches!(tx_e, Reading::Counter(7)));
         assert!(matches!(rx_d, Reading::Counter(1)));
@@ -621,7 +653,7 @@ mod tests {
         let dir = fake_net_sysroot_legacy(&[("eth0", "0", "0", "up", "1000")]);
         let p = NetPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let err = host_sample(&p, SensorId::new("net.ghost.rx_bytes")).unwrap_err();
+        let err = host_sample(&p, &SensorId::new("net.ghost.rx_bytes")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -654,7 +686,7 @@ mod tests {
         host_init(&p, &ctx_for(&dir)).unwrap();
 
         // First sample populates cache
-        let r1 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        let r1 = host_sample(&p, &SensorId::new("net.eth0.rx_bytes")).unwrap();
         assert!(matches!(r1, Reading::Counter(100)));
 
         // Mutate the sysfs files
@@ -662,7 +694,7 @@ mod tests {
         fs::write(&stat_path, "999\n").unwrap();
 
         // Second sample immediately should still see cached value
-        let r2 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        let r2 = host_sample(&p, &SensorId::new("net.eth0.rx_bytes")).unwrap();
         assert!(matches!(r2, Reading::Counter(100)), "cache should serve stale value");
     }
 
@@ -675,7 +707,7 @@ mod tests {
         host_init(&p, &ctx_for(&dir)).unwrap();
 
         // First sample
-        let r1 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        let r1 = host_sample(&p, &SensorId::new("net.eth0.rx_bytes")).unwrap();
         assert!(matches!(r1, Reading::Counter(100)));
 
         // Mutate the sysfs files
@@ -686,7 +718,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(60));
 
         // Second sample should see new value
-        let r2 = host_sample(&p, SensorId::new("net.eth0.rx_bytes")).unwrap();
+        let r2 = host_sample(&p, &SensorId::new("net.eth0.rx_bytes")).unwrap();
         assert!(matches!(r2, Reading::Counter(999)), "cache should reflect new value after expiry");
     }
 }

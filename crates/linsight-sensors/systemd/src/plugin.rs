@@ -309,7 +309,7 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
 
-        let r = host_sample(&plugin, SensorId::new("systemd.units")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("systemd.units")).unwrap();
         match r {
             Reading::Table(rows) => {
                 assert_eq!(rows.len(), 3, "expected 3 service units, got {}", rows.len());
@@ -340,13 +340,13 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
 
-        let _ = host_sample(&plugin, SensorId::new("systemd.units")).unwrap();
+        let _ = host_sample(&plugin, &SensorId::new("systemd.units")).unwrap();
 
         // Bump sshd cpu usage
         let sshd = dir.path().join("sys/fs/cgroup/system.slice/sshd.service/cpu.stat");
         fs::write(sshd, "usage_usec 2500000\nuser_usec 1300000\nsystem_usec 1200000\n").unwrap();
 
-        let r = host_sample(&plugin, SensorId::new("systemd.units")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("systemd.units")).unwrap();
         match r {
             Reading::Table(rows) => {
                 // sshd is rows[2] (alphabetical)
@@ -367,7 +367,7 @@ mod tests {
         let plugin = SystemdPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("nope.nope")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("nope.nope")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 

@@ -5,9 +5,9 @@ use std::path::Path;
 
 use anyhow::Result;
 use linsight_core::{Reading, SensorId, Unit};
-use linsight_protocol::{ClientMsg, ServerMsg};
+use linsight_protocol::{ClientMsg, RequestOp, ResponsePayload, ServerMsg};
 
-use crate::commands::connect_and_hello;
+use crate::commands::{connect_and_hello, request_rpc};
 
 pub fn run(socket: &Path, sensor: &str, count: Option<u64>) -> Result<()> {
     // `--count 0` is a no-op: print zero samples and exit cleanly without
@@ -24,15 +24,12 @@ pub fn run(socket: &Path, sensor: &str, count: Option<u64>) -> Result<()> {
     // through to `Unit::Count` and subscribe blindly, which the daemon
     // would silently discard — the CLI then waited forever for samples
     // that would never arrive. Bail immediately instead.
-    session.writer.write_client(&ClientMsg::ListSensors)?;
-    let unit = match session.reader.read_server()? {
-        ServerMsg::SensorList(infos) => match infos.into_iter().find(|i| i.id == sensor_id) {
-            Some(i) => i.unit,
-            None => anyhow::bail!(
-                "sensor not found: {sensor_id} (run `linsight-cli list` for the available set)",
-            ),
-        },
-        other => anyhow::bail!("expected SensorList, got {other:?}"),
+    let unit = match request_rpc(
+        &mut session,
+        RequestOp::GetSensorInfo { sensor: sensor_id.to_string() },
+    )? {
+        ResponsePayload::SensorInfo { info } => info.unit,
+        other => anyhow::bail!("expected SensorInfo, got {other:?}"),
     };
 
     session

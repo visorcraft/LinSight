@@ -219,7 +219,7 @@ mod tests {
         let p = MemPlugin::default();
         let dir = fake_sysroot();
         host_init(&p, &PluginCtx::new_with_sysroot(dir.path().into()).unwrap()).unwrap();
-        let r = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        let r = host_sample(&p, &SensorId::new("mem.used_bytes")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == (1000 - 600) as f64 * 1024.0));
     }
 
@@ -229,13 +229,13 @@ mod tests {
         let dir = fake_sysroot();
         host_init(&p, &PluginCtx::new_with_sysroot(dir.path().into()).unwrap()).unwrap();
         // SwapTotal: 8000 kB -> 8000 * 1024 bytes
-        let total = host_sample(&p, SensorId::new("mem.swap_total_bytes")).unwrap();
+        let total = host_sample(&p, &SensorId::new("mem.swap_total_bytes")).unwrap();
         assert!(matches!(total, Reading::Scalar(v) if v == 8000.0 * 1024.0));
         // SwapFree: 7500 kB -> used = (8000 - 7500) * 1024 = 500 * 1024
-        let used = host_sample(&p, SensorId::new("mem.swap_used_bytes")).unwrap();
+        let used = host_sample(&p, &SensorId::new("mem.swap_used_bytes")).unwrap();
         assert!(matches!(used, Reading::Scalar(v) if v == (8000.0 - 7500.0) * 1024.0));
         // SwapCached: 200 kB -> 200 * 1024 bytes
-        let cached = host_sample(&p, SensorId::new("mem.swap_cached_bytes")).unwrap();
+        let cached = host_sample(&p, &SensorId::new("mem.swap_cached_bytes")).unwrap();
         assert!(matches!(cached, Reading::Scalar(v) if v == 200.0 * 1024.0));
     }
 
@@ -245,16 +245,16 @@ mod tests {
         let dir = fake_sysroot();
         host_init(&p, &PluginCtx::new_with_sysroot(dir.path().into()).unwrap()).unwrap();
 
-        let used = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        let used = host_sample(&p, &SensorId::new("mem.used_bytes")).unwrap();
         assert!(matches!(used, Reading::Scalar(v) if v == 400.0 * 1024.0));
 
         write_meminfo(dir.path(), 2000, 100, 9000, 7000, 300);
 
-        let cached_total = host_sample(&p, SensorId::new("mem.total_bytes")).unwrap();
+        let cached_total = host_sample(&p, &SensorId::new("mem.total_bytes")).unwrap();
         assert!(matches!(cached_total, Reading::Scalar(v) if v == 1000.0 * 1024.0));
 
         thread::sleep(Duration::from_millis(75));
-        let refreshed_total = host_sample(&p, SensorId::new("mem.total_bytes")).unwrap();
+        let refreshed_total = host_sample(&p, &SensorId::new("mem.total_bytes")).unwrap();
         assert!(matches!(refreshed_total, Reading::Scalar(v) if v == 2000.0 * 1024.0));
     }
 
@@ -263,14 +263,14 @@ mod tests {
         let p = MemPlugin::default();
         let dir1 = fake_sysroot();
         host_init(&p, &PluginCtx::new_with_sysroot(dir1.path().into()).unwrap()).unwrap();
-        let used = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        let used = host_sample(&p, &SensorId::new("mem.used_bytes")).unwrap();
         assert!(matches!(used, Reading::Scalar(v) if v == 400.0 * 1024.0));
 
         let dir2 = fake_sysroot();
         write_meminfo(dir2.path(), 2000, 100, 9000, 7000, 300);
         host_init(&p, &PluginCtx::new_with_sysroot(dir2.path().into()).unwrap()).unwrap();
 
-        let used = host_sample(&p, SensorId::new("mem.used_bytes")).unwrap();
+        let used = host_sample(&p, &SensorId::new("mem.used_bytes")).unwrap();
         assert!(matches!(used, Reading::Scalar(v) if v == 1900.0 * 1024.0));
     }
 
@@ -290,6 +290,6 @@ mod tests {
         let p = MemPlugin::default();
         let dir = fake_sysroot();
         host_init(&p, &PluginCtx::new_with_sysroot(dir.path().into()).unwrap()).unwrap();
-        assert!(host_sample(&p, SensorId::new("nope")).is_err());
+        assert!(host_sample(&p, &SensorId::new("nope")).is_err());
     }
 }

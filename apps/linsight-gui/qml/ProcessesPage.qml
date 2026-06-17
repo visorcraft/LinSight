@@ -10,6 +10,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "qrc:/qml/Shared.js" as Shared
 
 Kirigami.Page {
     id: page
@@ -215,7 +216,7 @@ Kirigami.Page {
                         DataCell { text: modelData.name || ""; widthFrac: 0.25 }
                         DataCell { text: formatFloat(modelData.cpu) + "%"; widthFrac: 0.10 }
                         DataCell { text: formatFloat(modelData.mem) + "%"; widthFrac: 0.10 }
-                        DataCell { text: formatBytes(modelData.rss); widthFrac: 0.14 }
+                        DataCell { text: Shared.formatBytes(modelData.rss); widthFrac: 0.14 }
                         DataCell { text: modelData.threads !== undefined && modelData.threads !== null ? String(modelData.threads) : ""; widthFrac: 0.10 }
                         DataCell { text: modelData.state || ""; widthFrac: 0.08 }
                     }
@@ -293,16 +294,4 @@ Kirigami.Page {
         return n.toFixed(1)
     }
 
-    function formatBytes(v) {
-        const n = parseFloat(v)
-        if (isNaN(n) || n <= 0) return "0 B"
-        const units = ["B", "KiB", "MiB", "GiB", "TiB"]
-        let i = 0
-        let val = n
-        while (val >= 1024 && i < units.length - 1) {
-            val /= 1024
-            i++
-        }
-        return val.toFixed(2) + " " + units[i]
-    }
 }

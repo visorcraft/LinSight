@@ -13,6 +13,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import QtQuick.Dialogs as Dialogs
+import "qrc:/qml/Shared.js" as Shared
 
 Kirigami.Page {
     id: page
@@ -40,6 +41,42 @@ Kirigami.Page {
     Connections {
         target: page.dashModel
         function onTilesJsonChanged() { page.refreshSensors() }
+        function onTilesChangedJsonChanged() { page.applyTileDelta() }
+    }
+
+    function applyTileDelta() {
+        if (!page.dashModel) return
+        try {
+            const arr = JSON.parse(page.dashModel.tilesChangedJson || "[]")
+            if (arr.length === 0) return
+            const v = page.valueById
+            const m = page.sensorMetaById
+            const r = page.rowsById
+            const k = page.kindById
+            for (let i = 0; i < arr.length; ++i) {
+                const t = arr[i]
+                v[t.id] = t.value
+                m[t.id] = {
+                    name: t.name,
+                    deviceLabel: t.deviceLabel || "",
+                    category: t.category,
+                    sparkline: t.sparkline || []
+                }
+                if (t.rows && t.rows.length > 0) r[t.id] = t.rows
+                else delete r[t.id]
+                if (t.kind) k[t.id] = t.kind
+            }
+            page.valueById = v
+            page.sensorMetaById = m
+            page.rowsById = r
+            page.kindById = k
+        } catch (e) { /* keep previous state */ }
+    }
+
+    Connections {
+        target: app.dashboards
+        function onSlugListJsonChanged() { page.buildGallery() }
+        function onSummaryJsonChanged() { page.buildGallery() }
     }
 
     onViewingSlugChanged: page.reload()
@@ -68,8 +105,8 @@ Kirigami.Page {
         }
     }
 
-    /// Export the current dashboard layout as a downloadable JSON file.
-    function exportDashboard() {
+    /// Copy the current dashboard layout to the clipboard as JSON.
+    function copyDashboardToClipboard() {
         if (!page.viewingSlug || !app.dashboards) return
         const json = app.dashboards.loadLayout(page.viewingSlug).toString()
         const name = page.dashboardName || page.viewingSlug
@@ -80,43 +117,11 @@ Kirigami.Page {
             layout: JSON.parse(json),
             exported_at: new Date().toISOString()
         }, null, 2)
-        // Write to a temp file and trigger download
-        const path = StandardPaths.writableLocation(StandardPaths.DownloadLocation)
-                + "/" + name.replace(/[^a-zA-Z0-9_-]/g, "_") + ".dashboard.json"
-        // Use Clipboard as fallback if file write isn't available
         Clipboard.text = blob
         app.showPassiveNotification(
             qsTr("Dashboard layout copied to clipboard — paste into a file to share."),
             5000
         )
-    }
-
-    /// Import a dashboard from a previously exported JSON file.
-    function importDashboardFromText(jsonText) {
-        try {
-            const data = JSON.parse(jsonText)
-            if (!data.name || !data.layout) {
-                app.showPassiveNotification(qsTr("Invalid dashboard file: missing name or layout."), 4000)
-                return
-            }
-            // Generate a unique slug from the name
-            let slug = data.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
-            if (slug.length === 0) slug = "imported"
-            // If slug exists, append a number
-            let candidate = slug
-            let counter = 1
-            while (app.dashboards.nameOf(candidate).length > 0) {
-                candidate = slug + "-" + (counter++)
-            }
-            const result = app.dashboards.create(candidate, data.name)
-            if (result.length > 0) {
-                app.dashboards.saveLayout(candidate, JSON.stringify(data.layout))
-                app.goTo("dashboard:" + candidate)
-                app.showPassiveNotification(qsTr("Imported dashboard: %1").arg(data.name), 3000)
-            }
-        } catch (e) {
-            app.showPassiveNotification(qsTr("Failed to import: %1").arg(e), 4000)
-        }
     }
 
     function refreshSensors() {
@@ -146,6 +151,26 @@ Kirigami.Page {
         } catch (e) { /* keep previous state */ }
     }
 
+    function canvasContentWidth() {
+        if (!page.tiles || !Array.isArray(page.tiles)) return width
+        let max = 0
+        for (let i = 0; i < page.tiles.length; ++i) {
+            const t = page.tiles[i]
+            max = Math.max(max, (Number(t.x) || 0) + (Number(t.w) || 200))
+        }
+        return max + app.tokens.spaceM
+    }
+
+    function canvasContentHeight() {
+        if (!page.tiles || !Array.isArray(page.tiles)) return height
+        let max = 0
+        for (let i = 0; i < page.tiles.length; ++i) {
+            const t = page.tiles[i]
+            max = Math.max(max, (Number(t.y) || 0) + (Number(t.h) || 120))
+        }
+        return max + app.tokens.spaceM
+    }
+
     function reload() {
         if (!page.viewingSlug || !app.dashboards) {
             page.tiles = []
@@ -166,16 +191,13 @@ Kirigami.Page {
         title: qsTr("Import Dashboard")
         nameFilters: ["Dashboard JSON (*.dashboard.json *.json)", "All files (*)"]
         onAccepted: {
-            const path = importDialog.selectedFile
-            // Read file via a temporary XMLHttpRequest
-            const xhr = new XMLHttpRequest()
-            xhr.open("GET", "file://" + path.toString().replace("file://", ""))
-            xhr.onreadystatechange = function() {
-                if (xhr.readyState === XMLHttpRequest.DONE) {
-                    page.importDashboardFromText(xhr.responseText)
-                }
+            const result = app.dashboards.importDashboard(importDialog.selectedFile.toString())
+            if (result.length > 0) {
+                app.goTo("dashboard:" + result)
+                app.showPassiveNotification(qsTr("Imported dashboard"), 3000)
+            } else {
+                app.showPassiveNotification(app.dashboards.lastError || qsTr("Import failed"), 4000)
             }
-            xhr.send()
         }
     }
 
@@ -358,9 +380,12 @@ Kirigami.Page {
                     }
                 }
                 ThemedButton {
-                    icon.name: "document-save-symbolic"
-                    text: qsTr("Export")
-                    onClicked: page.exportDashboard()
+                    icon.name: "edit-copy-symbolic"
+                    text: qsTr("Copy to clipboard")
+                    Controls.ToolTip.text: qsTr("Copy the dashboard JSON to the clipboard")
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: 400
+                    onClicked: page.copyDashboardToClipboard()
                 }
                 ThemedButton {
                     icon.name: "document-edit-symbolic"
@@ -395,8 +420,8 @@ Kirigami.Page {
             Controls.ScrollView {
                 anchors.fill: parent
                 clip: true
-                contentWidth: canvas.width
-                contentHeight: canvas.height
+                contentWidth: Math.max(page.canvasContentWidth(), width)
+                contentHeight: Math.max(page.canvasContentHeight(), height)
 
                 Repeater {
                     model: page.tiles
@@ -421,8 +446,8 @@ Kirigami.Page {
                             if (!opts.thresholdEnabled) return app.tokens.separator
                             var numVal = parseFloat(page.valueById[String(modelData.id || "")])
                             if (isNaN(numVal)) return app.tokens.separator
-                            if (opts.thresholdWarn && numVal >= parseFloat(opts.thresholdWarn)) return Kirigami.Theme.negativeTextColor
-                            if (opts.thresholdOk && numVal >= parseFloat(opts.thresholdOk)) return Kirigami.Theme.warningTextColor
+                            if (opts.thresholdWarn && numVal >= parseFloat(opts.thresholdWarn)) return app.tokens.negative
+                            if (opts.thresholdOk && numVal >= parseFloat(opts.thresholdOk)) return app.tokens.warning
                             return app.tokens.separator
                         }
 
@@ -489,24 +514,11 @@ Kirigami.Page {
                                     const meta = parent.parent && parent.parent.sid ? page.sensorMetaById[parent.parent.sid] : null
                                     return meta && Array.isArray(meta.sparkline) ? meta.sparkline : []
                                 }
-                                // NOTE: the "varies" min/max loop below mirrors
-                                // SensorTile.__sparklineVaries. Both sites must be
-                                // kept in sync. A shared JS helper would need
-                                // qmldir "javascript resource" support in
-                                // qt-build-utils (currently TODO) — until then
-                                // the logic lives in both places.
                                 visible: {
                                     if (!(app.preferences ? app.preferences.sparklines : true)) return false
                                     const kind = page.kindById[parent.parent.sid] || "scalar"
                                     if (kind === "table" || kind === "state") return false
-                                    const pts = values
-                                    if (!Array.isArray(pts) || pts.length < 2) return false
-                                    let mn = pts[0], mx = pts[0]
-                                    for (let k = 1; k < pts.length; ++k) {
-                                        if (pts[k] < mn) mn = pts[k]
-                                        if (pts[k] > mx) mx = pts[k]
-                                    }
-                                    return mx > mn
+                                    return Shared.sparklineVaries(values)
                                 }
                             }
                             Item { Layout.fillHeight: true }
@@ -557,7 +569,7 @@ Kirigami.Page {
                                 if (typeof modelData === 'object' && modelData !== null) {
                                     if (modelData.text !== undefined) return modelData.text;
                                     if (modelData.number !== undefined) return Number(modelData.number).toFixed(1);
-                                    if (modelData.bytes !== undefined) return formatBytes(modelData.bytes);
+                                    if (modelData.bytes !== undefined) return Shared.formatBytes(modelData.bytes);
                                     return "";
                                 }
                                 return String(modelData);
@@ -573,11 +585,4 @@ Kirigami.Page {
         }
     }
 
-    function formatBytes(b) {
-        if (b >= 1099511627776) return (b / 1099511627776).toFixed(2) + " TiB";
-        if (b >= 1073741824) return (b / 1073741824).toFixed(2) + " GiB";
-        if (b >= 1048576) return (b / 1048576).toFixed(2) + " MiB";
-        if (b >= 1024) return (b / 1024).toFixed(2) + " KiB";
-        return b + " B";
-    }
 }

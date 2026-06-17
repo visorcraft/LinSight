@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
+#![allow(clippy::result_large_err)]
+
 //! Postcard client to `linsightd`. Connects to an existing daemon or
 //! spawns one as a child process. Exposes:
 //!
@@ -79,14 +81,21 @@ pub enum RpcError {
 /// `recv_timeout`.
 type ResponseSender = std::sync::mpsc::Sender<Result<ResponsePayload, ProtoError>>;
 
+/// Shared sensor catalogue shape: an `Arc` around the full `Vec` so
+/// broadcasts can hand every listener the same allocation.
+type SensorCatalogue = Arc<Vec<SensorInfo>>;
+/// Listener set for catalogue broadcasts.
+type CatalogueListeners = Arc<Mutex<Vec<Sender<SensorCatalogue>>>>;
+
 pub struct Client {
     writer: Mutex<FrameWriter<UnixStream>>,
     sample_rx: Mutex<Option<Receiver<Sample>>>,
     /// Live snapshot of the daemon's sensor catalogue. Seeded at
     /// handshake from `ListSensors`; the reader thread replaces it
     /// wholesale on each `SensorListBroadcast` (e.g. after a nickname
-    /// change).
-    catalogue: Arc<Mutex<Vec<SensorInfo>>>,
+    /// change). Stored as `Arc<Vec<...>>` so broadcasts can be shared
+    /// with every listener without deep-cloning per subscriber.
+    catalogue: Arc<Mutex<SensorCatalogue>>,
     /// Correlation map for v2 `Request`/`Response`. The RPC method
     /// inserts a sender keyed by `req_id`, sends the `Request`, and
     /// waits on the matching receiver. The reader thread removes the
@@ -101,9 +110,9 @@ pub struct Client {
     next_req_id: Arc<AtomicU32>,
     /// QObjects that want to learn about `SensorListBroadcast`s
     /// register an `mpsc::Sender` here via `subscribe_catalogue`. The
-    /// reader thread broadcasts the new `Vec<SensorInfo>` to each;
+    /// reader thread broadcasts the shared catalogue to each;
     /// disconnected senders are pruned on the next push.
-    catalogue_listeners: Arc<Mutex<Vec<Sender<Vec<SensorInfo>>>>>,
+    catalogue_listeners: CatalogueListeners,
     // Held to keep the spawned daemon alive; dropped on Client::drop.
     _child: Mutex<Option<Child>>,
     /// SSH `ssh -L` child process (Some only for `connect_ssh`). Killed on
@@ -232,7 +241,7 @@ impl Client {
         // can categorize tiles without round-tripping again per page.
         writer.write_client(&ClientMsg::ListSensors)?;
         let sensors = match reader.read_server()? {
-            ServerMsg::SensorList(infos) => infos,
+            ServerMsg::SensorList(infos) => Arc::new(infos),
             other => anyhow::bail!("unexpected reply to ListSensors: {other:?}"),
         };
         info!(count = sensors.len(), "sensor catalogue cached");
@@ -241,7 +250,7 @@ impl Client {
         let catalogue = Arc::new(Mutex::new(sensors));
         let inflight: Arc<Mutex<HashMap<u32, ResponseSender>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let catalogue_listeners: Arc<Mutex<Vec<Sender<Vec<SensorInfo>>>>> =
+        let catalogue_listeners: Arc<Mutex<Vec<Sender<SensorCatalogue>>>> =
             Arc::new(Mutex::new(Vec::new()));
         {
             let catalogue = Arc::clone(&catalogue);
@@ -268,7 +277,7 @@ impl Client {
     /// may be replaced wholesale by the reader thread when a
     /// `SensorListBroadcast` arrives.
     pub fn sensor_infos(&self) -> Vec<SensorInfo> {
-        self.catalogue.lock().expect("catalogue mutex poisoned").clone()
+        self.catalogue.lock().expect("catalogue mutex poisoned").to_vec()
     }
 
     pub fn subscribe(&self, sensors: Vec<SensorId>) -> Result<()> {
@@ -295,7 +304,7 @@ impl Client {
     /// nickname change (or any other catalogue-altering event) lands.
     /// Drop the receiver to unsubscribe — the dispatcher prunes
     /// disconnected senders lazily on the next broadcast.
-    pub fn subscribe_catalogue(&self) -> Receiver<Vec<SensorInfo>> {
+    pub fn subscribe_catalogue(&self) -> Receiver<SensorCatalogue> {
         let (tx, rx) = channel();
         self.catalogue_listeners.lock().expect("listeners poisoned").push(tx);
         rx
@@ -456,10 +465,11 @@ impl Client {
         history: Option<bool>,
         alerts: Option<bool>,
         prom: Option<bool>,
+        prom_bind: Option<String>,
         timeout: Duration,
     ) -> Result<(bool, bool, bool), RpcError> {
         self.request_rpc(
-            RequestOp::SetDaemonSettings { history, alerts, prom },
+            RequestOp::SetDaemonSettings { history, alerts, prom, prom_bind },
             timeout,
             |payload| match payload {
                 ResponsePayload::DaemonSettingsSet {
@@ -675,9 +685,9 @@ fn discover_remote_socket(target: &str) -> Result<String> {
 fn dispatch(
     mut reader: FrameReader<UnixStream>,
     sample_tx: SyncSender<Sample>,
-    catalogue: Arc<Mutex<Vec<SensorInfo>>>,
+    catalogue: Arc<Mutex<SensorCatalogue>>,
     inflight: Arc<Mutex<HashMap<u32, ResponseSender>>>,
-    catalogue_listeners: Arc<Mutex<Vec<Sender<Vec<SensorInfo>>>>>,
+    catalogue_listeners: Arc<Mutex<Vec<Sender<SensorCatalogue>>>>,
 ) {
     loop {
         match reader.read_server() {
@@ -700,11 +710,12 @@ fn dispatch(
                 }
             }
             Ok(ServerMsg::SensorListBroadcast(infos)) => {
-                *catalogue.lock().expect("catalogue poisoned") = infos.clone();
+                let infos = Arc::new(infos);
+                *catalogue.lock().expect("catalogue poisoned") = Arc::clone(&infos);
                 let mut listeners = catalogue_listeners.lock().expect("listeners poisoned");
-                // Send to every listener; drop those whose receivers
-                // have been dropped.
-                listeners.retain(|tx| tx.send(infos.clone()).is_ok());
+                // Send the shared catalogue to every listener; drop those
+                // whose receivers have been dropped.
+                listeners.retain(|tx| tx.send(Arc::clone(&infos)).is_ok());
             }
             Ok(ServerMsg::SensorDegraded { sensor, reason }) => {
                 warn!(?sensor, %reason, "sensor degraded");
@@ -759,9 +770,9 @@ mod tests {
     struct DispatchRunner {
         writer: FrameWriter<UnixStream>,
         handle: thread::JoinHandle<()>,
-        catalogue: Arc<Mutex<Vec<SensorInfo>>>,
+        catalogue: Arc<Mutex<SensorCatalogue>>,
         inflight: Arc<Mutex<HashMap<u32, ResponseSender>>>,
-        listeners: Arc<Mutex<Vec<Sender<Vec<SensorInfo>>>>>,
+        listeners: Arc<Mutex<Vec<Sender<SensorCatalogue>>>>,
     }
 
     impl DispatchRunner {
@@ -769,7 +780,7 @@ mod tests {
         /// writer plus all shared state.
         fn spawn(sample_tx: SyncSender<Sample>) -> Self {
             let (client_sock, server_sock) = UnixStream::pair().unwrap();
-            let catalogue = Arc::new(Mutex::new(vec![]));
+            let catalogue = Arc::new(Mutex::new(Arc::new(vec![])));
             let inflight = Arc::new(Mutex::new(HashMap::new()));
             let listeners = Arc::new(Mutex::new(vec![]));
             let reader = FrameReader::new(client_sock);
@@ -893,7 +904,7 @@ mod tests {
         let logs = capture_logs(|| {
             let (client_sock, server_sock) = UnixStream::pair().unwrap();
             let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
-            let catalogue = Arc::new(Mutex::new(vec![]));
+            let catalogue = Arc::new(Mutex::new(Arc::new(vec![])));
             let inflight = Arc::new(Mutex::new(HashMap::new()));
             let listeners = Arc::new(Mutex::new(vec![]));
 
@@ -918,7 +929,7 @@ mod tests {
         let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
 
-        let (cat_tx, cat_rx) = channel::<Vec<SensorInfo>>();
+        let (cat_tx, cat_rx) = channel::<SensorCatalogue>();
         runner.listeners.lock().unwrap().push(cat_tx);
 
         let infos = vec![sensor_info("cpu.util")];
@@ -929,7 +940,7 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].id, SensorId::new("cpu.util"));
 
-        let cached = runner.catalogue.lock().unwrap().clone();
+        let cached = (*runner.catalogue.lock().unwrap()).clone();
         assert_eq!(cached.len(), 1);
         runner.join();
     }
@@ -939,7 +950,7 @@ mod tests {
         let (sample_tx, _sample_rx) = sync_channel::<Sample>(SAMPLE_CHANNEL_CAP);
         let mut runner = DispatchRunner::spawn(sample_tx);
 
-        let (cat_tx, cat_rx) = channel::<Vec<SensorInfo>>();
+        let (cat_tx, cat_rx) = channel::<SensorCatalogue>();
         runner.listeners.lock().unwrap().push(cat_tx);
         // Drop the receiver before the broadcast so the listener is dead.
         drop(cat_rx);

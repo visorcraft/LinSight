@@ -15,8 +15,8 @@ use subtle::ConstantTimeEq;
 
 use linsight_core::SensorId;
 use linsight_protocol::{
-    ClientMsg, FrameError, FrameReader, FrameWriter, PROTOCOL_VERSION, PluginInfo, ServerMsg,
-    verify_hello,
+    ClientMsg, FrameError, FrameReader, FrameWriter, PROTOCOL_VERSION, PluginInfo, ProtoError,
+    ProtoErrorCode, RequestOp, ResponsePayload, ServerMsg, verify_hello,
 };
 use tracing::{info, warn};
 
@@ -88,8 +88,16 @@ const SAMPLER_POOL_SIZE: usize = 8;
 /// a second `Subscription` and inflating the scheduler's refcount.
 type ClientSubscriptions = HashMap<(SensorId, u64), Subscription>;
 
+/// Internal outbound message. Samples and catalogue broadcasts are shared
+/// via `Arc` so each client pump receives a pointer copy instead of a deep
+/// clone of the payload.
+enum OutboundMsg {
+    Sample(Arc<linsight_core::Sample>),
+    SensorListBroadcast(Arc<Vec<linsight_protocol::SensorInfo>>),
+}
+
 struct ClientSink {
-    tx: std::sync::mpsc::SyncSender<ServerMsg>,
+    tx: std::sync::mpsc::SyncSender<OutboundMsg>,
     subscriptions: Arc<Mutex<ClientSubscriptions>>,
 }
 
@@ -508,7 +516,7 @@ fn spawn_sampler(
             // delivery.
             let sinks: Vec<(
                 u64,
-                std::sync::mpsc::SyncSender<ServerMsg>,
+                std::sync::mpsc::SyncSender<OutboundMsg>,
                 Arc<Mutex<ClientSubscriptions>>,
             )> = {
                 let map = clients.lock().unwrap();
@@ -516,9 +524,11 @@ fn spawn_sampler(
                     .map(|(id, sink)| (*id, sink.tx.clone(), Arc::clone(&sink.subscriptions)))
                     .collect()
             };
+            let samples: Vec<Arc<linsight_core::Sample>> =
+                samples.into_iter().map(Arc::new).collect();
             let mut disconnected: Vec<u64> = Vec::new();
             for (id, tx, subscriptions) in sinks {
-                let interested: Vec<_> = {
+                let interested: Vec<Arc<linsight_core::Sample>> = {
                     let subs = subscriptions.lock().unwrap();
                     samples
                         .iter()
@@ -529,7 +539,7 @@ fn spawn_sampler(
                         .collect()
                 };
                 for sample in interested {
-                    match tx.try_send(ServerMsg::Sample(sample)) {
+                    match tx.try_send(OutboundMsg::Sample(sample)) {
                         Ok(()) => {}
                         Err(std::sync::mpsc::TrySendError::Full(_)) => {
                             tracing::debug!("outbound queue full; dropping sample for slow client");
@@ -561,6 +571,42 @@ fn now_micros() -> u64 {
     }
 }
 
+/// Build a single `SensorInfo` from a descriptor so `ListSensors`,
+/// `SensorListBroadcast`, and `GetSensorInfo` share the same decoration
+/// logic.
+fn build_sensor_info(
+    d: &linsight_plugin_sdk::SensorDescriptor,
+    sched: &Scheduler,
+    registry: &HardwareRegistry,
+) -> linsight_protocol::SensorInfo {
+    let plugin_id = sched.plugin_id_for(&d.id).unwrap_or("unknown").to_owned();
+    // Prefer the descriptor's explicit `device_key` (v4 plugins
+    // set this directly and host_init validated it lives in
+    // `manifest.devices`). Fall back to the `(plugin_id,
+    // device_id)` lookup for legacy / partial v4 manifests
+    // that bind via device_id only. Memory sensors carry
+    // neither and emit `device_key = None`.
+    let device_key = d.device_key.clone().or_else(|| {
+        d.device_id.as_ref().and_then(|did| registry.key_for(&plugin_id, did)).cloned()
+    });
+    let device_label = device_key.as_ref().map(|k| registry.device_label_for(k));
+    linsight_protocol::SensorInfo {
+        id: d.id.clone(),
+        display_name: d.display_name.clone(),
+        unit: d.unit.clone(),
+        kind: d.kind,
+        category: d.category,
+        native_rate_hz: d.native_rate_hz,
+        min: d.min,
+        max: d.max,
+        device_id: d.device_id.clone(),
+        plugin_id,
+        device_key: device_key.map(|k| k.as_str().to_owned()),
+        device_label,
+        tags: d.tags.clone(),
+    }
+}
+
 /// Build the wire-shape `SensorInfo` catalogue from the scheduler's
 /// descriptors and the hardware registry's decoration data. Shared by
 /// the `ListSensors` handler and the `SensorListBroadcast` emitted
@@ -570,37 +616,7 @@ fn build_sensor_info_list(
     sched: &Scheduler,
     registry: &HardwareRegistry,
 ) -> Vec<linsight_protocol::SensorInfo> {
-    sched
-        .descriptors()
-        .map(|d| {
-            let plugin_id = sched.plugin_id_for(&d.id).unwrap_or("unknown").to_owned();
-            // Prefer the descriptor's explicit `device_key` (v4 plugins
-            // set this directly and host_init validated it lives in
-            // `manifest.devices`). Fall back to the `(plugin_id,
-            // device_id)` lookup for legacy / partial v4 manifests
-            // that bind via device_id only. Memory sensors carry
-            // neither and emit `device_key = None`.
-            let device_key = d.device_key.clone().or_else(|| {
-                d.device_id.as_ref().and_then(|did| registry.key_for(&plugin_id, did)).cloned()
-            });
-            let device_label = device_key.as_ref().map(|k| registry.device_label_for(k));
-            linsight_protocol::SensorInfo {
-                id: d.id.clone(),
-                display_name: d.display_name.clone(),
-                unit: d.unit.clone(),
-                kind: d.kind,
-                category: d.category,
-                native_rate_hz: d.native_rate_hz,
-                min: d.min,
-                max: d.max,
-                device_id: d.device_id.clone(),
-                plugin_id,
-                device_key: device_key.map(|k| k.as_str().to_owned()),
-                device_label,
-                tags: d.tags.clone(),
-            }
-        })
-        .collect()
+    sched.descriptors().map(|d| build_sensor_info(d, sched, registry)).collect()
 }
 
 fn serve(
@@ -684,7 +700,8 @@ fn serve(
     // connection identities.
     let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
     let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
-    let (outbound_tx, outbound_rx) = std::sync::mpsc::sync_channel::<ServerMsg>(OUTBOUND_QUEUE_CAP);
+    let (outbound_tx, outbound_rx) =
+        std::sync::mpsc::sync_channel::<OutboundMsg>(OUTBOUND_QUEUE_CAP);
     clients.lock().unwrap().insert(
         client_id,
         ClientSink { tx: outbound_tx, subscriptions: Arc::clone(&subscriptions) },
@@ -722,8 +739,14 @@ fn serve(
             loop {
                 match outbound_rx.try_recv() {
                     Ok(msg) => {
+                        let server_msg = match msg {
+                            OutboundMsg::Sample(s) => ServerMsg::Sample((*s).clone()),
+                            OutboundMsg::SensorListBroadcast(infos) => {
+                                ServerMsg::SensorListBroadcast((*infos).clone())
+                            }
+                        };
                         let mut w = pump_writer.lock().unwrap();
-                        if w.write_server(&msg).is_err() {
+                        if w.write_server(&server_msg).is_err() {
                             return;
                         }
                         drained += 1;
@@ -878,7 +901,6 @@ fn handle_request(
     pump_interval_ms: &Arc<AtomicU64>,
 ) -> Result<(), FrameError> {
     use linsight_core::HardwareDeviceKey;
-    use linsight_protocol::{ProtoError, ProtoErrorCode, RequestOp, ResponsePayload};
 
     use crate::nickname_store::NicknameStore;
 
@@ -892,6 +914,38 @@ fn handle_request(
                 req_id,
                 result: Ok(ResponsePayload::Hardware { devices, nicknames }),
             })
+        }
+        RequestOp::GetSensorInfo { sensor } => {
+            let sensor_id = match linsight_core::SensorId::try_new(&sensor) {
+                Ok(id) => id,
+                Err(e) => {
+                    return writer.lock().unwrap().write_server(&ServerMsg::Response {
+                        req_id,
+                        result: Err(ProtoError {
+                            code: ProtoErrorCode::UnknownSensor,
+                            message: format!("bad sensor id: {e}"),
+                        }),
+                    });
+                }
+            };
+            let info = {
+                let s = sched.lock().unwrap();
+                let r = registry.read().unwrap();
+                s.descriptors().find(|d| d.id == sensor_id).map(|d| build_sensor_info(d, &s, &r))
+            };
+            match info {
+                Some(info) => writer.lock().unwrap().write_server(&ServerMsg::Response {
+                    req_id,
+                    result: Ok(ResponsePayload::SensorInfo { info }),
+                }),
+                None => writer.lock().unwrap().write_server(&ServerMsg::Response {
+                    req_id,
+                    result: Err(ProtoError {
+                        code: ProtoErrorCode::UnknownSensor,
+                        message: format!("sensor not found: {sensor_id}"),
+                    }),
+                }),
+            }
         }
         RequestOp::SetNickname { device_key, value } => {
             // Parse the key BEFORE touching the registry so we can
@@ -1218,7 +1272,7 @@ fn handle_request(
                 }),
             })
         }
-        RequestOp::SetDaemonSettings { history, alerts, prom } => {
+        RequestOp::SetDaemonSettings { history, alerts, prom, prom_bind } => {
             let mut s = sched.lock().unwrap();
             let mut errors: Vec<String> = Vec::new();
             if let Some(v) = history
@@ -1245,8 +1299,16 @@ fn handle_request(
                     "Prometheus toggle-off is not supported via RPC; unset LINSIGHT_PROM_BIND and restart".into(),
                 );
             }
-            let (history_enabled, alerts_enabled, _prom, prom_bind) = s.daemon_settings();
             drop(s);
+            if let Some(bind) = prom_bind {
+                if bind.trim().is_empty() {
+                    unsafe { std::env::remove_var("LINSIGHT_PROM_BIND") };
+                } else {
+                    unsafe { std::env::set_var("LINSIGHT_PROM_BIND", bind) };
+                }
+            }
+            let (history_enabled, alerts_enabled, _prom, prom_bind) =
+                sched.lock().unwrap().daemon_settings();
             if !errors.is_empty() {
                 return writer.lock().unwrap().write_server(&ServerMsg::Response {
                     req_id,
@@ -1276,16 +1338,20 @@ fn handle_request(
 /// (its pump dropped the receiver but its `serve()` hasn't yet
 /// reached the `remove` call).
 fn broadcast_sensor_list(clients: &ClientMap, infos: Vec<linsight_protocol::SensorInfo>) {
-    let msg = ServerMsg::SensorListBroadcast(infos);
+    let infos = Arc::new(infos);
     let mut map = clients.lock().unwrap();
-    map.retain(|_id, sink| match sink.tx.try_send(msg.clone()) {
-        Ok(()) => true,
-        Err(std::sync::mpsc::TrySendError::Full(_)) => {
-            // Same backpressure policy as samples: drop rather than disconnect.
-            tracing::debug!("outbound queue full; dropping sensor-list broadcast for slow client");
-            true
+    map.retain(|_id, sink| {
+        match sink.tx.try_send(OutboundMsg::SensorListBroadcast(Arc::clone(&infos))) {
+            Ok(()) => true,
+            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                // Same backpressure policy as samples: drop rather than disconnect.
+                tracing::debug!(
+                    "outbound queue full; dropping sensor-list broadcast for slow client"
+                );
+                true
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
         }
-        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
     });
 }
 
@@ -1396,13 +1462,13 @@ mod tests {
         broadcast_sensor_list(&clients, vec![info.clone()]);
 
         let msg = rx.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(matches!(msg, ServerMsg::SensorListBroadcast(list) if list.len() == 1));
+        assert!(matches!(msg, OutboundMsg::SensorListBroadcast(list) if list.len() == 1));
     }
 
     #[test]
     fn broadcast_sensor_list_drops_disconnected_clients() {
         let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = std::sync::mpsc::sync_channel::<ServerMsg>(16);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<OutboundMsg>(16);
         drop(rx);
         let subscriptions = Arc::new(Mutex::new(ClientSubscriptions::new()));
         clients

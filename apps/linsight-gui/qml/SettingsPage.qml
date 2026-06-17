@@ -18,8 +18,8 @@ Kirigami.ScrollablePage {
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
 
     // Shared OverviewModel — Main.qml passes it via `dashModel`. We
-    // ask it `envIsSet(name)` to flip the indicator below from a fixed
-    // checkbox-symbolic to a real on/off status.
+    // call `fetchDaemonSettings()` on it to drive the indicators below
+    // from the daemon's actual on/off state.
     property QtObject dashModel: null
 
     property var daemonSettings: ({ history: false, alerts: false, prom: false, promBind: "" })
@@ -32,9 +32,33 @@ Kirigami.ScrollablePage {
         } catch (e) {
             daemonSettings = { history: false, alerts: false, prom: false, promBind: "" }
         }
+        if (promBindField) {
+            promBindField.text = daemonSettings.promBind || ""
+        }
     }
 
-    Component.onCompleted: page.refreshDaemonSettings()
+    function syncSampleIntervalCombo() {
+        if (!app.preferences) return
+        const target = app.preferences.sampleIntervalMs
+        for (let i = 0; i < sampleIntervalCombo.count; i++) {
+            if (sampleIntervalCombo.model.get(i).ms === target) {
+                sampleIntervalCombo.currentIndex = i
+                return
+            }
+        }
+        // Out-of-list value — snap to default.
+        for (let i = 0; i < sampleIntervalCombo.count; i++) {
+            if (sampleIntervalCombo.model.get(i).ms === 150) {
+                sampleIntervalCombo.currentIndex = i
+                return
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        page.refreshDaemonSettings()
+        page.syncSampleIntervalCombo()
+    }
 
     function escapeHtml(s) {
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -149,22 +173,10 @@ Kirigami.ScrollablePage {
                         // Bind selected index to the preference value;
                         // fall back to the 150 ms slot if the persisted
                         // value isn't one of the offered choices.
-                        Component.onCompleted: {
-                            if (!app.preferences) return
-                            const target = app.preferences.sampleIntervalMs
-                            for (let i = 0; i < count; i++) {
-                                if (model.get(i).ms === target) {
-                                    currentIndex = i
-                                    return
-                                }
-                            }
-                            // Out-of-list value — snap to default.
-                            for (let i = 0; i < count; i++) {
-                                if (model.get(i).ms === 150) {
-                                    currentIndex = i
-                                    return
-                                }
-                            }
+                        Component.onCompleted: page.syncSampleIntervalCombo()
+                        Connections {
+                            target: app.preferences
+                            function onSampleIntervalMsChanged() { page.syncSampleIntervalCombo() }
                         }
                         onActivated: {
                             if (app.preferences) {
@@ -363,10 +375,41 @@ Kirigami.ScrollablePage {
                         }
                     }
 
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: app.tokens.spaceM
+                        ThemedTextField {
+                            id: promBindField
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("e.g. 127.0.0.1:9777")
+                            text: page.daemonSettings.promBind || ""
+                            enabled: page.dashModel !== null
+                        }
+                        ThemedButton {
+                            text: qsTr("Set bind")
+                            enabled: page.dashModel !== null
+                            onClicked: {
+                                if (!page.dashModel) return
+                                const result = page.dashModel.setDaemonSettingStr(
+                                    "promBind", promBindField.text
+                                ).toString()
+                                if (result.indexOf("error:") === 0) {
+                                    app.showPassiveNotification(result, 4000)
+                                } else {
+                                    app.showPassiveNotification(
+                                        qsTr("Prometheus bind updated; restart daemon to apply"),
+                                        3000
+                                    )
+                                }
+                                page.refreshDaemonSettings()
+                            }
+                        }
+                    }
+
                     Controls.Label {
                         text: page.daemonSettings.prom
-                            ? qsTr("Prometheus exporter is bound to %1. To change the bind address, set LINSIGHT_PROM_BIND and restart the daemon.").arg(page.escapeHtml(page.daemonSettings.promBind || ""))
-                            : qsTr("Prometheus exporter is not configured. Set LINSIGHT_PROM_BIND and restart the daemon to enable it.")
+                            ? qsTr("Prometheus exporter is bound to %1. Restart the daemon to apply a new bind address.").arg(page.escapeHtml(page.daemonSettings.promBind || ""))
+                            : qsTr("Prometheus exporter is not running. Set a bind address and restart the daemon to enable it.")
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                         opacity: 0.65

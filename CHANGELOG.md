@@ -7,6 +7,32 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.17.0] — 2026-06-17
+
+- **Performance: shared allocations in the hot path.** Daemon sample fan-out and
+  sensor-catalogue broadcasts now use `Arc` instead of deep-cloning. The frame
+  writer reuses its serialization buffer, the alert engine shares its evaluation
+  context across rules, history records carry only persistable fields, and
+  `SnapshotCache` returns shared pointers. Sensor hot-path file reads in `cpu`,
+  `mem`, `net`, `disk`, and `system` use small stack buffers instead of
+  `fs::read_to_string`.
+- **Performance: GUI dirty-delta tile updates.** The sample pump now emits only
+  changed tiles per tick rather than re-serializing the entire dashboard.
+- **UI/UX polish.** Dashboard "Export" renamed to "Copy to clipboard" with the
+  dead download path removed; the dashboard viewer scrolls to tile extents and
+  rebuilds its gallery reactively; threshold options are validated and use
+  design-token colors; the alert editor focuses the first field; the settings
+  sample-interval combo re-syncs on external changes.
+- **New features.** Dashboard import is now handled by a Rust `Q_INVOKABLE`
+  instead of an `XMLHttpRequest` hack; the Settings page exposes mutable daemon
+  toggles for history, alerts, and Prometheus (plus the bind address); the CLI
+  validates `--format` values via clap.
+- **Protocol/CLI.** Added `RequestOp::GetSensorInfo` so `read` and `watch` no
+  longer transfer the full sensor catalogue just to look up one unit; the CLI
+  RPC loop can skip pushed frames without full deserialization; `db export`
+  streams rows instead of collecting them; `history --format json` warns when
+  table-shaped samples are omitted.
+
 ## [1.16.0] — 2026-06-16
 
 - **Hardened sensor plugins against blocking leaks.** `fs`, `smart`, and `nvml`

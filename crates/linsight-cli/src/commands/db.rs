@@ -182,30 +182,6 @@ pub fn export(
         )?
     };
 
-    let rows: Vec<_> = if let Some(sid) = sensor {
-        stmt.query_map(rusqlite::params![sid, cutoff_micros as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?
-    } else {
-        stmt.query_map(rusqlite::params![cutoff_micros as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?
-    };
-
     let mut out: Box<dyn std::io::Write> = match output {
         Some(p) => Box::new(
             std::fs::File::create(p)
@@ -214,38 +190,103 @@ pub fn export(
         None => Box::new(std::io::stdout()),
     };
 
+    let map_row = |row: &rusqlite::Row<'_>| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<f64>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ))
+    };
+
     match format {
         "csv" => {
             writeln!(out, "sensor_id,ts,scalar,counter,state")?;
-            for row in rows {
-                let (sid, ts, scalar, counter, state) = row;
-                let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
-                let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
-                let state_s = state.as_deref().unwrap_or("");
-                writeln!(
-                    out,
-                    "{},{},{},{},{}",
-                    escape_csv(&sid),
-                    ts,
-                    scalar_s,
-                    counter_s,
-                    escape_csv(state_s),
-                )?;
+            if let Some(sid) = sensor {
+                let rows = stmt.query_map(rusqlite::params![sid, cutoff_micros as i64], map_row)?;
+                for row in rows {
+                    let (sid, ts, scalar, counter, state) = row?;
+                    let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
+                    let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
+                    let state_s = state.as_deref().unwrap_or("");
+                    writeln!(
+                        out,
+                        "{},{},{},{},{}",
+                        escape_csv(&sid),
+                        ts,
+                        scalar_s,
+                        counter_s,
+                        escape_csv(state_s),
+                    )?;
+                }
+            } else {
+                let rows = stmt.query_map(rusqlite::params![cutoff_micros as i64], map_row)?;
+                for row in rows {
+                    let (sid, ts, scalar, counter, state) = row?;
+                    let scalar_s = scalar.map(|v| v.to_string()).unwrap_or_default();
+                    let counter_s = counter.map(|v| v.to_string()).unwrap_or_default();
+                    let state_s = state.as_deref().unwrap_or("");
+                    writeln!(
+                        out,
+                        "{},{},{},{},{}",
+                        escape_csv(&sid),
+                        ts,
+                        scalar_s,
+                        counter_s,
+                        escape_csv(state_s),
+                    )?;
+                }
             }
         }
         "json" => {
-            let mut arr = Vec::new();
-            for row in rows {
-                let (sid, ts, scalar, counter, state) = row;
-                arr.push(serde_json::json!({
-                    "sensor_id": sid,
-                    "ts": ts,
-                    "scalar": scalar,
-                    "counter": counter,
-                    "state": state,
-                }));
+            writeln!(out, "[")?;
+            let mut first = true;
+            if let Some(sid) = sensor {
+                let rows = stmt.query_map(rusqlite::params![sid, cutoff_micros as i64], map_row)?;
+                for row in rows {
+                    let (sid, ts, scalar, counter, state) = row?;
+                    if !first {
+                        writeln!(out, ",")?;
+                    }
+                    first = false;
+                    write!(out, "  ")?;
+                    serde_json::to_writer(
+                        &mut out,
+                        &serde_json::json!({
+                            "sensor_id": sid,
+                            "ts": ts,
+                            "scalar": scalar,
+                            "counter": counter,
+                            "state": state,
+                        }),
+                    )?;
+                }
+            } else {
+                let rows = stmt.query_map(rusqlite::params![cutoff_micros as i64], map_row)?;
+                for row in rows {
+                    let (sid, ts, scalar, counter, state) = row?;
+                    if !first {
+                        writeln!(out, ",")?;
+                    }
+                    first = false;
+                    write!(out, "  ")?;
+                    serde_json::to_writer(
+                        &mut out,
+                        &serde_json::json!({
+                            "sensor_id": sid,
+                            "ts": ts,
+                            "scalar": scalar,
+                            "counter": counter,
+                            "state": state,
+                        }),
+                    )?;
+                }
             }
-            writeln!(out, "{}", serde_json::to_string_pretty(&arr)?)?;
+            if !first {
+                writeln!(out)?;
+            }
+            writeln!(out, "]")?;
         }
         other => {
             return Err(anyhow::anyhow!(

@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use linsight_core::{
@@ -194,7 +194,7 @@ impl DiskPlugin {
         Ok(value)
     }
 
-    fn snapshot(inner: &mut Inner) -> Result<HashMap<String, BlockStat>, PluginError> {
+    fn snapshot(inner: &mut Inner) -> Result<Arc<HashMap<String, BlockStat>>, PluginError> {
         if let Some(cache) = &inner.cache
             && let Some(stats) = cache.get(CACHE_TTL)
         {
@@ -210,7 +210,8 @@ impl DiskPlugin {
             }
         }
         tracing::debug!(target: "linsight_sensors::reads", plugin = "disk", files_read);
-        inner.cache = Some(linsight_core::SnapshotCache::new(stats.clone()));
+        let stats = Arc::new(stats);
+        inner.cache = Some(linsight_core::SnapshotCache::new(Arc::clone(&stats)));
         Ok(stats)
     }
 }
@@ -242,9 +243,32 @@ struct BlockStat {
     io_ticks: u64,
 }
 
+/// Read a small sysfs file into a stack buffer. Avoids the `String`
+/// allocation of `fs::read_to_string` for files that are typically a
+/// single line. Reads up to 512 bytes; truncates anything larger.
+fn read_small_file(path: &Path) -> Result<String, PluginError> {
+    use std::io::Read;
+    let mut file =
+        fs::File::open(path).map_err(|e| PluginError::Io(format!("{}: {e}", path.display())))?;
+    let mut buf = [0u8; 512];
+    let mut n = 0usize;
+    loop {
+        match file.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(m) => n += m,
+            Err(e) => return Err(PluginError::Io(format!("{}: {e}", path.display()))),
+        }
+        if n == buf.len() {
+            break;
+        }
+    }
+    std::str::from_utf8(&buf[..n])
+        .map(|s| s.to_owned())
+        .map_err(|e| PluginError::Parse(format!("{}: {e}", path.display())))
+}
+
 fn read_block_stat(path: &Path) -> Result<BlockStat, PluginError> {
-    let s = fs::read_to_string(path)
-        .map_err(|e| PluginError::Io(format!("{}: {e}", path.display())))?;
+    let s = read_small_file(path)?;
     let fields: Vec<&str> = s.split_whitespace().collect();
     if fields.len() < 11 {
         return Err(PluginError::Parse(format!(
@@ -296,7 +320,7 @@ fn enumerate(sysroot: Option<&Path>, extra_exclude: &[String]) -> Vec<DiskDevice
         }
 
         let size_path = entry.path().join("size");
-        let capacity_bytes = if let Ok(s) = fs::read_to_string(&size_path) {
+        let capacity_bytes = if let Ok(s) = read_small_file(&size_path) {
             s.trim().parse::<u64>().map(|sectors| sectors.saturating_mul(512)).unwrap_or(0)
         } else {
             0
@@ -402,23 +426,23 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // bytes_read = 300 sectors * 512 = 153600
-        let r = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("disk.sda.bytes_read")).unwrap();
         assert!(matches!(r, Reading::Counter(153600)));
 
         // bytes_written = 700 * 512 = 358400
-        let r = host_sample(&plugin, SensorId::new("disk.sda.bytes_written")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("disk.sda.bytes_written")).unwrap();
         assert!(matches!(r, Reading::Counter(358400)));
 
         // iops_read = 100
-        let r = host_sample(&plugin, SensorId::new("disk.sda.iops_read")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("disk.sda.iops_read")).unwrap();
         assert!(matches!(r, Reading::Counter(100)));
 
         // iops_written = 500
-        let r = host_sample(&plugin, SensorId::new("disk.sda.iops_written")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("disk.sda.iops_written")).unwrap();
         assert!(matches!(r, Reading::Counter(500)));
 
         // io_util_ms = 900
-        let r = host_sample(&plugin, SensorId::new("disk.sda.io_util_ms")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("disk.sda.io_util_ms")).unwrap();
         assert!(matches!(r, Reading::Counter(900)));
     }
 
@@ -451,7 +475,7 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // First sample populates cache
-        let r1 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        let r1 = host_sample(&plugin, &SensorId::new("disk.sda.bytes_read")).unwrap();
         assert!(matches!(r1, Reading::Counter(153600)));
 
         // Mutate the stat file on disk
@@ -459,7 +483,7 @@ mod tests {
         fs::write(&stat_path, "999 200 999 400 500 600 700 800 0 900 1000").unwrap();
 
         // Second sample immediately should still see cached value
-        let r2 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        let r2 = host_sample(&plugin, &SensorId::new("disk.sda.bytes_read")).unwrap();
         assert!(matches!(r2, Reading::Counter(153600)), "cache should serve stale value");
     }
 
@@ -471,7 +495,7 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // First sample
-        let r1 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        let r1 = host_sample(&plugin, &SensorId::new("disk.sda.bytes_read")).unwrap();
         assert!(matches!(r1, Reading::Counter(153600)));
 
         // Mutate the stat file
@@ -482,7 +506,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(60));
 
         // Second sample should see new value
-        let r2 = host_sample(&plugin, SensorId::new("disk.sda.bytes_read")).unwrap();
+        let r2 = host_sample(&plugin, &SensorId::new("disk.sda.bytes_read")).unwrap();
         assert!(
             matches!(r2, Reading::Counter(511488)),
             "cache should reflect new value after expiry"

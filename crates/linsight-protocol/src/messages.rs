@@ -82,9 +82,19 @@ pub enum RequestOp {
     GetDaemonSettings,
     /// Toggle daemon subsystems at runtime. `history`, `alerts`, and `prom`
     /// are tristated: `Some(true)` enables, `Some(false)` disables,
-    /// `None` leaves unchanged.
+    /// `None` leaves unchanged. `prom_bind` may be set to change the
+    /// Prometheus bind address (takes effect after daemon restart).
     /// New variant — appended at end per wire-format stability rules.
-    SetDaemonSettings { history: Option<bool>, alerts: Option<bool>, prom: Option<bool> },
+    SetDaemonSettings {
+        history: Option<bool>,
+        alerts: Option<bool>,
+        prom: Option<bool>,
+        prom_bind: Option<String>,
+    },
+    /// Look up a single sensor's metadata by id. Avoids fetching the
+    /// entire catalogue just to validate an id and capture its unit.
+    /// New variant — appended at end per wire-format stability rules.
+    GetSensorInfo { sensor: String },
 }
 
 /// A daemon → client message.
@@ -107,7 +117,10 @@ pub enum ServerMsg {
     Response { req_id: u32, result: Result<ResponsePayload, ProtoError> },
     /// NEW in v2: pushed when the daemon's sensor catalogue changes (e.g.,
     /// a nickname update relabels devices). Clients should refresh their
-    /// cached `SensorList` from this broadcast.
+    /// cached `SensorList` from this broadcast. The daemon keeps the wire
+    /// shape as `Vec<SensorInfo>`; the outbound channel uses `Arc` internally
+    /// so the same allocation is fanned out to every client until the final
+    /// per-socket serialization clone.
     SensorListBroadcast(Vec<SensorInfo>),
 }
 
@@ -156,6 +169,9 @@ pub enum ResponsePayload {
     },
     /// Reply to `RequestOp::SetDaemonSettings`. Echoes the applied state.
     DaemonSettingsSet { history_enabled: bool, alerts_enabled: bool, prom_enabled: bool },
+    /// Reply to `RequestOp::GetSensorInfo`. Carries the matching sensor
+    /// metadata, or is returned as an `UnknownSensor` error if absent.
+    SensorInfo { info: SensorInfo },
 }
 
 /// Failure payload for a v2 `ServerMsg::Response`.
@@ -588,6 +604,7 @@ mod tests {
                 history: Some(true),
                 alerts: Some(false),
                 prom: None,
+                prom_bind: None,
             },
         });
     }

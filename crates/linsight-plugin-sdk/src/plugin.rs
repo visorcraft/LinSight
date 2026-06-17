@@ -278,7 +278,7 @@ pub fn host_init(
 /// Convenience wrapper: call `plugin.sample(id)` with a host-side
 /// [`SensorId`] and get a host-side [`Reading`] back.
 #[must_use = "host_sample returns the sampled Reading; ignoring it drops the value the plugin produced"]
-pub fn host_sample(plugin: &dyn LinsightPlugin, id: SensorId) -> Result<Reading, PluginError> {
+pub fn host_sample(plugin: &dyn LinsightPlugin, id: &SensorId) -> Result<Reading, PluginError> {
     let rid: RSensorId = id.into();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.sample(rid)))
         .map_err(|_| PluginError::Panic("plugin sample panicked".into()))?;
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn noop_plugin_sample_errors() {
         let p = NoopPlugin;
-        let err = host_sample(&p, SensorId::new("foo")).unwrap_err();
+        let err = host_sample(&p, &SensorId::new("foo")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn host_sample_catches_plugin_panic() {
-        let err = host_sample(&PanicPlugin, SensorId::new("x")).unwrap_err();
+        let err = host_sample(&PanicPlugin, &SensorId::new("x")).unwrap_err();
         assert!(matches!(err, PluginError::Panic(_)), "expected Panic, got {err:?}");
     }
 

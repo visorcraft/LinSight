@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "qrc:/qml/Shared.js" as Shared
 
 Rectangle {
     id: root
@@ -60,8 +61,8 @@ Rectangle {
         if (!tileOptions || !tileOptions.thresholdEnabled) return app.tokens.separator;
         var numVal = parseFloat(tileValue);
         if (isNaN(numVal)) return app.tokens.separator;
-        if (tileOptions.thresholdWarn && numVal >= parseFloat(tileOptions.thresholdWarn)) return Kirigami.Theme.negativeTextColor;
-        if (tileOptions.thresholdOk && numVal >= parseFloat(tileOptions.thresholdOk)) return Kirigami.Theme.warningTextColor;
+        if (tileOptions.thresholdWarn && numVal >= parseFloat(tileOptions.thresholdWarn)) return app.tokens.negative;
+        if (tileOptions.thresholdOk && numVal >= parseFloat(tileOptions.thresholdOk)) return app.tokens.warning;
         return app.tokens.separator;
     }
     border.color: root.__borderColor
@@ -70,16 +71,7 @@ Rectangle {
     // True only when the sparkline series actually varies. A constant value
     // (e.g. GPU memory total) gets no chart — it has no trend, and a flat
     // line otherwise consumed the value label's layout space.
-    readonly property bool __sparklineVaries: {
-        const pts = root.tileSparkline
-        if (!Array.isArray(pts) || pts.length < 2) return false
-        let mn = pts[0], mx = pts[0]
-        for (let k = 1; k < pts.length; ++k) {
-            if (pts[k] < mn) mn = pts[k]
-            if (pts[k] > mx) mx = pts[k]
-        }
-        return mx > mn
-    }
+    readonly property bool __sparklineVaries: Shared.sparklineVaries(root.tileSparkline)
 
     Accessible.role: Accessible.Indicator
     Accessible.name: root.tileDeviceLabel.length > 0
@@ -231,7 +223,7 @@ Rectangle {
                                 if (typeof modelData === 'object' && modelData !== null) {
                                     if (modelData.text !== undefined) return modelData.text;
                                     if (modelData.number !== undefined) return Number(modelData.number).toFixed(1);
-                                    if (modelData.bytes !== undefined) return formatBytes(modelData.bytes);
+                                    if (modelData.bytes !== undefined) return Shared.formatBytes(modelData.bytes);
                                     return "";
                                 }
                                 return String(modelData);
@@ -245,14 +237,6 @@ Rectangle {
                 }
             }
         }
-    }
-
-    function formatBytes(b) {
-        if (b >= 1099511627776) return (b / 1099511627776).toFixed(2) + " TiB";
-        if (b >= 1073741824) return (b / 1073741824).toFixed(2) + " GiB";
-        if (b >= 1048576) return (b / 1048576).toFixed(2) + " MiB";
-        if (b >= 1024) return (b / 1024).toFixed(2) + " KiB";
-        return b + " B";
     }
 
     function copySensorIdToClipboard(message) {

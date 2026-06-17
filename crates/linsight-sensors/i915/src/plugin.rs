@@ -326,13 +326,13 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
 
-        let r = host_sample(&p, SensorId::new("i915.card0.cur_freq_hz")).unwrap();
+        let r = host_sample(&p, &SensorId::new("i915.card0.cur_freq_hz")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 300_000_000.0));
 
-        let r = host_sample(&p, SensorId::new("i915.card0.act_freq_hz")).unwrap();
+        let r = host_sample(&p, &SensorId::new("i915.card0.act_freq_hz")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 350_000_000.0));
 
-        let r = host_sample(&p, SensorId::new("i915.card0.temp_c")).unwrap();
+        let r = host_sample(&p, &SensorId::new("i915.card0.temp_c")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 45.0).abs() < 1e-6));
     }
 

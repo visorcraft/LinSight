@@ -42,6 +42,11 @@ pub mod ffi {
         #[qproperty(QString, cpu_temp_text)]
         #[qproperty(QString, cpu_freq_text)]
         #[qproperty(QString, tiles_json)]
+        /// Per-tick delta: JSON array containing only the tiles whose values
+        /// changed since the last tick. QML pages merge this into their local
+        /// tile maps; `tiles_json` remains the source of truth for full
+        /// snapshots after connect/reconnect/catalogue refresh.
+        #[qproperty(QString, tiles_changed_json)]
         #[qproperty(QString, network_json)]
         #[qproperty(QString, processes_json)]
         #[qproperty(bool, connected)]
@@ -94,6 +99,16 @@ pub mod ffi {
             self: Pin<&mut OverviewModel>,
             subsystem: &QString,
             enabled: bool,
+        ) -> QString;
+
+        /// Set a string-valued daemon setting. Currently only `promBind`
+        /// is supported; pass an empty string to clear the bind address.
+        /// Returns a status string beginning with `error:` on failure.
+        #[qinvokable]
+        fn set_daemon_setting_str(
+            self: Pin<&mut OverviewModel>,
+            subsystem: &QString,
+            value: &QString,
         ) -> QString;
     }
 
@@ -151,6 +166,9 @@ struct SampleState {
     static_ids: HashSet<String>,
     /// Previous raw counter sample per net sensor, keyed by sensor id.
     net_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
+    /// Tile ids updated during the current pump tick. Cleared after the
+    /// delta JSON is serialized so the next tick starts empty.
+    dirty: HashSet<String>,
 }
 
 /// Maximum number of points retained in a tile's rolling sparkline
@@ -184,6 +202,7 @@ fn apply_sample(state: &mut SampleState, sample: &linsight_core::Sample) {
                 tile.sparkline.pop_front();
             }
         }
+        state.dirty.insert(sensor_id);
     }
 }
 
@@ -227,6 +246,7 @@ pub struct OverviewModelRust {
     /// daemon returns Unsupported (no cpufreq subsystem).
     cpu_freq_text: QString,
     tiles_json: QString,
+    tiles_changed_json: QString,
     /// JSON array of per-interface network throughput objects. Empty "[]"
     /// until the first net counter samples have been processed.
     network_json: QString,
@@ -249,6 +269,7 @@ impl Default for OverviewModelRust {
             cpu_temp_text: QString::from("…"),
             cpu_freq_text: QString::from("…"),
             tiles_json: QString::from("[]"),
+            tiles_changed_json: QString::from("[]"),
             network_json: QString::from("[]"),
             processes_json: QString::from("[]"),
             connected: false,
@@ -282,6 +303,7 @@ impl ffi::OverviewModel {
         let initial = serialize_tiles(&initial_state.id_order, &initial_state.tiles);
         let init_q = QString::from(initial.as_str());
         self.as_mut().set_tiles_json(init_q);
+        self.as_mut().set_tiles_changed_json(QString::from("[]"));
 
         // Subscribe to everything except proc.list; the process page will
         // opt in via set_process_stream_enabled so the 5-second /proc
@@ -351,7 +373,7 @@ impl ffi::OverviewModel {
                     }
                     let json = {
                         let mut guard = state.lock().expect("tile state poisoned");
-                        for info in &fresh {
+                        for info in fresh.as_ref() {
                             let id = info.id.as_str();
                             if let Some(tile) = guard.tiles.get_mut(id) {
                                 tile.name = info.display_name.clone();
@@ -447,14 +469,14 @@ impl ffi::OverviewModel {
                                     pin.as_mut().set_connected(true);
                                 });
                             }
-                            let (json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
+                            let (delta_json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
                                 let mut guard = state.lock().expect("tile state poisoned");
                                 // Drain the first sample plus any others already
                                 // queued (typically the rest of this pump tick's
                                 // batch) into the in-memory state. Non-blocking;
                                 // returns once the channel is empty.
                                 drain_into_state(&rx, &mut guard, first, &mut current_g);
-                                let json = serialize_tiles(&guard.id_order, &guard.tiles);
+                                let delta_json = take_dirty_tiles_json(&mut guard);
                                 let network_json = compute_network_rates(&mut guard);
                                 let cpu = guard.tiles.get("cpu.util").map(|t| t.value.clone());
                                 let mem =
@@ -468,9 +490,9 @@ impl ffi::OverviewModel {
                                     .get("proc.list")
                                     .map(|t| serialize_proc_rows(&t.rows))
                                     .unwrap_or_else(|| "[]".to_string());
-                                (json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json)
+                                (delta_json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json)
                             };
-                            let qjson = QString::from(json.as_str());
+                            let qdelta = QString::from(delta_json.as_str());
                             let qnetwork = QString::from(network_json.as_str());
                             let qcpu = cpu.map(|s| QString::from(s.as_str()));
                             let qmem = mem.map(|s| QString::from(s.as_str()));
@@ -481,7 +503,7 @@ impl ffi::OverviewModel {
                             // down (i.e. the app is exiting). Silently discarding is
                             // correct in that case.
                             let _ = qt_thread.queue(move |mut pin| {
-                                pin.as_mut().set_tiles_json(qjson);
+                                pin.as_mut().set_tiles_changed_json(qdelta);
                                 pin.as_mut().set_network_json(qnetwork);
                                 if let Some(q) = qcpu {
                                     pin.as_mut().set_cpu_text(q);
@@ -571,12 +593,59 @@ impl ffi::OverviewModel {
             "prom" => (None, None, Some(enabled)),
             _ => return QString::from(format!("error: unknown subsystem {s}").as_str()),
         };
-        match client.set_daemon_settings(history, alerts, prom, std::time::Duration::from_secs(5)) {
+        match client.set_daemon_settings(
+            history,
+            alerts,
+            prom,
+            None,
+            std::time::Duration::from_secs(5),
+        ) {
             Ok((h, a, p)) => {
                 let json = serde_json::json!({"history": h, "alerts": a, "prom": p});
                 QString::from(json.to_string().as_str())
             }
             Err(e) => QString::from(format!("error: {e}").as_str()),
+        }
+    }
+
+    pub fn set_daemon_setting_str(
+        self: Pin<&mut Self>,
+        subsystem: &QString,
+        value: &QString,
+    ) -> QString {
+        let client = with_workspace(|ws| ws.client());
+        let s = subsystem.to_string();
+        match s.as_str() {
+            "promBind" => {
+                let bind = value.to_string();
+                let bind = bind.trim();
+                let prom_bind = if bind.is_empty() { None } else { Some(bind.to_owned()) };
+                let had_bind = prom_bind.is_some();
+                match client.set_daemon_settings(
+                    None,
+                    None,
+                    None,
+                    prom_bind,
+                    std::time::Duration::from_secs(5),
+                ) {
+                    Ok((h, a, p)) => {
+                        let msg = if had_bind {
+                            "Prometheus bind set; restart daemon to apply"
+                        } else {
+                            "Prometheus bind cleared"
+                        };
+                        let json = serde_json::json!({
+                            "history": h,
+                            "alerts": a,
+                            "prom": p,
+                            "message": msg,
+                        });
+                        QString::from(json.to_string().as_str())
+                    }
+                    Err(e) => QString::from(format!("error: {e}").as_str()),
+                }
+            }
+            _ => QString::from(format!("error: unknown string subsystem {s}").as_str()),
         }
     }
 
@@ -735,6 +804,19 @@ fn serialize_tiles(order: &[String], tiles: &HashMap<String, TileJson>) -> Strin
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Serialize only the tiles that have been marked dirty since the last tick.
+/// Clears `state.dirty` so the next tick starts with an empty set.
+fn take_dirty_tiles_json(state: &mut SampleState) -> String {
+    if state.dirty.is_empty() {
+        return "[]".to_string();
+    }
+    let dirty_ids: Vec<String> = state.dirty.iter().cloned().collect();
+    state.dirty.clear();
+    let changed: Vec<&TileJson> =
+        dirty_ids.into_iter().filter_map(|id| state.tiles.get(&id)).collect();
+    serde_json::to_string(&changed).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// Build a fresh `SampleState` from a daemon catalogue. Used at first
 /// connect and again after a reconnect to a different host, so pages
 /// repopulate from the new daemon's sensor set instead of keeping stale
@@ -772,7 +854,14 @@ fn build_sample_state(sensor_infos: &[SensorInfo]) -> SampleState {
             },
         );
     }
-    SampleState { tiles, id_order, units, static_ids, net_prev: HashMap::new() }
+    SampleState {
+        tiles,
+        id_order,
+        units,
+        static_ids,
+        net_prev: HashMap::new(),
+        dirty: HashSet::new(),
+    }
 }
 
 /// Compute per-interface network rates from the latest counter samples.
@@ -1042,7 +1131,14 @@ mod tests {
         for id in ids {
             units.insert((*id).to_string(), Unit::Count);
         }
-        SampleState { tiles, id_order, units, static_ids: HashSet::new(), net_prev: HashMap::new() }
+        SampleState {
+            tiles,
+            id_order,
+            units,
+            static_ids: HashSet::new(),
+            net_prev: HashMap::new(),
+            dirty: HashSet::new(),
+        }
     }
 
     fn scalar_sample(id: &str, value: f64) -> linsight_core::Sample {

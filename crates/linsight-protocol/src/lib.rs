@@ -6,7 +6,7 @@
 pub mod frame;
 pub mod messages;
 
-pub use frame::{FrameError, FrameReader, FrameWriter, MAX_FRAME_BYTES};
+pub use frame::{FrameError, FrameReader, FrameWriter, MAX_FRAME_BYTES, ResponseReadError};
 pub use messages::*;
 
 /// Wire-format protocol version. Bump only on breaking changes.

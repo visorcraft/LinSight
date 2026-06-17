@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "qrc:/qml/Shared.js" as Shared
 
 Kirigami.Page {
     id: page
@@ -21,9 +22,57 @@ Kirigami.Page {
 
     Rectangle { anchors.fill: parent; color: app.tokens.surface0; z: -1 }
 
-    // Filter the shared tilesJson on every change. The tilesJsonChanged
-    // NOTIFY makes this binding re-eval whenever the model gets fresh
-    // samples.
+    // Full tile snapshot maintained by merging per-tick deltas. Pages that
+    // filter the whole catalogue read from this instead of parsing a full
+    // JSON array every 150 ms.
+    property var _allTiles: []
+
+    function _mergeTiles(delta) {
+        const arr = page._allTiles
+        const byId = {}
+        for (let i = 0; i < arr.length; ++i) {
+            const t = arr[i]
+            if (t && t.id) byId[t.id] = i
+        }
+        for (let i = 0; i < delta.length; ++i) {
+            const t = delta[i]
+            if (!t || !t.id) continue
+            const idx = byId[t.id]
+            if (idx !== undefined) {
+                arr[idx] = t
+            } else {
+                arr.push(t)
+                byId[t.id] = arr.length - 1
+            }
+        }
+        page._allTiles = arr
+    }
+
+    Component.onCompleted: {
+        if (page.dashModel) {
+            try {
+                page._allTiles = JSON.parse(page.dashModel.tilesJson || "[]")
+            } catch (e) { page._allTiles = [] }
+        }
+    }
+
+    Connections {
+        target: page.dashModel
+        function onTilesJsonChanged() {
+            try {
+                page._allTiles = JSON.parse(page.dashModel.tilesJson || "[]")
+            } catch (e) { page._allTiles = [] }
+        }
+        function onTilesChangedJsonChanged() {
+            try {
+                page._mergeTiles(JSON.parse(page.dashModel.tilesChangedJson || "[]"))
+            } catch (e) { /* keep current */ }
+        }
+    }
+
+    // Filter the shared tile snapshot on every change. The underlying
+    // `_allTiles` is updated from full snapshots (connect/reconnect) and
+    // from per-tick deltas, so this binding re-evaluates cheaply.
     //
     // Note: the "-1" filter is a workaround for sensors that use -1 as
     // an "unknown" sentinel (e.g. net.speed_mbps when the kernel writes
@@ -36,7 +85,7 @@ Kirigami.Page {
     readonly property var tilesArray: {
         if (!page.dashModel) return []
         try {
-            const raw = JSON.parse(page.dashModel.tilesJson || "[]")
+            const raw = page._allTiles
             let filtered = raw.filter(t => t.category === page.category
                 && !(typeof t.value === "string" && page.isUnknownSentinel(t.value)))
 
@@ -173,7 +222,7 @@ Kirigami.Page {
     readonly property var storageSections: {
         if (page.category !== "storage" || !page.dashModel) return []
         try {
-            const raw = JSON.parse(page.dashModel.tilesJson || "[]")
+            const raw = page._allTiles
             const tiles = raw.filter(t => t.category === "storage"
                 && !(typeof t.value === "string" && page.isUnknownSentinel(t.value)))
 

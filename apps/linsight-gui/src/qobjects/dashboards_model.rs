@@ -44,7 +44,7 @@ pub(crate) struct DashboardFile {
     pub updated_at: String,
 }
 fn default_schema_version() -> u32 {
-    1
+    linsight_core::DASHBOARD_SCHEMA_VERSION
 }
 
 fn dashboards_dir() -> Option<PathBuf> {
@@ -259,7 +259,7 @@ fn duplicate_dashboard_file_with_observer(
     let new_slug = reservation.slug.clone();
     let now = Utc::now().to_rfc3339();
     let copy = DashboardFile {
-        schema_version: 1,
+        schema_version: default_schema_version(),
         name,
         slug: new_slug.clone(),
         layout: d.layout,
@@ -331,7 +331,7 @@ fn migrate_legacy_dashboard() {
     }
     let now = Utc::now().to_rfc3339();
     let d = DashboardFile {
-        schema_version: 1,
+        schema_version: default_schema_version(),
         name: "Default".into(),
         slug: "default".into(),
         layout,
@@ -393,6 +393,13 @@ pub mod ffi {
         #[qinvokable]
         fn load_layout(self: &DashboardsModel, slug: &QString) -> QString;
 
+        /// Import a dashboard from a previously exported JSON file at `path`.
+        /// Validates the exported shape, derives a unique slug, and writes
+        /// the layout to disk. Returns the new slug on success; on failure
+        /// returns an empty string and sets `last_error`.
+        #[qinvokable]
+        fn import_dashboard(self: Pin<&mut DashboardsModel>, path: &QString) -> QString;
+
         #[qinvokable]
         fn name_of(self: &DashboardsModel, slug: &QString) -> QString;
 
@@ -415,8 +422,9 @@ pub struct DashboardsModelRust {
 impl Default for DashboardsModelRust {
     fn default() -> Self {
         migrate_legacy_dashboard();
-        let arr = current_summary_json();
-        let slugs = current_slug_list_json();
+        let files = list_files();
+        let arr = current_summary_json(&files);
+        let slugs = current_slug_list_json(&files);
         Self {
             summary_json: QString::from(arr.as_str()),
             slug_list_json: QString::from(slugs.as_str()),
@@ -425,8 +433,7 @@ impl Default for DashboardsModelRust {
     }
 }
 
-fn current_summary_json() -> String {
-    let files = list_files();
+fn current_summary_json(files: &[DashboardFile]) -> String {
     let arr: Vec<serde_json::Value> = files
         .iter()
         .map(|d| {
@@ -440,15 +447,15 @@ fn current_summary_json() -> String {
     serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
 }
 
-fn current_slug_list_json() -> String {
-    let files = list_files();
+fn current_slug_list_json(files: &[DashboardFile]) -> String {
     let slugs: Vec<&str> = files.iter().map(|d| d.slug.as_str()).collect();
     serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into())
 }
 
 fn refresh_model(mut model: Pin<&mut ffi::DashboardsModel>) {
-    let s = current_summary_json();
-    let slugs = current_slug_list_json();
+    let files = list_files();
+    let s = current_summary_json(&files);
+    let slugs = current_slug_list_json(&files);
     model.as_mut().set_summary_json(QString::from(s.as_str()));
     model.as_mut().set_slug_list_json(QString::from(slugs.as_str()));
 }
@@ -464,7 +471,7 @@ impl ffi::DashboardsModel {
         let slug = reservation.slug.clone();
         let now = Utc::now().to_rfc3339();
         let d = DashboardFile {
-            schema_version: 1,
+            schema_version: default_schema_version(),
             name: n,
             slug: slug.clone(),
             layout: Vec::new(),
@@ -565,6 +572,65 @@ impl ffi::DashboardsModel {
             }
             None => QString::from("[]"),
         }
+    }
+
+    pub fn import_dashboard(mut self: Pin<&mut Self>, path: &QString) -> QString {
+        let path_str = path.to_string();
+        // FileDialog.selectedFile arrives as a file:// URL; strip the
+        // scheme so the path is usable by std::fs on all platforms.
+        let path_str = path_str.strip_prefix("file://").unwrap_or(&path_str);
+        let p = Path::new(path_str);
+        let raw = match std::fs::read_to_string(p) {
+            Ok(s) => s,
+            Err(e) => return self.report_err(format!("import failed: {e}")),
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(e) => return self.report_err(format!("import failed: invalid JSON: {e}")),
+        };
+        let name = match parsed.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            Some(n) => n,
+            None => return self.report_err("import failed: missing or empty name"),
+        };
+        let layout_value = match parsed.get("layout") {
+            Some(v) => v.clone(),
+            None => return self.report_err("import failed: missing layout"),
+        };
+        let layout: Vec<DashboardTile> = match serde_json::from_value(layout_value) {
+            Ok(v) => v,
+            Err(e) => return self.report_err(format!("import failed: invalid layout: {e}")),
+        };
+        for (i, t) in layout.iter().enumerate() {
+            if t.id.is_empty() {
+                return self.report_err(format!("import failed: tile {i} has empty id"));
+            }
+            if t.w <= 0 || t.h <= 0 || t.x < 0 || t.y < 0 {
+                return self.report_err(format!(
+                    "import failed: tile {i} `{}` has invalid geometry ({}x{} @ {},{})",
+                    t.id, t.w, t.h, t.x, t.y
+                ));
+            }
+        }
+        let base = derive_slug(name);
+        let reservation = match allocate_unique_slug(&base) {
+            Ok(v) => v,
+            Err(e) => return self.report_err(format!("import failed: {e}")),
+        };
+        let slug = reservation.slug.clone();
+        let now = Utc::now().to_rfc3339();
+        let d = DashboardFile {
+            schema_version: default_schema_version(),
+            name: name.to_owned(),
+            slug: slug.clone(),
+            layout,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        if let Err(e) = write_reserved_dashboard_file(reservation, &d) {
+            return self.report_err(format!("import failed: {e}"));
+        }
+        refresh_model(self.as_mut());
+        QString::from(slug.as_str())
     }
 
     pub fn name_of(&self, slug: &QString) -> QString {

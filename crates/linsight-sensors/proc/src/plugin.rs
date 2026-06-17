@@ -438,7 +438,7 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
 
-        let r = host_sample(&plugin, SensorId::new("proc.list")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("proc.list")).unwrap();
         match r {
             Reading::Table(rows) => {
                 // Should have at least 2 rows (pid 1 and 42)
@@ -472,11 +472,11 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // First sample: populates prev
-        let _ = host_sample(&plugin, SensorId::new("proc.list")).unwrap();
+        let _ = host_sample(&plugin, &SensorId::new("proc.list")).unwrap();
 
         // We can't observe CPU% change in a static fixture, but the
         // second call should succeed and return a table.
-        let r = host_sample(&plugin, SensorId::new("proc.list")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("proc.list")).unwrap();
         assert!(matches!(r, Reading::Table(_)));
     }
 
@@ -486,7 +486,7 @@ mod tests {
         let plugin = ProcPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("nope.nope")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("nope.nope")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 }

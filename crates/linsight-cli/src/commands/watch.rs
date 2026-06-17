@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use linsight_core::{Reading, SensorId, Unit};
-use linsight_protocol::{ClientMsg, ServerMsg};
+use linsight_protocol::{ClientMsg, RequestOp, ResponsePayload, ServerMsg};
 
-use crate::commands::connect_and_hello;
+use crate::commands::{connect_and_hello, request_rpc};
 
 pub fn run(
     socket: &Path,
@@ -33,27 +33,19 @@ pub fn run(
 
     let mut session = connect_and_hello(socket)?;
 
-    // Fetch the full sensor list so we can validate every requested sensor
-    // exists *and* capture each sensor's unit for formatting.
-    session.writer.write_client(&ClientMsg::ListSensors)?;
-    let units: std::collections::HashMap<SensorId, Unit> = match session.reader.read_server()? {
-        ServerMsg::SensorList(infos) => {
-            let mut map = std::collections::HashMap::new();
-            for id in &sensor_ids {
-                match infos.iter().find(|i| i.id == *id) {
-                    Some(i) => {
-                        map.insert(id.clone(), i.unit.clone());
-                    }
-                    None => anyhow::bail!(
-                        "sensor not found: {id} \
-                         (run `linsight-cli list` for the available set)",
-                    ),
-                }
+    // Validate every requested sensor and capture its unit for formatting
+    // via a single `GetSensorInfo` RPC per sensor instead of the full
+    // `ListSensors` round-trip.
+    let mut units: std::collections::HashMap<SensorId, Unit> =
+        std::collections::HashMap::with_capacity(sensor_ids.len());
+    for id in &sensor_ids {
+        match request_rpc(&mut session, RequestOp::GetSensorInfo { sensor: id.to_string() })? {
+            ResponsePayload::SensorInfo { info } => {
+                units.insert(id.clone(), info.unit);
             }
-            map
+            other => anyhow::bail!("expected SensorInfo, got {other:?}"),
         }
-        other => anyhow::bail!("expected SensorList, got {other:?}"),
-    };
+    }
 
     // Register Ctrl+C handler so we can send a graceful Goodbye.
     let term = Arc::new(AtomicBool::new(false));

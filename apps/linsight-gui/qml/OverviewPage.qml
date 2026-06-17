@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "qrc:/qml/Shared.js" as Shared
 
 Kirigami.Page {
     id: page
@@ -16,23 +17,33 @@ Kirigami.Page {
     // Receives the app-scope OverviewModel from Main.qml.
     property QtObject dashModel: null
 
-    // Sparkline data extracted from tilesJson.
+    // Sparkline data extracted from tile deltas.
     property var _sparklines: ({})
 
-    // Parse sparkline data whenever tilesJson updates
+    function _applySparklineDelta(arr) {
+        const sl = page._sparklines
+        for (let i = 0; i < arr.length; ++i) {
+            const t = arr[i]
+            if (!t || !t.id) continue
+            if (Array.isArray(t.sparkline) && t.sparkline.length >= 2) {
+                sl[t.id] = t.sparkline
+            }
+        }
+        page._sparklines = sl
+    }
+
+    // Full rebuild on connect/reconnect/catalogue refresh.
     Connections {
         target: page.dashModel
         function onTilesJsonChanged() {
             try {
-                const arr = JSON.parse(page.dashModel.tilesJson || "[]")
-                const sl = {}
-                for (let i = 0; i < arr.length; ++i) {
-                    const t = arr[i]
-                    if (Array.isArray(t.sparkline) && t.sparkline.length >= 2) {
-                        sl[t.id] = t.sparkline
-                    }
-                }
-                page._sparklines = sl
+                page._applySparklineDelta(JSON.parse(page.dashModel.tilesJson || "[]"))
+            } catch (e) { /* keep previous */ }
+        }
+        // Per-tick delta: merge only changed tiles.
+        function onTilesChangedJsonChanged() {
+            try {
+                page._applySparklineDelta(JSON.parse(page.dashModel.tilesChangedJson || "[]"))
             } catch (e) { /* keep previous */ }
         }
     }

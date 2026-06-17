@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use libloading::Library;
-use linsight_core::{HardwareDevice, Reading, Sample, SensorId};
+#[cfg(test)]
+use linsight_core::Reading;
+use linsight_core::{HardwareDevice, Sample, SensorId};
 use linsight_plugin_sdk::{
     LINSIGHT_PLUGIN_ABI_VERSION, LinsightPlugin, LinsightPluginDyn, PluginCtx, PluginError,
     PluginManifest, PluginMetadata, RPluginMetadata, SensorDescriptor, host_init, host_sample,
@@ -420,14 +422,10 @@ impl PluginHost {
             .map(|e| (e.meta.plugin_id.as_str(), e.devices.as_slice(), e.sensors.as_slice()))
     }
 
-    pub fn sample(&self, id: &SensorId) -> Result<Reading, PluginError> {
-        let (idx, _) =
-            self.registry.get(id).ok_or_else(|| PluginError::Unsupported(id.to_string()))?;
-        host_sample(self.plugins[*idx].plugin.as_ref(), id.clone())
-    }
-
     pub fn sample_to(&self, id: &SensorId, ts_micros: u64) -> Result<Sample, PluginError> {
-        let reading = self.sample(id)?;
+        let (idx, _) =
+            self.registry.get(id).ok_or_else(|| PluginError::Unsupported(id.as_str().into()))?;
+        let reading = host_sample(self.plugins[*idx].plugin.as_ref(), id)?;
         Ok(Sample { sensor: id.clone(), ts_micros, reading })
     }
 }
@@ -674,10 +672,10 @@ mod tests {
             ids.contains(&"example.init_count.extra"),
             "metadata-loaded plugin did not receive its per-plugin config; sensors = {ids:?}",
         );
-        let reading = host.sample(&SensorId::new("example.init_count.value")).unwrap();
+        let sample = host.sample_to(&SensorId::new("example.init_count.value"), 0).unwrap();
         assert!(
-            matches!(reading, Reading::Scalar(v) if v == 1.0),
-            "metadata-loaded plugin init should run once, got {reading:?}",
+            matches!(sample.reading, Reading::Scalar(v) if v == 1.0),
+            "metadata-loaded plugin init should run once, got {sample:?}",
         );
     }
 
@@ -701,10 +699,10 @@ mod tests {
             ids.contains(&"example.legacy_init_count.extra"),
             "fallback-loaded plugin did not receive its per-plugin config; sensors = {ids:?}",
         );
-        let reading = host.sample(&SensorId::new("example.legacy_init_count.value")).unwrap();
+        let sample = host.sample_to(&SensorId::new("example.legacy_init_count.value"), 0).unwrap();
         assert!(
-            matches!(reading, Reading::Scalar(v) if v == 2.0),
-            "fallback plugin should probe once and configure once, got {reading:?}",
+            matches!(sample.reading, Reading::Scalar(v) if v == 2.0),
+            "fallback plugin should probe once and configure once, got {sample:?}",
         );
     }
 
@@ -719,14 +717,14 @@ mod tests {
     fn sample_routes_to_owning_plugin() {
         let host = PluginHost::with_builtins();
         let id = SensorId::new("cpu.util");
-        let _first = host.sample(&id).unwrap();
-        let _second = host.sample(&id).unwrap();
+        let _first = host.sample_to(&id, 0).unwrap();
+        let _second = host.sample_to(&id, 0).unwrap();
     }
 
     #[test]
     fn sample_unknown_sensor_errors() {
         let host = PluginHost::with_builtins();
-        let err = host.sample(&SensorId::new("nope.nope")).unwrap_err();
+        let err = host.sample_to(&SensorId::new("nope.nope"), 0).unwrap_err();
         assert!(err.to_string().contains("nope.nope"));
     }
 

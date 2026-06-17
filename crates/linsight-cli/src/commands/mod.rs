@@ -14,7 +14,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use linsight_protocol::{
-    ClientMsg, FrameReader, FrameWriter, PROTOCOL_VERSION, RequestOp, ResponsePayload, ServerMsg,
+    ClientMsg, FrameReader, FrameWriter, PROTOCOL_VERSION, RequestOp, ResponsePayload,
+    ResponseReadError, ServerMsg,
 };
 
 pub(crate) struct Session {
@@ -65,24 +66,14 @@ pub(crate) fn request_rpc(
         .write_client(&ClientMsg::Request { req_id, op })
         .context("writing RPC request")?;
 
-    loop {
-        match session.reader.read_server().context("reading RPC response")? {
-            ServerMsg::Response { req_id: rid, result } if rid == req_id => {
-                return result.map_err(|pe| {
-                    anyhow::anyhow!("RPC error [{}]: {}", pe.code as u8, pe.message)
-                });
-            }
-            ServerMsg::Bye { reason } => {
-                return Err(anyhow::anyhow!("daemon disconnected: {reason}"));
-            }
-            ServerMsg::Sample(_)
-            | ServerMsg::Welcome { .. }
-            | ServerMsg::SensorList(_)
-            | ServerMsg::SensorListBroadcast(_)
-            | ServerMsg::SensorDegraded { .. } => continue,
-            ServerMsg::Response { req_id: rid, .. } => {
-                tracing::warn!("stale RPC response for req_id {rid}");
-            }
+    match session.reader.read_server_response(req_id) {
+        Ok(payload) => Ok(payload),
+        Err(ResponseReadError::Server(pe)) => {
+            Err(anyhow::anyhow!("RPC error [{}]: {}", pe.code as u8, pe.message))
         }
+        Err(ResponseReadError::Bye(reason)) => {
+            Err(anyhow::anyhow!("daemon disconnected: {reason}"))
+        }
+        Err(ResponseReadError::Frame(e)) => Err(e).context("reading RPC response"),
     }
 }

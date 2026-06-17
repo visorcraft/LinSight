@@ -5,7 +5,8 @@
 
 mod commands;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use std::fmt;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "LinSight command-line client")]
@@ -16,6 +17,53 @@ struct Cli {
 
     #[command(subcommand)]
     command: Cmd,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum WatchFormat {
+    Plain,
+    Json,
+}
+
+impl fmt::Display for WatchFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WatchFormat::Plain => write!(f, "plain"),
+            WatchFormat::Json => write!(f, "json"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum HistoryFormat {
+    Plain,
+    Csv,
+    Json,
+}
+
+impl fmt::Display for HistoryFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HistoryFormat::Plain => write!(f, "plain"),
+            HistoryFormat::Csv => write!(f, "csv"),
+            HistoryFormat::Json => write!(f, "json"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum ExportFormat {
+    Csv,
+    Json,
+}
+
+impl fmt::Display for ExportFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExportFormat::Csv => write!(f, "csv"),
+            ExportFormat::Json => write!(f, "json"),
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -39,8 +87,8 @@ enum Cmd {
         rate: Option<f64>,
 
         /// Output format: plain or json.
-        #[arg(long, default_value = "plain")]
-        format: String,
+        #[arg(long, default_value = "plain", value_enum)]
+        format: WatchFormat,
 
         /// Stop after N samples (total across all sensors).
         #[arg(long)]
@@ -59,8 +107,8 @@ enum Cmd {
         #[arg(long, default_value = "5m")]
         last: String,
         /// Output format: plain, csv, or json. Default "plain".
-        #[arg(long, default_value = "plain")]
-        format: String,
+        #[arg(long, default_value = "plain", value_enum)]
+        format: HistoryFormat,
         /// Maximum data points to return.
         #[arg(long)]
         max_points: Option<u32>,
@@ -127,8 +175,8 @@ enum DbCmd {
     /// Export historical samples to CSV or JSON.
     Export {
         /// Output format: csv or json.
-        #[arg(long, default_value = "csv")]
-        format: String,
+        #[arg(long, default_value = "csv", value_enum)]
+        format: ExportFormat,
         /// Sensor id to export (e.g. cpu.util). If omitted, exports all sensors.
         #[arg(long)]
         sensor: Option<String>,
@@ -174,9 +222,13 @@ fn main() -> anyhow::Result<()> {
         return match action {
             DbCmd::Stats { db } => commands::db::stats(db),
             DbCmd::Prune { older_than, vacuum, db } => commands::db::prune(db, &older_than, vacuum),
-            DbCmd::Export { format, sensor, since, db, output } => {
-                commands::db::export(db, sensor.as_deref(), &since, &format, output.as_deref())
-            }
+            DbCmd::Export { format, sensor, since, db, output } => commands::db::export(
+                db,
+                sensor.as_deref(),
+                &since,
+                &format.to_string(),
+                output.as_deref(),
+            ),
         };
     }
 
@@ -188,7 +240,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::List => commands::list::run(&socket),
         Cmd::Read { sensor, count } => commands::read::run(&socket, &sensor, count),
         Cmd::Watch { sensors, rate, format, count } => {
-            commands::watch::run(&socket, &sensors, rate, &format, count)
+            commands::watch::run(&socket, &sensors, rate, &format.to_string(), count)
         }
         Cmd::Alert { action } => match action {
             AlertCmd::List => commands::alert::list(&socket),
@@ -203,7 +255,7 @@ fn main() -> anyhow::Result<()> {
             AlertCmd::Remove { name } => commands::alert::remove(&socket, &name),
         },
         Cmd::History { sensor, last, format, max_points } => {
-            commands::history::run(&socket, &sensor, &last, &format, max_points)
+            commands::history::run(&socket, &sensor, &last, &format.to_string(), max_points)
         }
         Cmd::Db { .. } => unreachable!("handled above"),
         Cmd::Plugin { action } => match action {

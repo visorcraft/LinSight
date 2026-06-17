@@ -3,9 +3,10 @@
 
 use std::io::{self, Read, Write};
 
+use serde::Serialize;
 use thiserror::Error;
 
-use crate::messages::{ClientMsg, ServerMsg};
+use crate::messages::{ClientMsg, ProtoError, ResponsePayload, ServerMsg};
 
 /// Cap on a single frame's body. 1 MiB is far larger than any
 /// realistic LinSight message; anything bigger is treated as
@@ -44,6 +45,20 @@ impl<R: Read> FrameReader<R> {
     }
 
     fn read_frame(&mut self) -> Result<Vec<u8>, FrameError> {
+        let (len, first) = self.read_frame_header()?;
+        let mut body = vec![0u8; len as usize];
+        body[0] = first;
+        if len > 1 {
+            self.inner.read_exact(&mut body[1..])?;
+        }
+        Ok(body)
+    }
+
+    /// Read the length prefix and the first body byte without decoding
+    /// the rest of the frame. Callers can use [`FrameReader::skip_frame_body`]
+    /// to discard the remainder, or reconstruct the full body for the
+    /// variants they care about.
+    pub fn read_frame_header(&mut self) -> Result<(u32, u8), FrameError> {
         let mut len_buf = [0u8; 4];
         match self.inner.read_exact(&mut len_buf) {
             Ok(()) => {}
@@ -54,42 +69,141 @@ impl<R: Read> FrameReader<R> {
         if len > MAX_FRAME_BYTES {
             return Err(FrameError::Oversized(len as u64));
         }
-        let mut body = vec![0u8; len as usize];
-        self.inner.read_exact(&mut body)?;
-        Ok(body)
+        let mut first = [0u8; 1];
+        match self.inner.read_exact(&mut first) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Err(FrameError::Closed),
+            Err(e) => return Err(FrameError::Io(e)),
+        }
+        Ok((len, first[0]))
     }
+
+    /// Discard `remaining` bytes from the current frame body. Used by the
+    /// CLI RPC path to skip pushed samples without fully decoding them.
+    pub fn skip_frame_body(&mut self, remaining: u32) -> Result<(), FrameError> {
+        let mut remaining = remaining as usize;
+        if remaining == 0 {
+            return Ok(());
+        }
+        let mut discard = [0u8; 1024];
+        while remaining > 0 {
+            let n = std::cmp::min(remaining, discard.len());
+            self.inner.read_exact(&mut discard[..n])?;
+            remaining -= n;
+        }
+        Ok(())
+    }
+
+    /// Wait for a matching `ServerMsg::Response` for `req_id`, skipping
+    /// pushed samples and catalogue broadcasts without fully decoding them.
+    /// A `ServerMsg::Bye` is decoded so its reason can be surfaced.
+    pub fn read_server_response(
+        &mut self,
+        req_id: u32,
+    ) -> Result<ResponsePayload, ResponseReadError> {
+        // Variant indexes for `ServerMsg` in declaration order.
+        const BYE: u8 = 4;
+        const RESPONSE: u8 = 5;
+
+        loop {
+            let (len, first) = self.read_frame_header()?;
+            match first {
+                RESPONSE => {
+                    let mut body = vec![0u8; len as usize];
+                    body[0] = first;
+                    if len > 1 {
+                        self.inner.read_exact(&mut body[1..]).map_err(FrameError::Io)?;
+                    }
+                    let msg: ServerMsg = postcard::from_bytes(&body).map_err(FrameError::Decode)?;
+                    if let ServerMsg::Response { req_id: rid, result } = msg
+                        && rid == req_id
+                    {
+                        return result.map_err(ResponseReadError::Server);
+                    }
+                }
+                BYE => {
+                    let mut body = vec![0u8; len as usize];
+                    body[0] = first;
+                    if len > 1 {
+                        self.inner.read_exact(&mut body[1..]).map_err(FrameError::Io)?;
+                    }
+                    let msg: ServerMsg = postcard::from_bytes(&body).map_err(FrameError::Decode)?;
+                    if let ServerMsg::Bye { reason } = msg {
+                        return Err(ResponseReadError::Bye(reason));
+                    }
+                }
+                _ => {
+                    if len > 1 {
+                        self.skip_frame_body(len - 1)?;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Ways a response-only read can fail without returning the payload.
+#[derive(Debug, thiserror::Error)]
+pub enum ResponseReadError {
+    #[error(transparent)]
+    Frame(#[from] FrameError),
+    #[error("server: {0:?}")]
+    Server(ProtoError),
+    #[error("daemon disconnected: {0}")]
+    Bye(String),
 }
 
 pub struct FrameWriter<W: Write> {
     inner: W,
+    /// Reusable buffer for the serialized message body.
+    body_buf: Vec<u8>,
+    /// Reusable buffer holding the length prefix + body for a single
+    /// `write_all`. Coalescing the two into one syscall reduces per-sample
+    /// overhead on the hot-path pump threads.
+    frame_buf: Vec<u8>,
 }
 
 impl<W: Write> FrameWriter<W> {
     pub fn new(inner: W) -> Self {
-        Self { inner }
+        Self { inner, body_buf: Vec::with_capacity(256), frame_buf: Vec::with_capacity(260) }
     }
 
     pub fn write_client(&mut self, msg: &ClientMsg) -> Result<(), FrameError> {
-        let bytes = postcard::to_allocvec(msg)?;
-        self.write_frame(&bytes)
+        self.write_frame(msg)
     }
 
     pub fn write_server(&mut self, msg: &ServerMsg) -> Result<(), FrameError> {
-        let bytes = postcard::to_allocvec(msg)?;
-        self.write_frame(&bytes)
+        self.write_frame(msg)
     }
 
-    fn write_frame(&mut self, body: &[u8]) -> Result<(), FrameError> {
+    fn write_frame<T: Serialize>(&mut self, msg: &T) -> Result<(), FrameError> {
+        let body_len = self.serialize_body(msg)?;
         // Compare on `usize` BEFORE narrowing to `u32`: a body of exactly
         // 2^32 bytes would otherwise truncate to `len = 0` and slip past
         // the guard, producing a malformed frame.
-        if body.len() > MAX_FRAME_BYTES as usize {
-            return Err(FrameError::Oversized(body.len() as u64));
+        if body_len > MAX_FRAME_BYTES as usize {
+            return Err(FrameError::Oversized(body_len as u64));
         }
-        let len = body.len() as u32;
-        self.inner.write_all(&len.to_le_bytes())?;
-        self.inner.write_all(body)?;
+        let len = body_len as u32;
+        self.frame_buf.clear();
+        self.frame_buf.extend_from_slice(&len.to_le_bytes());
+        self.frame_buf.extend_from_slice(&self.body_buf[..body_len]);
+        self.inner.write_all(&self.frame_buf)?;
         Ok(())
+    }
+
+    fn serialize_body<T: Serialize>(&mut self, msg: &T) -> Result<usize, FrameError> {
+        loop {
+            let cap = self.body_buf.capacity();
+            self.body_buf.resize(cap, 0);
+            match postcard::to_slice(msg, &mut self.body_buf) {
+                Ok(slice) => return Ok(slice.len()),
+                Err(postcard::Error::SerializeBufferFull) => {
+                    self.body_buf.reserve(cap.max(256));
+                }
+                Err(e) => return Err(FrameError::Decode(e)),
+            }
+        }
     }
 }
 

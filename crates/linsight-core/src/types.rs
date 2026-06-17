@@ -245,20 +245,23 @@ mod tests {
 /// Used by sensor plugins to avoid re-reading kernel files multiple
 /// times per sample window.  Create with [`SnapshotCache::new`] and
 /// call [`SnapshotCache::get`] to retrieve the data while it is fresh.
+///
+/// The cached value is stored behind an [`Arc`] so that a cache hit
+/// returns a shared pointer instead of cloning the whole snapshot.
 #[derive(Clone, Debug)]
 pub struct SnapshotCache<T> {
     captured_at: Instant,
-    data: T,
+    data: std::sync::Arc<T>,
 }
 
-impl<T: Clone> SnapshotCache<T> {
+impl<T> SnapshotCache<T> {
     /// Store `data` with the current timestamp.
-    pub fn new(data: T) -> Self {
+    pub fn new(data: std::sync::Arc<T>) -> Self {
         Self { captured_at: Instant::now(), data }
     }
 
-    /// Return a clone of the data if it was captured within `ttl`.
-    pub fn get(&self, ttl: Duration) -> Option<T> {
+    /// Return a shared pointer to the data if it was captured within `ttl`.
+    pub fn get(&self, ttl: Duration) -> Option<std::sync::Arc<T>> {
         if self.captured_at.elapsed() <= ttl { Some(self.data.clone()) } else { None }
     }
 }
@@ -271,13 +274,13 @@ mod snapshot_cache_tests {
 
     #[test]
     fn get_returns_data_within_ttl() {
-        let cache = SnapshotCache::new(42);
-        assert_eq!(cache.get(Duration::from_millis(50)), Some(42));
+        let cache = SnapshotCache::new(std::sync::Arc::new(42));
+        assert_eq!(*cache.get(Duration::from_millis(50)).unwrap(), 42);
     }
 
     #[test]
     fn get_returns_none_after_ttl() {
-        let cache = SnapshotCache::new(42);
+        let cache = SnapshotCache::new(std::sync::Arc::new(42));
         thread::sleep(Duration::from_millis(60));
         assert_eq!(cache.get(Duration::from_millis(50)), None);
     }

@@ -24,6 +24,38 @@ use crate::proc_stat::{
 };
 
 const PROC_STAT_CACHE_TTL: Duration = Duration::from_millis(50);
+const SMALL_FILE_BUF: usize = 64;
+
+/// Read a small sysfs/proc file into a stack buffer. Avoids the `String`
+/// allocation of `fs::read_to_string` for hot-path files that are typically
+/// a few bytes. Reads up to `SMALL_FILE_BUF` bytes; truncates anything larger.
+fn read_small_file(path: &Path) -> Result<String, PluginError> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| PluginError::Io(format!("{}: {e}", path.display())))?;
+    let mut buf = [0u8; SMALL_FILE_BUF];
+    let mut n = 0usize;
+    loop {
+        match file.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(m) => n += m,
+            Err(e) => return Err(PluginError::Io(format!("{}: {e}", path.display()))),
+        }
+        if n == buf.len() {
+            break;
+        }
+    }
+    std::str::from_utf8(&buf[..n])
+        .map(|s| s.to_owned())
+        .map_err(|e| PluginError::Parse(format!("{}: {e}", path.display())))
+}
+
+fn read_int<T: std::str::FromStr>(path: &Path) -> Result<T, PluginError> {
+    read_small_file(path)?
+        .trim()
+        .parse::<T>()
+        .map_err(|_| PluginError::Parse(format!("{}: invalid integer", path.display())))
+}
 
 /// Read `/proc/cpuinfo` (rooted at `sysroot` if set) and return the first
 /// `model name` value. None on any read/parse failure.
@@ -355,12 +387,7 @@ impl CpuPlugin {
                     .cached_temp_input
                     .as_ref()
                     .ok_or_else(|| PluginError::Unsupported(sensor.to_string()))?;
-                let raw = std::fs::read_to_string(path)
-                    .map_err(|e| PluginError::Io(format!("{}: {e}", path.display())))?;
-                let milli: i32 = raw
-                    .trim()
-                    .parse()
-                    .map_err(|e| PluginError::Parse(format!("{}: {e}", path.display())))?;
+                let milli: i32 = read_int(path)?;
                 Ok(Reading::Scalar(milli as f64 / 1000.0))
             }
             "cpu.freq_hz" => {
@@ -380,8 +407,7 @@ impl CpuPlugin {
                 let mut sum: u64 = 0;
                 let mut count: u64 = 0;
                 for p in paths {
-                    let Ok(raw) = std::fs::read_to_string(p) else { continue };
-                    if let Ok(khz) = raw.trim().parse::<u64>() {
+                    if let Ok(khz) = read_int::<u64>(p) {
                         sum = sum.saturating_add(khz);
                         count += 1;
                     }
@@ -512,9 +538,9 @@ mod tests {
         let dir = fake_sysroot(stat);
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 0.0));
-        let r = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.core1.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 0.0));
     }
 
@@ -529,7 +555,7 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // First sample (caches the baseline)
-        host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
 
         // Second sample: cpu0 user went from 100 -> 200, idle unchanged
         let stat2 = "cpu 300 0 100 2000 0 0 0 0 0 0\n\
@@ -538,7 +564,7 @@ mod tests {
         fs::write(dir.path().join("proc/stat"), stat2).unwrap();
         wait_for_proc_stat_cache_expiry();
 
-        let r = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
         // cpu0: busy went from 150 to 250 (delta 100), total from 1150 to 1250 (delta 100)
         // utilization = 100/100 * 100 = 100%
         assert!(matches!(r, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
@@ -555,7 +581,7 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // Prime baseline from stat1 for all core sensors.
-        host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
 
         let stat2 = "cpu 400 0 100 2000 0 0 0 0 0 0\n\
                       cpu0 200 0 50 1000 0 0 0 0 0 0\n\
@@ -564,8 +590,8 @@ mod tests {
         wait_for_proc_stat_cache_expiry();
 
         // Both cores must use the same previous snapshot from stat1.
-        let core0 = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
-        let core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        let core0 = host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
+        let core1 = host_sample(&plugin, &SensorId::new("cpu.core1.util")).unwrap();
         assert!(matches!(core0, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
         assert!(matches!(core1, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
     }
@@ -576,15 +602,15 @@ mod tests {
         let dir = fake_sysroot("cpu 100 0 50 1000 0 0 0 0\n");
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
 
         fs::write(dir.path().join("proc/stat"), "cpu 200 0 50 1000 0 0 0 0\n").unwrap();
 
-        let cached = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        let cached = host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         assert!(matches!(cached, Reading::Scalar(v) if v == 0.0));
 
         wait_for_proc_stat_cache_expiry();
-        let refreshed = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        let refreshed = host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         assert!(matches!(refreshed, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
     }
 
@@ -597,19 +623,19 @@ mod tests {
         let dir = fake_sysroot(stat1);
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
 
         let stat2 = "cpu 400 0 100 2000 0 0 0 0 0 0\n\
                       cpu0 200 0 50 1000 0 0 0 0 0 0\n\
                       cpu1 160 0 30 800 0 0 0 0 0 0\n";
         fs::write(dir.path().join("proc/stat"), stat2).unwrap();
 
-        let cached_core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        let cached_core1 = host_sample(&plugin, &SensorId::new("cpu.core1.util")).unwrap();
         assert!(matches!(cached_core1, Reading::Scalar(v) if v == 0.0));
 
         wait_for_proc_stat_cache_expiry();
-        let core0 = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
-        let core1 = host_sample(&plugin, SensorId::new("cpu.core1.util")).unwrap();
+        let core0 = host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
+        let core1 = host_sample(&plugin, &SensorId::new("cpu.core1.util")).unwrap();
         assert!(matches!(core0, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
         assert!(matches!(core1, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
     }
@@ -625,9 +651,9 @@ mod tests {
         host_init(&plugin, &ctx).unwrap();
 
         // Sample aggregate (sets prev_stat, not prev_core_stats)
-        host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         // Sample per-core (sets prev_core_stats, not prev_stat)
-        host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
 
         // Change only per-core stat (cpu0), leaving aggregate unchanged
         let stat2 = "cpu 400 0 200 4000 0 0 0 0 0 0\n\
@@ -637,12 +663,12 @@ mod tests {
         wait_for_proc_stat_cache_expiry();
 
         // Per-core should see its own delta (cpu0: 150->250 busy, 1150->1250 total)
-        let r = host_sample(&plugin, SensorId::new("cpu.core0.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.core0.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 100.0).abs() < 1e-6));
 
         // Aggregate still sees its last cached prev_stat (from stat1).
         // Since aggregate itself hasn't changed, util is 0.
-        let r = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 0.0));
     }
 
@@ -654,7 +680,7 @@ mod tests {
         let dir = fake_sysroot(stat);
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("cpu.core5.util")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("cpu.core5.util")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -664,7 +690,7 @@ mod tests {
         let dir = fake_sysroot("cpu 1 2 3 4 5 6 7 8\n");
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("not.cpu")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("not.cpu")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -686,7 +712,7 @@ mod tests {
         let plugin = CpuPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("cpu.temp_c")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.temp_c")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 72.5).abs() < 1e-6));
     }
 
@@ -698,7 +724,7 @@ mod tests {
         let plugin = CpuPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("cpu.temp_c")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("cpu.temp_c")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -714,7 +740,7 @@ mod tests {
         let plugin = CpuPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("cpu.temp_c")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.temp_c")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 55.0).abs() < 1e-6));
     }
 
@@ -737,7 +763,7 @@ mod tests {
         let plugin = CpuPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("cpu.freq_hz")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.freq_hz")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 2_000_000_000.0).abs() < 1.0));
     }
 
@@ -747,7 +773,7 @@ mod tests {
         let plugin = CpuPlugin::default();
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("cpu.freq_hz")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("cpu.freq_hz")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 
@@ -757,7 +783,7 @@ mod tests {
         let dir = fake_sysroot("cpu 100 0 50 1000 0 0 0 0\n");
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let r = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 0.0));
     }
 
@@ -767,10 +793,10 @@ mod tests {
         let dir = fake_sysroot("cpu 100 0 50 1000 0 0 0 0\n");
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         std::fs::write(dir.path().join("proc/stat"), "cpu 200 0 50 1000 0 0 0 0\n").unwrap();
         wait_for_proc_stat_cache_expiry();
-        let r = host_sample(&plugin, SensorId::new("cpu.util")).unwrap();
+        let r = host_sample(&plugin, &SensorId::new("cpu.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 100.0));
     }
 
@@ -795,7 +821,7 @@ mod tests {
         let dir = fake_sysroot("cpu 1 2 3 4 5 6 7 8\n");
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&plugin, &ctx).unwrap();
-        let err = host_sample(&plugin, SensorId::new("not.cpu")).unwrap_err();
+        let err = host_sample(&plugin, &SensorId::new("not.cpu")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 }

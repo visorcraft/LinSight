@@ -99,9 +99,38 @@ pub fn read_meminfo(sysroot: Option<&Path>) -> Result<Meminfo, MemError> {
         Some(root) => root.join("proc/meminfo"),
         None => Path::new("/proc/meminfo").to_path_buf(),
     };
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| MemError::Io(format!("{}: {e}", path.display())))?;
+    let content = read_meminfo_file(&path)?;
     parse_meminfo(&content)
+}
+
+/// Read `/proc/meminfo` into a stack buffer. Typical systems produce ~1 KiB,
+/// so a 4 KiB buffer avoids the `String` allocation of `fs::read_to_string`
+/// in the common case while still tolerating large containers.
+fn read_meminfo_file(path: &Path) -> Result<String, MemError> {
+    use std::io::Read;
+    let mut file =
+        std::fs::File::open(path).map_err(|e| MemError::Io(format!("{}: {e}", path.display())))?;
+    let mut buf = [0u8; 4096];
+    let mut n = 0usize;
+    loop {
+        match file.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(m) => n += m,
+            Err(e) => return Err(MemError::Io(format!("{}: {e}", path.display()))),
+        }
+        if n == buf.len() {
+            // Unusually large meminfo — fall back to a dynamic buffer for
+            // the remainder so we don't fail on weird kernels/containers.
+            let mut rest = buf.to_vec();
+            file.read_to_end(&mut rest)
+                .map_err(|e| MemError::Io(format!("{}: {e}", path.display())))?;
+            return String::from_utf8(rest)
+                .map_err(|e| MemError::Io(format!("{}: {e}", path.display())));
+        }
+    }
+    std::str::from_utf8(&buf[..n])
+        .map(|s| s.to_owned())
+        .map_err(|e| MemError::Io(format!("{}: {e}", path.display())))
 }
 
 #[cfg(test)]

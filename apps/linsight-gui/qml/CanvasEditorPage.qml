@@ -8,7 +8,7 @@
 // dropped tiles can be moved and resized via a corner handle; all
 // coordinates snap to an 8px grid. Save serializes a flat
 // `[{id,x,y,w,h}]` array to the dashboard JSON via
-// OverviewModel::save_layout. Load round-trips it back.
+// DashboardsModel::save_layout. Load round-trips it back.
 //
 // Live values come from the app-scope OverviewModel via the
 // `dashModel` property. The Connections block fires refreshSensors()
@@ -18,6 +18,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "qrc:/qml/Shared.js" as Shared
 
 Kirigami.Page {
     id: page
@@ -29,6 +30,22 @@ Kirigami.Page {
     Rectangle { anchors.fill: parent; color: app.tokens.surface0; z: -1 }
 
     readonly property int gridStep: 8
+
+    // Stable category ordering for the palette sort comparator.
+    // Built once so the comparator does not allocate an array per call.
+    readonly property var categoryOrderMap: {
+        const m = {}
+        m[qsTr("CPU Sensors")] = 0
+        m[qsTr("Memory Sensors")] = 1
+        m[qsTr("GPU Sensors")] = 2
+        m[qsTr("Storage Sensors")] = 3
+        m[qsTr("Network Sensors")] = 4
+        m[qsTr("Thermal Sensors")] = 5
+        m[qsTr("Power Sensors")] = 6
+        m[qsTr("Battery Sensors")] = 7
+        m[qsTr("Other Sensors")] = 8
+        return m
+    }
 
     // Receives the shared OverviewModel from Main.qml.
     property QtObject dashModel: null
@@ -59,6 +76,7 @@ Kirigami.Page {
     Connections {
         target: page.dashModel
         function onTilesJsonChanged() { page.refreshSensors() }
+        function onTilesChangedJsonChanged() { page.applyTileDelta() }
     }
     Connections {
         target: app.dashboards
@@ -172,6 +190,29 @@ Kirigami.Page {
         }
     }
 
+    function applyTileDelta() {
+        if (!page.dashModel) return
+        if (page._isDragging) return
+        try {
+            const arr = JSON.parse(page.dashModel.tilesChangedJson || "[]")
+            if (arr.length === 0) return
+            const lookup = page.valueById
+            const rowsLookup = page.rowsById
+            const kindLookup = page.kindById
+            for (let i = 0; i < arr.length; ++i) {
+                const t = arr[i]
+                lookup[t.id] = t.value
+                if (t.rows && t.rows.length > 0) rowsLookup[t.id] = t.rows
+                else delete rowsLookup[t.id]
+                if (t.kind) kindLookup[t.id] = t.kind
+            }
+            page.valueById = lookup
+            page.rowsById = rowsLookup
+            page.kindById = kindLookup
+            canvasModel.refreshValues()
+        } catch (e) { /* keep previous state */ }
+    }
+
     function sameStringSequence(a, b) {
         if (a.length !== b.length) return false
         for (let i = 0; i < a.length; ++i) {
@@ -203,19 +244,53 @@ Kirigami.Page {
     // user-friendly order independent of arrival order from the
     // daemon (which is plugin-load order).
     function categoryRank(cat) {
-        const order = [
-            qsTr("CPU Sensors"),
-            qsTr("Memory Sensors"),
-            qsTr("GPU Sensors"),
-            qsTr("Storage Sensors"),
-            qsTr("Network Sensors"),
-            qsTr("Thermal Sensors"),
-            qsTr("Power Sensors"),
-            qsTr("Battery Sensors"),
-            qsTr("Other Sensors"),
-        ]
-        const i = order.indexOf(cat)
-        return i < 0 ? order.length : i
+        const i = page.categoryOrderMap[cat]
+        return i === undefined ? 9 : i
+    }
+
+    function isValidNumber(s) {
+        if (!s || s.trim().length === 0) return true
+        const n = Number(s)
+        return !isNaN(n) && isFinite(n)
+    }
+
+    function isValidColorString(s) {
+        if (!s || s.trim().length === 0) return true
+        if (/^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/.test(s)) return true
+        const named = {
+            aliceblue:1, antiquewhite:1, aqua:1, aquamarine:1, azure:1, beige:1, bisque:1,
+            black:1, blanchedalmond:1, blue:1, blueviolet:1, brown:1, burlywood:1, cadetblue:1,
+            chartreuse:1, chocolate:1, coral:1, cornflowerblue:1, cornsilk:1, crimson:1, cyan:1,
+            darkblue:1, darkcyan:1, darkgoldenrod:1, darkgray:1, darkgreen:1, darkgrey:1,
+            darkkhaki:1, darkmagenta:1, darkolivegreen:1, darkorange:1, darkorchid:1, darkred:1,
+            darksalmon:1, darkseagreen:1, darkslateblue:1, darkslategray:1, darkslategrey:1,
+            darkturquoise:1, darkviolet:1, deeppink:1, deepskyblue:1, dimgray:1, dimgrey:1,
+            dodgerblue:1, firebrick:1, floralwhite:1, forestgreen:1, fuchsia:1, gainsboro:1,
+            ghostwhite:1, gold:1, goldenrod:1, gray:1, green:1, greenyellow:1, grey:1,
+            honeydew:1, hotpink:1, indianred:1, indigo:1, ivory:1, khaki:1, lavender:1,
+            lavenderblush:1, lawngreen:1, lemonchiffon:1, lightblue:1, lightcoral:1, lightcyan:1,
+            lightgoldenrodyellow:1, lightgray:1, lightgreen:1, lightgrey:1, lightpink:1,
+            lightsalmon:1, lightseagreen:1, lightskyblue:1, lightslategray:1, lightslategrey:1,
+            lightsteelblue:1, lightyellow:1, lime:1, limegreen:1, linen:1, magenta:1, maroon:1,
+            mediumaquamarine:1, mediumblue:1, mediumorchid:1, mediumpurple:1, mediumseagreen:1,
+            mediumslateblue:1, mediumspringgreen:1, mediumturquoise:1, mediumvioletred:1,
+            midnightblue:1, mintcream:1, mistyrose:1, moccasin:1, navajowhite:1, navy:1,
+            oldlace:1, olive:1, olivedrab:1, orange:1, orangered:1, orchid:1, palegoldenrod:1,
+            palegreen:1, paleturquoise:1, palevioletred:1, papayawhip:1, peachpuff:1, peru:1,
+            pink:1, plum:1, powderblue:1, purple:1, red:1, rosybrown:1, royalblue:1, saddlebrown:1,
+            salmon:1, sandybrown:1, seagreen:1, seashell:1, sienna:1, silver:1, skyblue:1,
+            slateblue:1, slategray:1, slategrey:1, snow:1, springgreen:1, steelblue:1, tan:1,
+            teal:1, thistle:1, tomato:1, turquoise:1, violet:1, wheat:1, white:1, whitesmoke:1,
+            yellow:1, yellowgreen:1, transparent:1
+        }
+        return named[s.trim().toLowerCase()] === 1
+    }
+
+    readonly property string optionsError: {
+        if (!isValidColorString(textAccentField.text)) return qsTr("Text accent must be a valid color.")
+        if (!isValidNumber(thresholdOkField.text)) return qsTr("OK threshold must be a number.")
+        if (!isValidNumber(thresholdWarnField.text)) return qsTr("Warning threshold must be a number.")
+        return ""
     }
 
     function hasTile(sensorId) {
@@ -264,14 +339,6 @@ Kirigami.Page {
         banner.visible = true
         // We deliberately do NOT restart the hide timer for errors —
         // they stay until the next user action overwrites them.
-    }
-
-    // True when the value returned by `save_layout` / `layout_path` is
-    // an error sentinel rather than a real path. The Rust side prefixes
-    // these with `"error: "`; we centralize the check here so callers
-    // can't mis-classify success as failure (or vice versa).
-    function isLayoutError(s) {
-        return typeof s === "string" && s.indexOf("error:") === 0
     }
 
     // ----- Canvas model ------------------------------------------------------
@@ -1215,7 +1282,7 @@ Kirigami.Page {
                                 if (typeof modelData === 'object' && modelData !== null) {
                                     if (modelData.text !== undefined) return modelData.text;
                                     if (modelData.number !== undefined) return Number(modelData.number).toFixed(1);
-                                    if (modelData.bytes !== undefined) return formatBytes(modelData.bytes);
+                                    if (modelData.bytes !== undefined) return Shared.formatBytes(modelData.bytes);
                                     return "";
                                 }
                                 return String(modelData);
@@ -1249,6 +1316,10 @@ Kirigami.Page {
 
     function applyOptions() {
         if (page._optionsIndex < 0) return
+        if (page.optionsError.length > 0) {
+            app.showPassiveNotification(page.optionsError, 4000)
+            return
+        }
         const opts = {}
         if (labelOverrideField.text.trim()) opts.labelOverride = labelOverrideField.text.trim()
         if (textAccentField.text.trim()) opts.textAccent = textAccentField.text.trim()
@@ -1353,12 +1424,22 @@ Kirigami.Page {
 
             Item { Layout.fillHeight: true }
 
+            Controls.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                visible: page.optionsError.length > 0
+                text: page.optionsError
+                color: app.tokens.negative
+                font.pixelSize: app.tokens.textCaption
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: app.tokens.spaceS
                 Controls.Button {
                     text: qsTr("Apply")
                     Layout.fillWidth: true
+                    enabled: page.optionsError.length === 0
                     onClicked: page.applyOptions()
                 }
                 Controls.Button {
@@ -1371,11 +1452,4 @@ Kirigami.Page {
         }
     }
 
-    function formatBytes(b) {
-        if (b >= 1099511627776) return (b / 1099511627776).toFixed(2) + " TiB";
-        if (b >= 1073741824) return (b / 1073741824).toFixed(2) + " GiB";
-        if (b >= 1048576) return (b / 1048576).toFixed(2) + " MiB";
-        if (b >= 1024) return (b / 1024).toFixed(2) + " KiB";
-        return b + " B";
-    }
 }

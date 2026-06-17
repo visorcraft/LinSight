@@ -395,6 +395,8 @@ Kirigami.Page {
             sensorPicker.currentIndex = -1
             title = qsTr("Add Alert Rule")
             open()
+            nameField.forceActiveFocus()
+            nameField.selectAll()
         }
 
         function openEdit(name, expr, notify, cooldown) {
@@ -408,6 +410,8 @@ Kirigami.Page {
             sensorPicker.currentIndex = -1
             title = qsTr("Edit Rule: %1").arg(name)
             open()
+            nameField.forceActiveFocus()
+            nameField.selectAll()
         }
 
         onAccepted: {
@@ -452,6 +456,7 @@ Kirigami.Page {
                 Layout.fillWidth: true
                 placeholderText: qsTr("e.g. cpu.util > 90 && mem.used_bytes > 8e9")
                 font.family: app.tokens.monoFamily
+                Keys.onReturnPressed: editDialog.accept()
             }
 
             RowLayout {

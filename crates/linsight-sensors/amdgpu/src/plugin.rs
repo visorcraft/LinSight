@@ -382,13 +382,13 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
         host_init(&p, &ctx).unwrap();
 
-        let r = host_sample(&p, SensorId::new("amdgpu.card0.util")).unwrap();
+        let r = host_sample(&p, &SensorId::new("amdgpu.card0.util")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if v == 42.0));
 
-        let r = host_sample(&p, SensorId::new("amdgpu.card0.temp_c")).unwrap();
+        let r = host_sample(&p, &SensorId::new("amdgpu.card0.temp_c")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 65.0).abs() < 1e-6));
 
-        let r = host_sample(&p, SensorId::new("amdgpu.card0.power_w")).unwrap();
+        let r = host_sample(&p, &SensorId::new("amdgpu.card0.power_w")).unwrap();
         assert!(matches!(r, Reading::Scalar(v) if (v - 150.0).abs() < 1e-6));
     }
 }

@@ -98,7 +98,11 @@ fn main() {
                 .file(
                     QResourceFile::new("resources/linsight-512.png")
                         .alias("resources/linsight-512.png"),
-                ),
+                )
+                // Shared JS helpers used by several QML files. Bundled as a
+                // qrc resource so the files can import it with a stable
+                // `qrc:/qml/Shared.js` URL regardless of install layout.
+                .file(QResourceFile::new("qml/Shared.js").alias("qml/Shared.js")),
         ),
     );
 

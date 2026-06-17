@@ -358,7 +358,7 @@ mod tests {
         let dir = fake_cgroup();
         let p = ContainersPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let r = host_sample(&p, SensorId::new("containers.list")).unwrap();
+        let r = host_sample(&p, &SensorId::new("containers.list")).unwrap();
         match r {
             Reading::Table(rows) => {
                 // docker + podman, conmon and the service excluded.
@@ -384,14 +384,14 @@ mod tests {
         let dir = fake_cgroup();
         let p = ContainersPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let _ = host_sample(&p, SensorId::new("containers.list")).unwrap();
+        let _ = host_sample(&p, &SensorId::new("containers.list")).unwrap();
 
         // Bump the docker container's CPU usage by 250000 usec.
         let docker =
             dir.path().join("sys/fs/cgroup/system.slice/docker-abc123def4567890aaaa.scope");
         fs::write(docker.join("cpu.stat"), "usage_usec 1250000\nuser_usec 700000\n").unwrap();
 
-        let r = host_sample(&p, SensorId::new("containers.list")).unwrap();
+        let r = host_sample(&p, &SensorId::new("containers.list")).unwrap();
         match r {
             Reading::Table(rows) => {
                 let docker_row = rows
@@ -420,7 +420,7 @@ mod tests {
         let dir = fake_cgroup();
         let p = ContainersPlugin::default();
         host_init(&p, &ctx_for(&dir)).unwrap();
-        let err = host_sample(&p, SensorId::new("containers.bogus")).unwrap_err();
+        let err = host_sample(&p, &SensorId::new("containers.bogus")).unwrap_err();
         assert!(matches!(err, PluginError::Unsupported(_)));
     }
 }
