@@ -59,7 +59,7 @@ compatibility on every CI run.
 | `postcard` (compact serde wire format) | MIT OR Apache-2.0 | [jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
 | `signal-hook` | Apache-2.0 OR MIT | [vorner/signal-hook](https://github.com/vorner/signal-hook) |
 | `subtle` (constant-time comparison for auth-token checks) | BSD-3-Clause | [dalek-cryptography/subtle](https://github.com/dalek-cryptography/subtle) |
-| `libc` (Unix `SO_PEERCRED` auth, `statvfs` filesystem stats) | MIT OR Apache-2.0 | [rust-lang/libc](https://github.com/rust-lang/libc) |
+| `libc` (Unix `SO_PEERCRED` auth in the daemon and `statvfs` filesystem stats in the fs sensor) | MIT OR Apache-2.0 | [rust-lang/libc](https://github.com/rust-lang/libc) |
 
 ### Optional always-on subsystems
 
@@ -76,6 +76,7 @@ compatibility on every CI run.
 | ----- | ------- | ------- |
 | `tokio`, `tokio-rustls` | MIT | [tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
 | `rustls` | Apache-2.0 OR ISC OR MIT | [rustls/rustls](https://github.com/rustls/rustls) |
+| `rustls-pki-types` (types shared by the `rustls`/`tokio-rustls` stack; pinned in `workspace.dependencies`) | MIT OR Apache-2.0 | [rustls/pki-types](https://github.com/rustls/pki-types) |
 | `x509-parser` (client certificate parsing for mTLS) | MIT OR Apache-2.0 | [rusticata/x509-parser](https://github.com/rusticata/x509-parser) |
 
 ### Serialization + CLI plumbing
@@ -99,10 +100,10 @@ compatibility on every CI run.
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `proptest` | MIT OR Apache-2.0 | [proptest-rs/proptest](https://github.com/proptest-rs/proptest) |
-| `criterion` (benchmark harness for core + protocol) | MIT OR Apache-2.0 | [bheisrow/criterion](https://github.com/bheisrow/criterion) |
+| `criterion` (benchmark harness for core + protocol) | MIT OR Apache-2.0 | [bheisler/criterion.rs](https://github.com/bheisler/criterion.rs) |
 | `tempfile` | MIT OR Apache-2.0 | [Stebalien/tempfile](https://github.com/Stebalien/tempfile) |
 | `assert_cmd`, `predicates` | MIT OR Apache-2.0 | [assert-rs](https://github.com/assert-rs) |
-| `escargot` (rebuilds the example plugin under `tests/dynamic_load.rs`) | MIT OR Apache-2.0 | [assert-rs/escargot](https://github.com/assert-rs/escargot) |
+| `escargot` (rebuilds the example plugin under `tests/dynamic_load.rs`) | MIT OR Apache-2.0 | [crate-ci/escargot](https://github.com/crate-ci/escargot) |
 | `rcgen` (test certificate generation for mTLS smoke tests) | MIT OR Apache-2.0 | [est31/rcgen](https://github.com/est31/rcgen) |
 
 ## License compatibility
@@ -110,11 +111,11 @@ compatibility on every CI run.
 GPL-3.0-only is compatible with every license listed above. Specifically:
 
 - MIT / Apache-2.0 / BSD-3-Clause / ISC are permissive and combine freely.
-- `Unicode-3.0` (transitive via ICU) is FSF-approved as GPL-compatible.
-- `Unlicense` (any ripgrep-family deps reached transitively) is FSF-approved as GPL-compatible.
-- `Zlib` (used by `miniz_oxide`, `foldhash`, `tinyvec`) is FSF-approved as GPL-compatible.
+- `Unicode-3.0` (transitive via `unicode-ident`) is FSF-approved as GPL-compatible.
+- `Zlib` (used by `foldhash`) is FSF-approved as GPL-compatible.
 
-The `deny.toml` allowlist enforces this. New licenses outside the
+The `deny.toml` allowlist also permits `Unlicense` for any future
+transitive deps; no current crate uses it. New licenses outside the
 allowlist fail the `cargo deny check` step in CI.
 
 ## Reporting attribution gaps
