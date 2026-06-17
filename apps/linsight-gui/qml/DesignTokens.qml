@@ -22,7 +22,6 @@ QtObject {
     readonly property int spaceL:   16
     readonly property int spaceXL:  24
     readonly property int spaceXXL: 32
-    readonly property int spaceXXXL: 48
 
     // Radii.
     readonly property int radiusButton: 6
@@ -51,14 +50,6 @@ QtObject {
     // editor. Previously copy-pasted as `height: 76` across each page.
     readonly property int pageHeaderHeight: 76
 
-    // Brand "L-tile" mark, used in AboutPage's hero and any other
-    // place we render the placeholder brand icon inline rather than as
-    // a raster. These bypass Kirigami.Theme deliberately — the mark is
-    // dark-on-dark by design regardless of the current Plasma theme.
-    readonly property color markPanelDeep: "#0d1115"
-    readonly property color markPanelTop:  "#1b1f24"
-    readonly property color markBar:       "#84d4ff"
-
     // Motion: pass `--reduce-motion` (or the alias `--no-animations`)
     // on the command line to flatten every duration to 0 — the
     // snappy-but-bouncy sidebar collapse, the tile hover fade, and any
@@ -76,8 +67,6 @@ QtObject {
         Qt.application.arguments.indexOf("--reduce-motion") !== -1
         || Qt.application.arguments.indexOf("--no-animations") !== -1
     readonly property int durationSnap:  reduceMotion ? 0 : 120
-    readonly property int durationFade:  reduceMotion ? 0 : 140
-    readonly property int durationEnter: reduceMotion ? 0 : 200
 
     // Colors are routed through `app.preferences` so the active
     // theme can replace Kirigami.Theme entirely. For the `system`

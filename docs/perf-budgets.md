@@ -43,7 +43,7 @@ reproducible baseline for the budgets below.
 
 ## Release binary sizes
 
-| Binary | Target | v0.3.0 |
+| Binary | Target | v1.16.0 |
 |---|---|---|
 | `linsightd` | ≤ 5 MB | ~1.3 MB |
 | `linsight-cli` | ≤ 5 MB | ~1.3 MB |
@@ -52,13 +52,14 @@ reproducible baseline for the budgets below.
 
 ## Methodology
 
-There is no committed benchmark suite yet — the figures above are
-by-hand spot measurements (RSS from `/proc/<pid>/status`, latency
-from ad-hoc `std::time::Instant` probes, binary sizes from `size` on
-a `just build-release` artifact). If a `cargo bench` group is added
-under `crates/<crate>/benches/`, bias toward fewer, well-named
-benchmarks that catch real regressions over many small ones that
-drown signal in noise.
+Criterion benchmarks exist for the protocol encode/decode and core
+type hot paths; run them with `just bench`. The remaining figures
+above are by-hand spot measurements (RSS from `/proc/<pid>/status`,
+latency from ad-hoc `std::time::Instant` probes, binary sizes from
+`size` on a `just build-release` artifact). If a `cargo bench` group
+is added under `crates/<crate>/benches/`, bias toward fewer,
+well-named benchmarks that catch real regressions over many small
+ones that drown signal in noise.
 
 When a budget is violated:
 

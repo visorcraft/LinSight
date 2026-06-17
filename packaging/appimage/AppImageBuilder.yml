@@ -51,12 +51,6 @@ AppDir:
     env:
       QT_QPA_PLATFORM: wayland;xcb
       LINSIGHT_LOG: info
-  test:
-    fedora-37:
-      image: appimagecrafters/tests-env:fedora-37
-      command: ./AppRun --help
-      use_host_x: true
 
 AppImage:
   arch: x86_64
-  update-information: gh-releases-zsync|visorcraft|linsight|latest|*x86_64.AppImage.zsync

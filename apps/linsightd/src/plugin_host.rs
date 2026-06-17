@@ -50,8 +50,9 @@ struct PluginEntry {
     /// loaded `.so` plugins. RAII guard: held purely to keep the dynamic
     /// library mapped for the lifetime of the entry — dropping it
     /// `dlclose`s the `.so` and invalidates every vtable pointer borrowed
-    /// from it. The field is intentionally write-only; the `#[allow]`
-    /// suppresses clippy noise about that, NOT a deferred caller.
+    /// from it. The field is intentionally write-only; the
+    /// `#[allow(dead_code)]` suppresses clippy noise about that, NOT a
+    /// deferred caller.
     #[allow(dead_code)]
     library: Option<Library>,
     meta: PluginMeta,

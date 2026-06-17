@@ -79,11 +79,11 @@ perf.data.old
 # Agent-guidance entry points — kept local, not version-controlled.
 # AGENTS.md is the single canonical file; CLAUDE.md and GEMINI.md are
 # symlinks to it so each agent CLI auto-loads the same content.
-/AGENTS.md
-/CLAUDE.md
-/GEMINI.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 # Internal implementation plan — kept local, not version-controlled.
-/PLAN.md
+PLAN.md
 
 # Local env overrides (never commit secrets)
 .env

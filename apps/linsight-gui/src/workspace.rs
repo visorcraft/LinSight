@@ -222,7 +222,6 @@ impl Workspace {
     /// Reconnect to a different daemon. `target` is either `"local"` for the
     /// default Unix socket or `"ssh://[user@]host[:port]"`. On failure the
     /// existing client is kept and an error string is returned.
-    #[allow(dead_code)]
     pub fn reconnect(&self, target: &str) -> Result<(), String> {
         let new_client = if target == "local" {
             let path = default_socket_path().map_err(|e| e.to_string())?;

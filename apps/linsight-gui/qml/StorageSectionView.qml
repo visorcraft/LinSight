@@ -4,7 +4,6 @@
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
-import org.kde.kirigami as Kirigami
 
 // Scrollable column of physical-disk cards. Each disk card shows the disk's
 // own sensors, then inset cards for the mounts that live on it. Orphan

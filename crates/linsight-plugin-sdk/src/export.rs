@@ -113,8 +113,8 @@ mod tests {
     // itself, because the macro emits `#[no_mangle]` symbols that would
     // collide with the SDK's own test harness when other crates link it.
     // The macro is exercised via the dynamic plugin in
-    // `examples/echo-plugin` (not currently present) and via the
-    // in-tree sensor crates which call it through their own cdylibs.
+    // `examples/echo-plugin` (exercised by the SDK's dynamic_load test)
+    // and via the in-tree sensor crates which call it through their own cdylibs.
 
     #[test]
     fn host_init_round_trips() {

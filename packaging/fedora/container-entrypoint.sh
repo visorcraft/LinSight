@@ -82,7 +82,7 @@ fi
 cd packaging/fedora
 
 # Sync the spec's Version field to Cargo.toml if they've drifted. The
-# spec ships with 1.0.0; if Cargo.toml is ahead, use Cargo.toml.
+# spec ships with the current workspace version; if Cargo.toml is ahead, use Cargo.toml.
 spec_version="$(awk '/^Version:/ {print $2; exit}' linsight.spec)"
 if [ "$spec_version" != "$version" ]; then
     echo "    Note: linsight.spec Version (${spec_version}) lags Cargo.toml (${version}); using Cargo.toml"

@@ -22,14 +22,6 @@ Kirigami.ScrollablePage {
     // checkbox-symbolic to a real on/off status.
     property QtObject dashModel: null
 
-    // Env-var names that gate the always-on subsystems on the daemon
-    // side. Keep these in sync with `apps/linsightd/src/runtime.rs`
-    // where they are actually read. Treat any rename in Rust as a
-    // breaking change here too.
-    readonly property string envHistory: "LINSIGHT_HISTORY"
-    readonly property string envAlerts:  "LINSIGHT_ALERTS"
-    readonly property string envProm:    "LINSIGHT_PROM_BIND"
-
     property var daemonSettings: ({ history: false, alerts: false, prom: false, promBind: "" })
 
     function refreshDaemonSettings() {

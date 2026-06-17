@@ -6,7 +6,6 @@
 
 import QtQuick
 import QtQuick.Controls as Controls
-import QtQuick.Layouts
 
 Controls.Dialog {
     id: root

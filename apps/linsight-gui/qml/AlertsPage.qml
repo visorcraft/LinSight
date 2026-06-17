@@ -23,7 +23,6 @@ Kirigami.Page {
 
     property var rules: []
     property var events: []
-    property string testResultText: ""
 
     Component.onCompleted: {
         if (page.alertModel) {

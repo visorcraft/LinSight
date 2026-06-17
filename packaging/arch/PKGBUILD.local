@@ -56,8 +56,6 @@ package() {
   install -Dm644 packaging/systemd/linsight.service \
     "$pkgdir/usr/lib/systemd/user/linsight.service"
 
-  # Hicolor icons so the .desktop entry resolves an icon (the release
-  # PKGBUILD currently omits these).
   install -Dm644 packaging/icons/scalable/apps/com.visorcraft.LinSight.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.visorcraft.LinSight.svg"
   local size

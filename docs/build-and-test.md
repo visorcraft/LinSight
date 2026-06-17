@@ -63,7 +63,7 @@ linsight/
 │   ├── linsight-protocol/      # wire format
 │   ├── linsight-plugin-sdk/    # public plugin API (ABI v6, stabby R-mirror)
 │   ├── linsight-sensors/       # one in-tree plugin per hardware family
-│   │   ├── cpu/  mem/  net/  nvme/  nvml/
+│   │   ├── cpu/  mem/  net/  nvme/  nvml/  smart/
 │   │   ├── xe/  i915/  amdgpu/         # GPUs
 │   │   ├── disk/  fs/  hwmon/  zram/
 │   │   └── proc/  system/  systemd/  containers/  sock/

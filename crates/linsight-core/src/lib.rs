@@ -4,7 +4,10 @@
 #![deny(rust_2018_idioms)]
 
 pub mod atomic_write;
-pub mod dashboard;
+/// Schema version embedded in saved dashboard JSON. Bump on any
+/// incompatible change to the on-disk layout format.
+pub const DASHBOARD_SCHEMA_VERSION: u32 = 1;
+
 pub mod error;
 pub mod hardware;
 pub mod paths;

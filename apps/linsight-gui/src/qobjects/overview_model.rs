@@ -9,8 +9,6 @@
 //! `qt_thread.queue(...)` setter calls. QML bindings on `cpuText`,
 //! `memText`, and `tilesJson` re-evaluate from the resulting NOTIFY
 //! signals.
-//!
-//! `save_layout` / `load_layout` / `layout_path` back the canvas editor.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::pin::Pin;
@@ -52,28 +50,6 @@ pub mod ffi {
         #[qinvokable]
         fn start(self: Pin<&mut OverviewModel>);
 
-        /// Persist a canvas-editor layout JSON to
-        /// `~/.config/linsight/dashboard.json`. Phase 6b uses a minimal
-        /// `[{id,x,y,w,h}]` shape stored under a single "Custom" page so the
-        /// editor stays decoupled from the full `DashboardSpec` schema
-        /// while still living in the same file.
-        ///
-        /// Returns the absolute path written on success, or an
-        /// `error: …` prefixed message on failure. QML treats both as
-        /// status strings.
-        #[qinvokable]
-        fn save_layout(self: Pin<&mut OverviewModel>, json: QString) -> QString;
-
-        /// Read the canvas-editor layout JSON previously written by
-        /// `save_layout`. Missing file → `"[]"`. Malformed → `"[]"`.
-        #[qinvokable]
-        fn load_layout(self: Pin<&mut OverviewModel>) -> QString;
-
-        /// Absolute path of the dashboard JSON file the editor writes to.
-        /// Surfaced in the editor's status strip.
-        #[qinvokable]
-        fn layout_path(self: Pin<&mut OverviewModel>) -> QString;
-
         /// Returns the bundled-at-build-time third-party credits markdown
         /// (`docs/third-party-notices.md`). Used by the Credits page —
         /// QML's `XMLHttpRequest` against `qrc:/` URLs does not reliably
@@ -99,18 +75,6 @@ pub mod ffi {
         /// renders this as a sortable, filterable table.
         #[qinvokable]
         fn third_party_credits_json(self: &OverviewModel) -> QString;
-
-        /// True if the named environment variable is set in this process.
-        /// Used by the Settings page to flip the always-on indicators
-        /// between "on" and "off" instead of showing a fixed checkbox
-        /// regardless of the actual env state.
-        ///
-        /// Caveat: this reads the GUI process's env, not the daemon's.
-        /// In the systemd-unit setup the two share an env, but a
-        /// detached daemon could diverge; surfacing daemon-side env is
-        /// tracked in the open-followups doc.
-        #[qinvokable]
-        fn env_is_set(self: &OverviewModel, name: &QString) -> bool;
 
         /// Enable or disable the proc.list sample stream. The process
         /// page calls this on activation / deactivation so the 5-second
@@ -563,67 +527,6 @@ impl ffi::OverviewModel {
         }
     }
 
-    /// Save the canvas-editor's placements JSON. We embed the editor's
-    /// flat `[{id,x,y,w,h}]` array under a single `Custom` page so the
-    /// on-disk file stays valid against `DashboardSpec` once the
-    /// Custom-page renderer in `linsight-core` learns to translate
-    /// pixel coords back to the 24-column grid. Until then the editor
-    /// owns the file end-to-end and round-trips it through a
-    /// `editor_layout` extension field that `DashboardSpec` ignores.
-    pub fn save_layout(self: Pin<&mut Self>, json: QString) -> QString {
-        let path = match layout_path_buf() {
-            Ok(p) => p,
-            Err(e) => return QString::from(format!("error: {e}").as_str()),
-        };
-        if let Some(parent) = path.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            return QString::from(format!("error: mkdir {}: {e}", parent.display()).as_str());
-        }
-        // Validate the payload is JSON; refuse silently-corrupted writes.
-        let body = json.to_string();
-        let parsed: serde_json::Value = match serde_json::from_str(&body) {
-            Ok(v) => v,
-            Err(e) => return QString::from(format!("error: invalid JSON: {e}").as_str()),
-        };
-        let doc = serde_json::json!({
-            "schema_version": linsight_core::dashboard::DASHBOARD_SCHEMA_VERSION,
-            "pages": [],
-            "editor_layout": parsed,
-        });
-        let pretty = serde_json::to_string_pretty(&doc).unwrap_or_else(|_| body.clone());
-        if let Err(e) = std::fs::write(&path, pretty) {
-            return QString::from(format!("error: write {}: {e}", path.display()).as_str());
-        }
-        QString::from(path.to_string_lossy().as_ref())
-    }
-
-    /// Counterpart to [`save_layout`]. Returns the inner editor array.
-    pub fn load_layout(self: Pin<&mut Self>) -> QString {
-        let path = match layout_path_buf() {
-            Ok(p) => p,
-            Err(_) => return QString::from("[]"),
-        };
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(_) => return QString::from("[]"),
-        };
-        let doc: serde_json::Value = match serde_json::from_str(&raw) {
-            Ok(v) => v,
-            Err(_) => return QString::from("[]"),
-        };
-        let inner = doc.get("editor_layout").cloned().unwrap_or_else(|| serde_json::json!([]));
-        QString::from(inner.to_string().as_str())
-    }
-
-    /// User-visible path label.
-    pub fn layout_path(self: Pin<&mut Self>) -> QString {
-        match layout_path_buf() {
-            Ok(p) => QString::from(p.to_string_lossy().as_ref()),
-            Err(e) => QString::from(format!("error: {e}").as_str()),
-        }
-    }
-
     pub fn credits_text(&self) -> QString {
         QString::from(BUNDLED_CREDITS)
     }
@@ -638,11 +541,6 @@ impl ffi::OverviewModel {
 
     pub fn third_party_credits_json(&self) -> QString {
         QString::from(third_party_credit_entries_json(BUNDLED_CREDITS).as_str())
-    }
-
-    pub fn env_is_set(&self, name: &QString) -> bool {
-        let name = name.to_string();
-        std::env::var_os(name).map(|v| !v.is_empty()).unwrap_or(false)
     }
 
     pub fn fetch_daemon_settings(self: Pin<&mut Self>) -> QString {
@@ -1098,19 +996,6 @@ fn serialize_category(c: linsight_core::Category) -> String {
         linsight_core::Category::Network => "network".into(),
         linsight_core::Category::Custom => "custom".into(),
     }
-}
-
-/// Resolve `~/.config/linsight/dashboard.json` without pulling in `dirs`.
-/// Honors `XDG_CONFIG_HOME` per the spec; falls back to `$HOME/.config`.
-fn layout_path_buf() -> Result<std::path::PathBuf, String> {
-    let base = match std::env::var_os("XDG_CONFIG_HOME") {
-        Some(s) if !s.is_empty() => std::path::PathBuf::from(s),
-        _ => {
-            let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
-            std::path::PathBuf::from(home).join(".config")
-        }
-    };
-    Ok(base.join("linsight").join("dashboard.json"))
 }
 
 fn serialize_kind(k: linsight_core::SensorKind) -> String {

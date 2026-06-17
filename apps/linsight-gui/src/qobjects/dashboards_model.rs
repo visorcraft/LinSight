@@ -370,9 +370,6 @@ pub mod ffi {
         type DashboardsModel = super::DashboardsModelRust;
 
         #[qinvokable]
-        fn refresh(self: Pin<&mut DashboardsModel>);
-
-        #[qinvokable]
         fn create(self: Pin<&mut DashboardsModel>, name: &QString) -> QString;
 
         #[qinvokable]
@@ -449,14 +446,14 @@ fn current_slug_list_json() -> String {
     serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into())
 }
 
-impl ffi::DashboardsModel {
-    pub fn refresh(mut self: Pin<&mut Self>) {
-        let s = current_summary_json();
-        let slugs = current_slug_list_json();
-        self.as_mut().set_summary_json(QString::from(s.as_str()));
-        self.as_mut().set_slug_list_json(QString::from(slugs.as_str()));
-    }
+fn refresh_model(mut model: Pin<&mut ffi::DashboardsModel>) {
+    let s = current_summary_json();
+    let slugs = current_slug_list_json();
+    model.as_mut().set_summary_json(QString::from(s.as_str()));
+    model.as_mut().set_slug_list_json(QString::from(slugs.as_str()));
+}
 
+impl ffi::DashboardsModel {
     pub fn create(mut self: Pin<&mut Self>, name: &QString) -> QString {
         let n = name.to_string();
         let base = derive_slug(&n);
@@ -477,7 +474,7 @@ impl ffi::DashboardsModel {
         if let Err(e) = write_reserved_dashboard_file(reservation, &d) {
             return self.report_err(format!("create failed: {e}"));
         }
-        self.as_mut().refresh();
+        refresh_model(self.as_mut());
         QString::from(slug.as_str())
     }
 
@@ -486,7 +483,7 @@ impl ffi::DashboardsModel {
         let new_name_s = new_name.to_string();
         match rename_dashboard_file(&old_slug, &new_name_s) {
             Ok(new_slug) => {
-                self.as_mut().refresh();
+                refresh_model(self.as_mut());
                 QString::from(new_slug.as_str())
             }
             Err(e) => self.report_err(format!("rename failed: {e}")),
@@ -497,7 +494,7 @@ impl ffi::DashboardsModel {
         let s = slug.to_string();
         match duplicate_dashboard_file(&s) {
             Ok(new_slug) => {
-                self.as_mut().refresh();
+                refresh_model(self.as_mut());
                 QString::from(new_slug.as_str())
             }
             Err(e) => self.report_err(format!("duplicate failed: {e}")),
@@ -512,7 +509,7 @@ impl ffi::DashboardsModel {
         };
         let removed = std::fs::remove_file(&path).is_ok();
         if removed {
-            self.as_mut().refresh();
+            refresh_model(self.as_mut());
         }
         removed
     }
@@ -549,7 +546,7 @@ impl ffi::DashboardsModel {
         d.updated_at = Utc::now().to_rfc3339();
         match write_one(&d) {
             Ok(written) => {
-                self.as_mut().refresh();
+                refresh_model(self.as_mut());
                 QString::from(written.to_string_lossy().as_ref())
             }
             Err(e) => self.report_err(format!("save failed: {e}")),

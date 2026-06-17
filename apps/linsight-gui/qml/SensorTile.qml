@@ -31,9 +31,6 @@ Rectangle {
     // Short unit suffix forwarded to HistoryDialog (e.g. "°C", "%").
     property string tileUnit: ""
 
-    property real thresholdOk: 50.0
-    property real thresholdWarn: 80.0
-
     color: app.tokens.surface1
     radius: app.tokens.radiusCard
 
