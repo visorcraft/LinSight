@@ -1007,8 +1007,13 @@ mod tests {
         // Give the kernel a moment to reap the process after wait().
         thread::sleep(Duration::from_millis(100));
         let pid = std::fs::read_to_string(&pid_file).unwrap().trim().parse::<u32>().unwrap();
-        let status = Command::new("kill").arg("-0").arg(pid.to_string()).status().unwrap();
-        assert!(!status.success(), "child {pid} was not killed after timeout");
+        // Liveness via /proc, not an external `kill`: minimal build chroots
+        // (the Debian packaging container) lack procps, so `Command::new("kill")`
+        // would fail with NotFound rather than report the process state.
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "child {pid} was not killed after timeout"
+        );
     }
 
     #[test]
