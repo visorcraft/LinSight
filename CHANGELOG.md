@@ -7,6 +7,22 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.18.0] — 2026-06-17
+
+- **Dependency maintenance.** Upgraded the workspace crate tree to the latest
+  compatible versions, including the semver-incompatible bumps whose API
+  migration is mechanical: stabby 36→72, rusqlite 0.32→0.40, toml 0.8→1.1,
+  evalexpr 11→13, rcgen 0.13→0.14, criterion 0.5→0.8, libloading 0.8→0.9,
+  signal-hook 0.3→0.4, clap 4.5→4.6, postcard 1.0→1.1, zbus 5.5→5.16,
+  nvml-wrapper 0.11→0.12, and x509-parser 0.17→0.18.
+- **License note: evalexpr is now AGPL-3.0-only** (relicensed at v12). GPLv3
+  §13 permits combining a GPL-3.0 work with AGPL-3.0 code; the combined work as
+  conveyed carries AGPL §13's network-interaction source-offer clause. It is
+  allowlisted in `deny.toml`/`about.toml` accordingly.
+- **Third-party credits reconciled.** Regenerated `docs/third-party-notices.md`
+  from the updated lockfile and corrected stale license claims in `CREDITS.md`
+  (evalexpr, stabby's `EPL-2.0 OR Apache-2.0`, tokio-rustls).
+
 ## [1.17.1] — 2026-06-17
 
 - **Fix: packaged GUI failed to launch (blank, no window).** The QML pages

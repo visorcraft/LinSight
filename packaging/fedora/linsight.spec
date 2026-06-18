@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.17.1
+Version:        1.18.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Wed Jun 17 2026 VisorCraft LLC <support@visorcraft.com> - 1.18.0-1
+- Dependency maintenance: upgrade the workspace crate tree (stabby 72,
+  rusqlite 0.40, toml 1.1, evalexpr 13, rcgen 0.14, criterion 0.8, and others).
+  evalexpr relicensed to AGPL-3.0-only (permitted in a GPL-3.0 project via GPLv3
+  section 13). Regenerate and reconcile third-party license notices.
+
 * Wed Jun 17 2026 VisorCraft LLC <support@visorcraft.com> - 1.17.1-1
 - Fix packaged GUI failing to launch (no window): QML pages imported shared JS
   helpers via an absolute qrc:/qml/Shared.js URL the older Qt bundled in the

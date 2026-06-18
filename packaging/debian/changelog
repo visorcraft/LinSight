@@ -1,3 +1,12 @@
+linsight (1.18.0-1) unstable; urgency=medium
+
+  * Dependency maintenance: upgrade the workspace crate tree (stabby 72,
+    rusqlite 0.40, toml 1.1, evalexpr 13, rcgen 0.14, criterion 0.8, and
+    others). evalexpr relicensed to AGPL-3.0-only (permitted in a GPL-3.0
+    project via GPLv3 §13). Regenerate and reconcile third-party notices.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 17 Jun 2026 14:00:00 +0000
+
 linsight (1.17.1-1) unstable; urgency=medium
 
   * Fix packaged GUI failing to launch (no window): QML pages imported
