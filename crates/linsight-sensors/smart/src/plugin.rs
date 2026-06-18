@@ -250,9 +250,12 @@ mod tests {
         let ctx = PluginCtx::new_with_sysroot(std::path::PathBuf::from("/")).unwrap();
         host_init(&plugin, &ctx).unwrap();
         let err = host_sample(&plugin, &SensorId::new("disk.nvme0n1.smart_temp_c")).unwrap_err();
-        // May be Unsupported or Io depending on whether udisks2 is present.
+        // May be Unsupported (udisks2 present, sensor unknown) or Io (no
+        // udisks2 / no D-Bus bus at all, e.g. a minimal packaging chroot —
+        // the error then reads "D-Bus connection: ...").
+        let msg = err.to_string();
         assert!(
-            err.to_string().contains("unsupported") || err.to_string().contains("udisks2"),
+            msg.contains("unsupported") || msg.contains("udisks2") || msg.contains("D-Bus"),
             "unexpected error: {err}"
         );
     }
