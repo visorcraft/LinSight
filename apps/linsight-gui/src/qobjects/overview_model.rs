@@ -767,6 +767,7 @@ fn license_section_to_spdx(title: &str) -> String {
         "BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License" => "BSD-3-Clause".to_owned(),
         "BSD Zero Clause License" => "0BSD".to_owned(),
         "Community Data License Agreement Permissive 2.0" => "CDLA-Permissive-2.0".to_owned(),
+        "GNU Affero General Public License v3.0 only" => "AGPL-3.0-only".to_owned(),
         "GNU General Public License v3.0 only" => "GPL-3.0-only".to_owned(),
         "ISC License" => "ISC".to_owned(),
         "MIT License" => "MIT".to_owned(),

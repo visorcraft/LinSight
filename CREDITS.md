@@ -42,7 +42,7 @@ compatibility on every CI run.
 
 | Crate | License | Project |
 | ----- | ------- | ------- |
-| `stabby` (FFI-stable types for the runtime plugin ABI) | MIT OR Apache-2.0 | [ZettaScaleLabs/stabby](https://github.com/ZettaScaleLabs/stabby) |
+| `stabby` (FFI-stable types for the runtime plugin ABI) | EPL-2.0 OR Apache-2.0 (taken under Apache-2.0) | [ZettaScaleLabs/stabby](https://github.com/ZettaScaleLabs/stabby) |
 | `libloading` (dlopen wrapper for `.so` plugin discovery) | ISC | [nagisa/rust_libloading](https://github.com/nagisa/rust_libloading) |
 
 ### Sensors + hardware
@@ -66,7 +66,7 @@ compatibility on every CI run.
 | Crate | License | Project |
 | ----- | ------- | ------- |
 | `rusqlite` (SQLite for opt-in history) | MIT | [rusqlite/rusqlite](https://github.com/rusqlite/rusqlite) |
-| `evalexpr` (alert expression engine) | MIT | [ISibboI/evalexpr](https://github.com/ISibboI/evalexpr) |
+| `evalexpr` (alert expression engine) | AGPL-3.0-only | [ISibboI/evalexpr](https://github.com/ISibboI/evalexpr) |
 | `notify-rust` (desktop notifications for alerts) | MIT OR Apache-2.0 | [hoodie/notify-rust](https://github.com/hoodie/notify-rust) |
 | `ureq` (HTTP client for alert webhook notifications) | MIT OR Apache-2.0 | [algesten/ureq](https://github.com/algesten/ureq) |
 
@@ -74,7 +74,8 @@ compatibility on every CI run.
 
 | Crate | License | Project |
 | ----- | ------- | ------- |
-| `tokio`, `tokio-rustls` | MIT | [tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
+| `tokio` | MIT | [tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
+| `tokio-rustls` | MIT OR Apache-2.0 | [rustls/tokio-rustls](https://github.com/rustls/tokio-rustls) |
 | `rustls` | Apache-2.0 OR ISC OR MIT | [rustls/rustls](https://github.com/rustls/rustls) |
 | `rustls-pki-types` (types shared by the `rustls`/`tokio-rustls` stack; pinned in `workspace.dependencies`) | MIT OR Apache-2.0 | [rustls/pki-types](https://github.com/rustls/pki-types) |
 | `x509-parser` (client certificate parsing for mTLS) | MIT OR Apache-2.0 | [rusticata/x509-parser](https://github.com/rusticata/x509-parser) |
@@ -108,9 +109,17 @@ compatibility on every CI run.
 
 ## License compatibility
 
-GPL-3.0-only is compatible with every license listed above. Specifically:
+LinSight is conveyed under GPL-3.0-only. Every dependency above is either
+GPL-compatible outright or offered under a dual license whose
+GPL-compatible option we take:
 
 - MIT / Apache-2.0 / BSD-3-Clause / ISC are permissive and combine freely.
+- `stabby` is `EPL-2.0 OR Apache-2.0`; we take it under **Apache-2.0**.
+  EPL-2.0 on its own is not GPL-compatible — the `OR` lets us avoid it,
+  and `cargo about` reproduces only the Apache-2.0 text for it.
+- `evalexpr` is `AGPL-3.0-only`. GPLv3 §13 explicitly permits combining a
+  GPL-3.0 work with AGPL-3.0 code; the combined work as conveyed then
+  carries AGPL §13's network-interaction source-offer requirement.
 - `Unicode-3.0` (transitive via `unicode-ident`) is FSF-approved as GPL-compatible.
 - `Zlib` (used by `foldhash`) is FSF-approved as GPL-compatible.
 
