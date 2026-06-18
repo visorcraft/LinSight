@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use linsight_core::{Reading, Sample, SensorId};
+use std::hint::black_box;
 
 fn bench_serde(c: &mut Criterion) {
     let sample = Sample {

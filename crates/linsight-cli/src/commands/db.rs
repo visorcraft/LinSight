@@ -93,8 +93,8 @@ pub fn stats(db_path: Option<PathBuf>) -> Result<()> {
     let path = db_path.unwrap_or_else(default_db_path);
     let conn = open_db(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
 
-    let row_count: u64 = conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))?;
-    let distinct_sensors: u64 =
+    let row_count: i64 = conn.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))?;
+    let distinct_sensors: i64 =
         conn.query_row("SELECT COUNT(DISTINCT sensor_id) FROM samples", [], |r| r.get(0))?;
 
     let (min_ts, max_ts): (Option<i64>, Option<i64>) =
@@ -333,9 +333,9 @@ mod tests {
 
         // Verify counts directly via a fresh connection
         let conn2 = Connection::open(f.path()).unwrap();
-        let row_count: u64 =
+        let row_count: i64 =
             conn2.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap();
-        let distinct: u64 = conn2
+        let distinct: i64 = conn2
             .query_row("SELECT COUNT(DISTINCT sensor_id) FROM samples", [], |r| r.get(0))
             .unwrap();
         let min_ts: i64 = conn2.query_row("SELECT MIN(ts) FROM samples", [], |r| r.get(0)).unwrap();
@@ -377,10 +377,10 @@ mod tests {
         prune(Some(f.path().to_path_buf()), "1h", false).unwrap();
 
         let conn2 = Connection::open(f.path()).unwrap();
-        let remaining: u64 =
+        let remaining: i64 =
             conn2.query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0)).unwrap();
         assert_eq!(remaining, 1, "expected only the 30-min-old sample row to survive");
-        let remaining_events: u64 =
+        let remaining_events: i64 =
             conn2.query_row("SELECT COUNT(*) FROM alert_events", [], |r| r.get(0)).unwrap();
         assert_eq!(remaining_events, 1, "expected only the 30-min-old alert event to survive");
     }

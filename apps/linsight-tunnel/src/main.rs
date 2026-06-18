@@ -795,7 +795,8 @@ mod tests {
             dn.push(DnType::CommonName, cn);
             dn
         };
-        let leaf_cert = leaf_params.signed_by(&leaf_key, &ca_cert, &ca_key).unwrap();
+        let ca_issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+        let leaf_cert = leaf_params.signed_by(&leaf_key, &ca_issuer).unwrap();
 
         TestCert {
             ca_der: ca_cert.der().to_vec().into(),

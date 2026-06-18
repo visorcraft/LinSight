@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 VisorCraft LLC
 // SPDX-License-Identifier: GPL-3.0-only
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use linsight_core::{Category, Reading, Sample, SensorId, SensorKind, Unit};
 use linsight_protocol::{ClientMsg, RequestOp, ServerMsg};
+use std::hint::black_box;
 
 fn sample() -> ServerMsg {
     ServerMsg::Sample(Sample {

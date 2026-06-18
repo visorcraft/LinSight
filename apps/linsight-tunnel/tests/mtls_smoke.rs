@@ -60,6 +60,7 @@ fn make_pki() -> Pki {
     };
     ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+    let ca_issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
 
     let issue = |cn: &str, sans: Vec<String>| -> GeneratedCert {
         let key = KeyPair::generate().unwrap();
@@ -69,7 +70,7 @@ fn make_pki() -> Pki {
             dn.push(DnType::CommonName, cn);
             dn
         };
-        let cert = params.signed_by(&key, &ca_cert, &ca_key).unwrap();
+        let cert = params.signed_by(&key, &ca_issuer).unwrap();
         GeneratedCert { cert_pem: cert.pem(), key_pem: key.serialize_pem() }
     };
 
@@ -86,7 +87,7 @@ fn make_pki() -> Pki {
         dn
     };
     rogue_ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    let rogue_ca_cert = rogue_ca_params.self_signed(&rogue_ca_key).unwrap();
+    let rogue_issuer = rcgen::Issuer::from_params(&rogue_ca_params, &rogue_ca_key);
     let rogue_client_key = KeyPair::generate().unwrap();
     let mut rogue_client_params = CertificateParams::new(vec![]).unwrap();
     rogue_client_params.distinguished_name = {
@@ -95,7 +96,7 @@ fn make_pki() -> Pki {
         dn
     };
     let rogue_client_cert =
-        rogue_client_params.signed_by(&rogue_client_key, &rogue_ca_cert, &rogue_ca_key).unwrap();
+        rogue_client_params.signed_by(&rogue_client_key, &rogue_issuer).unwrap();
     let rogue_client = GeneratedCert {
         cert_pem: rogue_client_cert.pem(),
         key_pem: rogue_client_key.serialize_pem(),

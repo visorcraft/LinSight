@@ -12,6 +12,11 @@ ignore = [
 
 [licenses]
 allow = [
+    # AGPL-3.0-only is pulled in by evalexpr (>= v12, the alert
+    # expression engine). GPLv3 §13 explicitly permits combining a
+    # GPL-3.0 work with AGPL-3.0 code; the combined work as conveyed
+    # then carries AGPL §13's network-interaction source-offer clause.
+    "AGPL-3.0-only",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-3-Clause",
