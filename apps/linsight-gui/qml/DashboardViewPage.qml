@@ -66,10 +66,15 @@ Kirigami.Page {
                 else delete r[t.id]
                 if (t.kind) k[t.id] = t.kind
             }
-            page.valueById = v
-            page.sensorMetaById = m
-            page.rowsById = r
-            page.kindById = k
+            // Reassign NEW object references. QML `var` change detection is by
+            // identity, so reassigning the same mutated-in-place object fires
+            // no change signal and the `valueById[...]`/rows/kind bindings never
+            // re-evaluate — dashboard tiles would freeze on their initial "…".
+            // (Same trap as CategoryPage._mergeTiles.) Shallow copy is cheap.
+            page.valueById = Object.assign({}, v)
+            page.sensorMetaById = Object.assign({}, m)
+            page.rowsById = Object.assign({}, r)
+            page.kindById = Object.assign({}, k)
         } catch (e) { /* keep previous state */ }
     }
 

@@ -42,6 +42,26 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.19.0" date="2026-06-20">
+      <description>
+        <p>Fix: GPU and storage tiles frozen on "…" across category pages and
+        dashboards. The Qt pages merged each tick's value delta by mutating a
+        var map/array in place and reassigning the same object reference, which
+        QML's identity-based change detection ignores, so the value bindings
+        never re-evaluated. Fixed on the GPUs and Storage pages, custom
+        dashboards, the dashboard editor, and the Overview sparklines.</p>
+        <p>Fix: static sensor values (GPU VRAM, total RAM, disk capacity) could
+        stay on "…". A static sensor is sampled once then parked, so its value
+        arrives in a single delta a late-loading page could miss; the GUI now
+        re-emits already-sampled static tiles in every delta so any page
+        converges.</p>
+        <p>Fix: static sensors were parked after the first scheduler tick even
+        when their sample was dropped by the bounded sampler at cold start.
+        Parking now happens on a successful sample only, so a dropped or errored
+        static reading retries on the next due tick instead of hanging on "…"
+        forever.</p>
+      </description>
+    </release>
     <release version="1.18.0" date="2026-06-17">
       <description>
         <p>Dependency maintenance: upgrade the workspace crate tree (stabby 72,

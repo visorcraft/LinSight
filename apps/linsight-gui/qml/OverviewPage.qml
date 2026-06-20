@@ -29,7 +29,10 @@ Kirigami.Page {
                 sl[t.id] = t.sparkline
             }
         }
-        page._sparklines = sl
+        // New reference so the change signal fires — QML `var` change detection
+        // is by identity, so reassigning the same mutated object is silently
+        // ignored and sparkline bindings freeze. (Same trap as CategoryPage.)
+        page._sparklines = Object.assign({}, sl)
     }
 
     // Full rebuild on connect/reconnect/catalogue refresh.

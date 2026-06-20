@@ -216,11 +216,14 @@ impl Scheduler {
                 continue;
             }
             due.push(TickItem { id: id.clone() });
-            // Static sensors (total capacity, etc.) never change — park
-            // indefinitely after the first reading instead of re-polling on
-            // the native cadence. On error, tick_commit overwrites this.
-            entry.next_due_at_micros =
-                if entry.is_static { u64::MAX } else { now_micros + entry.period_micros };
+            // Advance past `now` so a second tick landing while the sampler
+            // is still in flight does not double-sample. Static sensors are
+            // NOT parked here: the SamplingPool silently drops jobs that
+            // never started within the tick timeout, and such a dropped item
+            // never reaches `tick_commit` to overwrite an optimistic
+            // `u64::MAX` park — leaving the sensor stuck on "…" forever.
+            // Parking to `u64::MAX` happens in `tick_commit` on success only.
+            entry.next_due_at_micros = now_micros + entry.period_micros;
         }
         due
     }
@@ -244,6 +247,13 @@ impl Scheduler {
                     entry.unsupported_strikes = 0;
                     entry.timeout_strikes = 0;
                     entry.last_sampled_at_micros = Some(now_micros);
+                    // A successful static reading is constant for the
+                    // process lifetime — park indefinitely so we never
+                    // re-poll. Done here (not in tick_plan) so a sampler
+                    // drop / error leaves the sensor due for a retry.
+                    if entry.is_static {
+                        entry.next_due_at_micros = u64::MAX;
+                    }
                     if let Some(history) = &self.history {
                         history.record(&sample);
                     }
@@ -466,6 +476,35 @@ mod tests {
         assert!(tick(&mut sched, 60_000_000).is_empty(), "parked after first sample");
         sched.subscribe(&id, None).unwrap(); // new client
         assert_eq!(tick(&mut sched, 70_000_000).len(), 1, "new subscriber gets one reading");
+    }
+
+    #[test]
+    fn static_sensor_dropped_by_sampler_retries() {
+        // Regression: SamplingPool silently drops planned items that never
+        // started within the tick timeout (unix.rs "Pending jobs never
+        // started this tick"). Such dropped items do NOT reach tick_commit,
+        // so an optimistic u64::MAX park in tick_plan left static sensors
+        // (e.g. GPU VRAM total) stuck on "…" forever. Verify that a dropped
+        // static item remains due and gets sampled on a later tick.
+        let host = PluginHost::with_builtins();
+        let mut sched = Scheduler::new(host);
+        let id = SensorId::new("mem.total_bytes");
+        sched.subscribe(&id, None).unwrap();
+
+        // Simulate a dropped tick: plan runs, but the sampler returns no
+        // result for this sensor (empty commit).
+        let _plan = sched.tick_plan(1_000);
+        let after_drop = sched.tick_commit(vec![], 1_000);
+        assert!(after_drop.is_empty(), "dropped item yields no sample");
+
+        // The sensor must still be due after one period (10 s @ 0.1 Hz),
+        // not parked at u64::MAX.
+        assert!(
+            tick(&mut sched, 11_000_000).len() == 1,
+            "dropped static sensor must be re-sampled on the next due tick"
+        );
+        // And once it succeeds, it parks as normal.
+        assert!(tick(&mut sched, 60_000_000).is_empty(), "parked after successful sample");
     }
 
     #[test]

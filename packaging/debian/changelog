@@ -1,3 +1,18 @@
+linsight (1.19.0-1) unstable; urgency=medium
+
+  * Fix: GPU/storage tiles frozen on "…" on category pages and dashboards. The
+    Qt pages merged per-tick value deltas by mutating a var map/array in place
+    and reassigning the same reference, which QML treats as no change, so value
+    bindings never re-evaluated. Each path now assigns a fresh reference.
+  * Fix: static sensor values (VRAM/RAM/disk capacity) could stay on "…".
+    Statics are sampled once then parked, arriving in a single delta a late
+    page could miss; the GUI now re-emits sampled static tiles every delta.
+  * Fix: static sensors were parked after the first scheduler tick even when
+    their sample was dropped by the bounded sampler at cold start. Park on
+    successful sample only so a dropped or errored static reading retries.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 20 Jun 2026 14:00:00 +0000
+
 linsight (1.18.0-1) unstable; urgency=medium
 
   * Dependency maintenance: upgrade the workspace crate tree (stabby 72,

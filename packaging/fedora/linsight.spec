@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.18.0
+Version:        1.19.0
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,19 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sat Jun 20 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.0-1
+- Fix GPU/storage tiles frozen on "…" on category pages and dashboards: the Qt
+  pages merged per-tick value deltas by mutating a var map/array in place and
+  reassigning the same reference (QML treats it as no change), so value bindings
+  never re-evaluated. Each path now assigns a fresh reference.
+- Fix static sensor values (VRAM/RAM/disk capacity) could stay on "…": statics
+  are sampled once then parked, arriving in one delta a late page could miss;
+  the GUI now re-emits sampled static tiles every delta.
+- Fix GPU VRAM total tiles stuck on "…": static sensors were parked after the
+  first scheduler tick even when their sample was dropped by the bounded sampler
+  at cold start. Park on successful sample only so a dropped/errored static
+  reading retries on the next due tick.
+
 * Wed Jun 17 2026 VisorCraft LLC <support@visorcraft.com> - 1.18.0-1
 - Dependency maintenance: upgrade the workspace crate tree (stabby 72,
   rusqlite 0.40, toml 1.1, evalexpr 13, rcgen 0.14, criterion 0.8, and others).

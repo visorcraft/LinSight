@@ -808,13 +808,24 @@ fn serialize_tiles(order: &[String], tiles: &HashMap<String, TileJson>) -> Strin
 /// Serialize only the tiles that have been marked dirty since the last tick.
 /// Clears `state.dirty` so the next tick starts with an empty set.
 fn take_dirty_tiles_json(state: &mut SampleState) -> String {
-    if state.dirty.is_empty() {
+    // Always re-emit already-sampled STATIC tiles alongside the dirty set.
+    // The daemon samples a static sensor once then parks it, so its value
+    // reaches the client in exactly ONE delta; a page whose binding attaches
+    // a tick later would otherwise never see it and stay stuck on "…" forever
+    // (static never re-samples). The static set is tiny (capacities/totals)
+    // and the delta already fires every tick for dynamic sensors, so this
+    // adds no extra render cadence. `last_ts_micros != 0` skips statics that
+    // haven't produced a real value yet (don't broadcast placeholders).
+    let mut ids: HashSet<String> = std::mem::take(&mut state.dirty);
+    for sid in &state.static_ids {
+        if state.tiles.get(sid).is_some_and(|t| t.last_ts_micros != 0) {
+            ids.insert(sid.clone());
+        }
+    }
+    if ids.is_empty() {
         return "[]".to_string();
     }
-    let dirty_ids: Vec<String> = state.dirty.iter().cloned().collect();
-    state.dirty.clear();
-    let changed: Vec<&TileJson> =
-        dirty_ids.into_iter().filter_map(|id| state.tiles.get(&id)).collect();
+    let changed: Vec<&TileJson> = ids.into_iter().filter_map(|id| state.tiles.get(&id)).collect();
     serde_json::to_string(&changed).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -1283,6 +1294,45 @@ mod tests {
         let (s2, _) =
             format_reading_with_rows(&id, &Reading::Scalar(34_190_917_632.0), &Unit::Bytes, false);
         assert_eq!(s2, "31.84 GiB");
+    }
+
+    #[test]
+    fn take_dirty_reincludes_sampled_static_tiles() {
+        // Regression: the daemon samples a static sensor once then parks it,
+        // so its value reaches the client in exactly ONE delta. A dashboard or
+        // category page whose binding attaches a tick later would otherwise
+        // never see it and stay stuck on "…". take_dirty_tiles_json must
+        // re-emit already-sampled static tiles every tick so a late listener
+        // converges — but must NOT broadcast statics that have no value yet.
+        let mut state =
+            empty_state_with_tiles(&["nvml.gpu0.mem_total_bytes", "cpu.util", "mem.total_bytes"]);
+        state.static_ids.insert("nvml.gpu0.mem_total_bytes".to_string());
+        state.static_ids.insert("mem.total_bytes".to_string());
+
+        // Sample only the GPU static (ts != 0 marks it as really sampled).
+        apply_sample(
+            &mut state,
+            &linsight_core::Sample {
+                sensor: SensorId::new("nvml.gpu0.mem_total_bytes"),
+                ts_micros: 1,
+                reading: Reading::Scalar(34_190_917_632.0),
+            },
+        );
+        // First delta carries it (dirty) and clears dirty.
+        assert!(take_dirty_tiles_json(&mut state).contains("nvml.gpu0.mem_total_bytes"));
+
+        // Next tick: only a dynamic sensor changes.
+        apply_sample(&mut state, &scalar_sample("cpu.util", 12.0));
+        let second = take_dirty_tiles_json(&mut state);
+        assert!(second.contains("cpu.util"), "dirty dynamic tile present");
+        assert!(
+            second.contains("nvml.gpu0.mem_total_bytes"),
+            "sampled static re-emitted though not dirty (late-listener convergence)"
+        );
+        assert!(
+            !second.contains("mem.total_bytes"),
+            "never-sampled static must not be broadcast as a placeholder"
+        );
     }
 
     #[test]

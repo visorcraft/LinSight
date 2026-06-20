@@ -45,7 +45,13 @@ Kirigami.Page {
                 byId[t.id] = arr.length - 1
             }
         }
-        page._allTiles = arr
+        // Reassign a NEW array reference. QML `var` change detection is by
+        // identity, so `page._allTiles = arr` (same ref, mutated in place)
+        // fires no change signal and the `tilesArray` binding never
+        // re-evaluates — category pages would show only the initial "…"
+        // snapshot forever. slice() is a cheap shallow copy (tile objects
+        // are shared) that still avoids re-parsing the full catalogue JSON.
+        page._allTiles = arr.slice()
     }
 
     Component.onCompleted: {

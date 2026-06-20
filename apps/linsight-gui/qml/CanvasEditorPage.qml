@@ -206,9 +206,13 @@ Kirigami.Page {
                 else delete rowsLookup[t.id]
                 if (t.kind) kindLookup[t.id] = t.kind
             }
-            page.valueById = lookup
-            page.rowsById = rowsLookup
-            page.kindById = kindLookup
+            // New references so the change signals fire — QML `var` change
+            // detection is by identity, so reassigning the same mutated-in-place
+            // object is ignored and tile bindings freeze. (Same trap as
+            // CategoryPage._mergeTiles.) Shallow copy is cheap.
+            page.valueById = Object.assign({}, lookup)
+            page.rowsById = Object.assign({}, rowsLookup)
+            page.kindById = Object.assign({}, kindLookup)
             canvasModel.refreshValues()
         } catch (e) { /* keep previous state */ }
     }

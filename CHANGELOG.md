@@ -7,6 +7,31 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.19.0] — 2026-06-20
+
+- **Fix: GPU and storage tiles frozen on "…" across category pages and
+  dashboards.** The Qt pages merged each tick's value delta by mutating a
+  `var` map/array in place and reassigning the *same* object reference; QML's
+  change detection is by identity, so no change signal fired and the value
+  bindings never re-evaluated (regression from the v1.17.0 delta-merge
+  optimization). Fixed on the GPUs and Storage pages, custom dashboards, the
+  dashboard editor, and the Overview sparklines — each now reassigns a fresh
+  reference.
+- **Fix: static sensor values (GPU VRAM / total RAM / disk capacity) could
+  stay on "…".** A static sensor is sampled once and then parked, so its value
+  reaches the GUI in a single delta that a page attaching a tick later would
+  miss — and it is never re-sent. The GUI now re-emits already-sampled static
+  tiles in every delta so any page converges regardless of when it loads.
+- **Fix: GPU VRAM total tiles stuck on "…".** Static sensors (every GPU's
+  `mem_total_bytes`, plus total RAM) were permanently parked after the first
+  scheduler tick regardless of whether their sample actually completed. The
+  `SamplingPool` silently drops planned jobs that never started within the tick
+  timeout — at cold start, when all sensors are due at once and the bounded
+  sampler is busy with slow NVML / D-Bus / statvfs calls, the static
+  VRAM-total jobs were dropped and never re-sampled. Parking now happens in
+  `tick_commit` on a successful sample only, so a dropped or errored static
+  reading retries on the next due tick instead of hanging on "…" forever.
+
 ## [1.18.0] — 2026-06-17
 
 - **Dependency maintenance.** Upgraded the workspace crate tree to the latest
