@@ -72,6 +72,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sat Jun 20 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.1-1
+- Packaging release: rebuild the AppImage carrying the 1.19.0 GUI tile-rendering
+  fixes; verified rendering under the AppImage's bundled Qt 6.4. No source
+  changes since 1.19.0.
+
 * Sat Jun 20 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.0-1
 - Fix GPU/storage tiles frozen on "…" on category pages and dashboards: the Qt
   pages merged per-tick value deltas by mutating a var map/array in place and

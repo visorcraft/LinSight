@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.19.1" date="2026-06-20">
+      <description>
+        <p>Packaging release: rebuilds the AppImage so the GPU, storage, and
+        dashboard tile-rendering fixes from 1.19.0 are carried in it, verified
+        to render correctly under the AppImage's bundled Qt 6.4. No source
+        changes since 1.19.0.</p>
+      </description>
+    </release>
     <release version="1.19.0" date="2026-06-20">
       <description>
         <p>Fix: GPU and storage tiles frozen on "…" across category pages and

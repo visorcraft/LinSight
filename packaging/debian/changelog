@@ -1,3 +1,11 @@
+linsight (1.19.1-1) unstable; urgency=medium
+
+  * Packaging: rebuild the AppImage so the 1.19.0 GUI tile-rendering fixes ship
+    in it; verified rendering under the AppImage's bundled Qt 6.4. No source
+    changes since 1.19.0.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 20 Jun 2026 17:30:00 +0000
+
 linsight (1.19.0-1) unstable; urgency=medium
 
   * Fix: GPU/storage tiles frozen on "…" on category pages and dashboards. The

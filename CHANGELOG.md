@@ -7,6 +7,14 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.19.1] — 2026-06-20
+
+- **Packaging: ship the 1.19.0 GUI fixes in a rebuilt AppImage.** Rebuilt the
+  LinSight AppImage so the GPU / storage / dashboard tile-rendering fixes from
+  1.19.0 are carried in it, and verified they render correctly under the
+  AppImage's bundled Qt 6.4 (stricter than the dev Qt). No source changes since
+  1.19.0.
+
 ## [1.19.0] — 2026-06-20
 
 - **Fix: GPU and storage tiles frozen on "…" across category pages and
