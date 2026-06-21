@@ -122,6 +122,11 @@ GPL-compatible option we take:
   carries AGPL §13's network-interaction source-offer requirement.
 - `Unicode-3.0` (transitive via `unicode-ident`) is FSF-approved as GPL-compatible.
 - `Zlib` (used by `foldhash`) is FSF-approved as GPL-compatible.
+- `0BSD` (transitive via `adler2`) is a public-domain-equivalent permissive
+  license — strictly laxer than ISC — and combines freely.
+- `CDLA-Permissive-2.0` (the bundled Mozilla CA-root data in `webpki-roots`)
+  is a permissive data license with no copyleft, imposing no conditions on
+  combination or conveyance.
 
 The `deny.toml` allowlist also permits `Unlicense` for any future
 transitive deps; no current crate uses it. New licenses outside the
