@@ -7,6 +7,17 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.19.2] — 2026-06-21
+
+- **Fix: the GUI auto-reconnects to `linsightd` instead of getting stuck on
+  "Disconnected".** Two compounding bugs caused frequent, permanent
+  disconnects: the daemon evicts any client idle for 30 minutes, but the GUI
+  goes silent after subscribing (it only reads samples), so a live dashboard
+  was dropped as "stale" — and nothing ever reconnected. The GUI now sends a
+  lightweight keepalive so it is never falsely evicted, and a connection
+  supervisor automatically reconnects (respawning the local daemon if needed)
+  whenever the connection drops.
+
 ## [1.19.1] — 2026-06-20
 
 - **Packaging: ship the 1.19.0 GUI fixes in a rebuilt AppImage.** Rebuilt the

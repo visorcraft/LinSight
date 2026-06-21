@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.19.0
+Version:        1.19.2
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sun Jun 21 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.2-1
+- Fix: the GUI auto-reconnects to linsightd instead of getting stuck on
+  "Disconnected". The GUI now sends a keepalive so the daemon's 30-minute idle
+  timeout no longer evicts a live-but-quiet dashboard, and a supervisor
+  auto-reconnects (respawning the local daemon if needed) on any drop.
+
 * Sat Jun 20 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.1-1
 - Packaging release: rebuild the AppImage carrying the 1.19.0 GUI tile-rendering
   fixes; verified rendering under the AppImage's bundled Qt 6.4. No source

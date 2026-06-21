@@ -42,6 +42,15 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.19.2" date="2026-06-21">
+      <description>
+        <p>Fix: the GUI auto-reconnects to the daemon instead of getting stuck
+        on "Disconnected". A keepalive stops the daemon's 30-minute idle timeout
+        from evicting a live-but-quiet dashboard, and a connection supervisor
+        automatically reconnects (respawning the local daemon if needed)
+        whenever the connection drops.</p>
+      </description>
+    </release>
     <release version="1.19.1" date="2026-06-20">
       <description>
         <p>Packaging release: rebuilds the AppImage so the GPU, storage, and
