@@ -21,7 +21,7 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 use tracing_subscriber::EnvFilter;
 
 use crate::client::Client;
-use crate::workspace::{Workspace, default_socket_path};
+use crate::workspace::{Workspace, default_socket_path, spawn_connection_supervisor};
 
 /// Default screenshot warm-up delay. Long enough for QML scene + sensor
 /// catalogue to settle on a cold start; short enough not to feel like
@@ -110,7 +110,9 @@ fn main() -> anyhow::Result<()> {
             (Client::connect_or_spawn(&socket)?, "local".to_string())
         }
     };
-    qobjects::install_workspace(Arc::new(Workspace::new(client, &initial_target)?));
+    let workspace = Arc::new(Workspace::new(client, &initial_target)?);
+    spawn_connection_supervisor(Arc::clone(&workspace));
+    qobjects::install_workspace(workspace);
 
     let mut app = QGuiApplication::new();
     if app.is_null() {

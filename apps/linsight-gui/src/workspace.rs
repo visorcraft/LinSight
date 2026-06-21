@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use linsight_core::{Sample, SensorId};
 use linsight_protocol::SensorInfo;
@@ -26,6 +26,15 @@ type CatalogueBridge = (u64, Arc<Vec<SensorInfo>>);
 /// client (its own `OUTBOUND_QUEUE_CAP` already handles this gracefully).
 /// The cap holds roughly two pump ticks so normal jitter never blocks.
 const BRIDGE_CHANNEL_CAP: usize = 512;
+
+/// How often the connection supervisor wakes to check liveness and pace
+/// keepalives.
+const SUPERVISOR_TICK: Duration = Duration::from_secs(1);
+/// Keepalive cadence. Must stay well under the daemon's
+/// `CLIENT_IDLE_READ_TIMEOUT` (1800s) or a live-but-quiet GUI gets evicted.
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(600);
+/// Upper bound on the reconnect backoff after the daemon goes away.
+const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(15);
 
 /// Resolve `XDG_RUNTIME_DIR/linsight.sock` per the daemon's default.
 pub fn default_socket_path() -> anyhow::Result<PathBuf> {
@@ -219,6 +228,12 @@ impl Workspace {
         Ok(applied)
     }
 
+    /// Send a keepalive on the current client so the daemon's idle read
+    /// timeout doesn't evict a live-but-quiet GUI. See [`Client::keepalive`].
+    pub fn send_keepalive(&self) -> anyhow::Result<()> {
+        self.client().keepalive()
+    }
+
     /// Reconnect to a different daemon. `target` is either `"local"` for the
     /// default Unix socket or `"ssh://[user@]host[:port]"`. On failure the
     /// existing client is kept and an error string is returned.
@@ -336,6 +351,52 @@ fn spawn_catalogue_forwarder(
         while let Ok(infos) = client_rx.recv() {
             if bridge_tx.send((my_generation, infos)).is_err() {
                 break;
+            }
+        }
+    });
+}
+
+/// Background watchdog that keeps the GUI's daemon connection healthy.
+///
+/// Two jobs in one thread:
+/// 1. **Keepalive** — periodically pokes the daemon so it never evicts a
+///    live-but-quiet GUI at its 1800s idle read timeout (the GUI otherwise
+///    goes silent after subscribing and only reads samples).
+/// 2. **Auto-reconnect** — when the connection drops for any reason (idle
+///    eviction, daemon crash, daemon restart on upgrade), it re-dials the
+///    current target with capped backoff until it's back. `reconnect`
+///    respawns the local daemon when nothing is listening, so a dropped
+///    connection is no longer a dead end the user must restart out of.
+pub fn spawn_connection_supervisor(ws: Arc<Workspace>) {
+    let alive = ws.connection_alive();
+    thread::spawn(move || {
+        let mut last_keepalive = Instant::now();
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            thread::sleep(SUPERVISOR_TICK);
+            if alive.load(Ordering::SeqCst) {
+                backoff = Duration::from_secs(1);
+                if last_keepalive.elapsed() >= KEEPALIVE_INTERVAL {
+                    // A failed keepalive just means the connection is already
+                    // dying; the alive flag will flip and the reconnect branch
+                    // takes over on a later tick.
+                    let _ = ws.send_keepalive();
+                    last_keepalive = Instant::now();
+                }
+            } else {
+                let target = ws.active_target();
+                match ws.reconnect(&target) {
+                    Ok(()) => {
+                        tracing::info!(%target, "auto-reconnected to daemon");
+                        last_keepalive = Instant::now();
+                        backoff = Duration::from_secs(1);
+                    }
+                    Err(e) => {
+                        tracing::warn!(%target, error = %e, "auto-reconnect failed; retrying");
+                        thread::sleep(backoff);
+                        backoff = (backoff * 2).min(RECONNECT_BACKOFF_MAX);
+                    }
+                }
             }
         }
     });
@@ -594,6 +655,22 @@ mod tests {
         // explicitly subscribing again.
         let replayed = recv_sample(&rx, "cpu.util");
         assert!(matches!(replayed.reading, Reading::Scalar(42.0)));
+    }
+
+    #[test]
+    fn keepalive_reaches_daemon() {
+        // The GUI is silent toward the daemon after subscribing, so without a
+        // keepalive the daemon's idle read timeout evicts a live connection.
+        // The fake daemon acks any Subscribe (incl. the empty keepalive one)
+        // with a catalogue broadcast, which proves the frame reached it.
+        let (workspace, _path, _disconnected) = make_workspace("cpu.util");
+        let catalogue_rx = workspace.take_catalogue_rx().expect("take catalogue rx");
+
+        workspace.send_keepalive().expect("send keepalive");
+
+        let (_gen, infos) =
+            catalogue_rx.recv_timeout(Duration::from_secs(3)).expect("daemon acked keepalive");
+        assert!(infos.iter().any(|i| i.id.as_str() == "cpu.util"));
     }
 
     #[test]

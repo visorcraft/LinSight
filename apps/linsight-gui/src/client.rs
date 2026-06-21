@@ -293,6 +293,22 @@ impl Client {
         Ok(())
     }
 
+    /// Send a no-op frame to reset the daemon's idle read deadline. After
+    /// subscribing, the GUI only *reads* samples and never writes, so the
+    /// daemon's `CLIENT_IDLE_READ_TIMEOUT` (1800s) would eventually evict a
+    /// perfectly-live connection as "stale". An empty `Subscribe` is a no-op
+    /// on the daemon (it iterates zero sensors and writes nothing back) but
+    /// still counts as client activity, resetting that deadline.
+    // ponytail: reuse the existing Subscribe frame as a keepalive rather than
+    // adding a Ping wire type + PROTOCOL_VERSION bump for one idle counter.
+    pub fn keepalive(&self) -> Result<()> {
+        self.writer
+            .lock()
+            .unwrap()
+            .write_client(&ClientMsg::Subscribe { sensors: Vec::new(), rate_hz: None })?;
+        Ok(())
+    }
+
     /// Take ownership of the sample receiver. Called once by the
     /// QObject that owns the live UI.
     pub fn take_sample_rx(&self) -> Option<Receiver<Sample>> {
