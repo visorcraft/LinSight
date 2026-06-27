@@ -1,3 +1,11 @@
+linsight (1.19.3-1) unstable; urgency=medium
+
+  * Fix: prevent unbounded GUI memory growth when QML falls behind live sample
+    updates. The sample pump now coalesces pending Qt-thread updates so only
+    the latest rendered frame is retained.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 27 Jun 2026 12:00:00 +0000
+
 linsight (1.19.2-1) unstable; urgency=medium
 
   * Fix: the GUI auto-reconnects to linsightd instead of getting stuck on

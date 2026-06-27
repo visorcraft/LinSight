@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.19.2
+Version:        1.19.3
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sat Jun 27 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.3-1
+- Fix unbounded GUI memory growth when QML falls behind live sample updates.
+  The sample pump now coalesces pending Qt-thread updates so only the latest
+  rendered frame is retained.
+
 * Sun Jun 21 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.2-1
 - Fix: the GUI auto-reconnects to linsightd instead of getting stuck on
   "Disconnected". The GUI now sends a keepalive so the daemon's 30-minute idle

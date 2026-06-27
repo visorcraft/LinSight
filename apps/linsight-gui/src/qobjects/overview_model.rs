@@ -12,13 +12,13 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::pin::Pin;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use cxx_qt::{CxxQtType, Threading};
+use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use linsight_core::{Reading, SensorId, Unit};
 use linsight_protocol::SensorInfo;
@@ -169,6 +169,100 @@ struct SampleState {
     /// Tile ids updated during the current pump tick. Cleared after the
     /// delta JSON is serialized so the next tick starts empty.
     dirty: HashSet<String>,
+}
+
+#[derive(Debug)]
+struct SampleUiUpdate {
+    tiles_changed_json: String,
+    network_json: String,
+    cpu_text: Option<String>,
+    mem_text: Option<String>,
+    cpu_temp_text: Option<String>,
+    cpu_freq_text: Option<String>,
+    processes_json: String,
+}
+
+#[derive(Debug, Default)]
+struct CoalescedSampleUiQueue {
+    // `qt_thread.queue` is outside the bounded sample channels. If QML
+    // falls behind, keep only the latest rendered frame instead of
+    // accumulating closures that each own JSON strings.
+    pending: Mutex<Option<SampleUiUpdate>>,
+    queued: AtomicBool,
+}
+
+impl CoalescedSampleUiQueue {
+    fn store(&self, update: SampleUiUpdate) -> bool {
+        *self.pending.lock().expect("sample ui queue poisoned") = Some(update);
+        !self.queued.swap(true, Ordering::AcqRel)
+    }
+
+    fn take_pending(&self) -> Option<SampleUiUpdate> {
+        self.pending.lock().expect("sample ui queue poisoned").take()
+    }
+
+    fn finish_and_should_requeue(&self) -> bool {
+        self.queued.store(false, Ordering::Release);
+        if self.pending.lock().expect("sample ui queue poisoned").is_none() {
+            return false;
+        }
+        !self.queued.swap(true, Ordering::AcqRel)
+    }
+
+    fn clear_after_queue_error(&self) {
+        let _ = self.take_pending();
+        self.queued.store(false, Ordering::Release);
+    }
+}
+
+fn queue_sample_ui_update(
+    qt_thread: &CxxQtThread<ffi::OverviewModel>,
+    queue: &Arc<CoalescedSampleUiQueue>,
+    update: SampleUiUpdate,
+) {
+    if !queue.store(update) {
+        return;
+    }
+    queue_sample_ui_drain(qt_thread.clone(), Arc::clone(queue));
+}
+
+fn queue_sample_ui_drain(
+    qt_thread: CxxQtThread<ffi::OverviewModel>,
+    queue: Arc<CoalescedSampleUiQueue>,
+) {
+    let retry_thread = qt_thread.clone();
+    let queue_on_error = Arc::clone(&queue);
+    if qt_thread
+        .queue(move |mut pin| {
+            if let Some(update) = queue.take_pending() {
+                apply_sample_ui_update(pin.as_mut(), update);
+            }
+            if queue.finish_and_should_requeue() {
+                queue_sample_ui_drain(retry_thread, Arc::clone(&queue));
+            }
+        })
+        .is_err()
+    {
+        queue_on_error.clear_after_queue_error();
+    }
+}
+
+fn apply_sample_ui_update(mut pin: Pin<&mut ffi::OverviewModel>, update: SampleUiUpdate) {
+    pin.as_mut().set_tiles_changed_json(QString::from(update.tiles_changed_json.as_str()));
+    pin.as_mut().set_network_json(QString::from(update.network_json.as_str()));
+    if let Some(s) = update.cpu_text {
+        pin.as_mut().set_cpu_text(QString::from(s.as_str()));
+    }
+    if let Some(s) = update.mem_text {
+        pin.as_mut().set_mem_text(QString::from(s.as_str()));
+    }
+    if let Some(s) = update.cpu_temp_text {
+        pin.as_mut().set_cpu_temp_text(QString::from(s.as_str()));
+    }
+    if let Some(s) = update.cpu_freq_text {
+        pin.as_mut().set_cpu_freq_text(QString::from(s.as_str()));
+    }
+    pin.as_mut().set_processes_json(QString::from(update.processes_json.as_str()));
 }
 
 /// Maximum number of points retained in a tile's rolling sparkline
@@ -413,6 +507,7 @@ impl ffi::OverviewModel {
         // state to QML.
         {
             let state = Arc::clone(&state);
+            let sample_ui_queue = Arc::new(CoalescedSampleUiQueue::default());
             thread::spawn(move || {
                 let mut last_alive = true;
                 let mut current_g = connection_generation.load(Ordering::Relaxed);
@@ -492,33 +587,19 @@ impl ffi::OverviewModel {
                                     .unwrap_or_else(|| "[]".to_string());
                                 (delta_json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json)
                             };
-                            let qdelta = QString::from(delta_json.as_str());
-                            let qnetwork = QString::from(network_json.as_str());
-                            let qcpu = cpu.map(|s| QString::from(s.as_str()));
-                            let qmem = mem.map(|s| QString::from(s.as_str()));
-                            let qctemp = cpu_temp.map(|s| QString::from(s.as_str()));
-                            let qcfreq = cpu_freq.map(|s| QString::from(s.as_str()));
-                            let qproc = QString::from(proc_json.as_str());
-                            // queue() returns Err only when the Qt thread has shut
-                            // down (i.e. the app is exiting). Silently discarding is
-                            // correct in that case.
-                            let _ = qt_thread.queue(move |mut pin| {
-                                pin.as_mut().set_tiles_changed_json(qdelta);
-                                pin.as_mut().set_network_json(qnetwork);
-                                if let Some(q) = qcpu {
-                                    pin.as_mut().set_cpu_text(q);
-                                }
-                                if let Some(q) = qmem {
-                                    pin.as_mut().set_mem_text(q);
-                                }
-                                if let Some(q) = qctemp {
-                                    pin.as_mut().set_cpu_temp_text(q);
-                                }
-                                if let Some(q) = qcfreq {
-                                    pin.as_mut().set_cpu_freq_text(q);
-                                }
-                                pin.as_mut().set_processes_json(qproc);
-                            });
+                            queue_sample_ui_update(
+                                &qt_thread,
+                                &sample_ui_queue,
+                                SampleUiUpdate {
+                                    tiles_changed_json: delta_json,
+                                    network_json,
+                                    cpu_text: cpu,
+                                    mem_text: mem,
+                                    cpu_temp_text: cpu_temp,
+                                    cpu_freq_text: cpu_freq,
+                                    processes_json: proc_json,
+                                },
+                            );
                         }
                         Err(RecvTimeoutError::Timeout) => {
                             let alive_now = connection_alive.load(Ordering::Relaxed);
@@ -1177,6 +1258,18 @@ mod tests {
         }
     }
 
+    fn sample_ui_update(value: &str) -> SampleUiUpdate {
+        SampleUiUpdate {
+            tiles_changed_json: value.to_owned(),
+            network_json: "[]".to_owned(),
+            cpu_text: None,
+            mem_text: None,
+            cpu_temp_text: None,
+            cpu_freq_text: None,
+            processes_json: "[]".to_owned(),
+        }
+    }
+
     fn net_array(state: &mut SampleState) -> Vec<serde_json::Value> {
         let json = compute_network_rates(state);
         serde_json::from_str::<serde_json::Value>(&json).unwrap().as_array().unwrap().clone()
@@ -1537,6 +1630,52 @@ mod tests {
         let count = drain_into_state(&rx, &mut state, first, &mut current_g);
         assert_eq!(count, 2);
         assert_eq!(state.tiles["s.a"].value, "100");
+    }
+
+    #[test]
+    fn sample_ui_queue_coalesces_to_latest_pending_update() {
+        let queue = CoalescedSampleUiQueue::default();
+
+        assert!(queue.store(sample_ui_update("first")));
+        assert!(!queue.store(sample_ui_update("second")));
+        assert!(!queue.store(sample_ui_update("third")));
+
+        let pending = queue.take_pending().expect("latest update retained");
+        assert_eq!(pending.tiles_changed_json, "third");
+        assert!(
+            !queue.finish_and_should_requeue(),
+            "no requeue needed when the queued closure drained the latest update"
+        );
+    }
+
+    #[test]
+    fn sample_ui_queue_requests_requeue_when_update_arrives_during_apply() {
+        let queue = CoalescedSampleUiQueue::default();
+
+        assert!(queue.store(sample_ui_update("first")));
+        let pending = queue.take_pending().expect("first update queued");
+        assert_eq!(pending.tiles_changed_json, "first");
+
+        assert!(!queue.store(sample_ui_update("second")));
+        assert!(
+            queue.finish_and_should_requeue(),
+            "an update stored while a queued closure was running needs another queued closure"
+        );
+        assert_eq!(
+            queue.take_pending().expect("second update retained for follow-up").tiles_changed_json,
+            "second"
+        );
+    }
+
+    #[test]
+    fn sample_ui_queue_clear_after_queue_error_drops_pending_update() {
+        let queue = CoalescedSampleUiQueue::default();
+
+        assert!(queue.store(sample_ui_update("stale")));
+        queue.clear_after_queue_error();
+
+        assert!(queue.take_pending().is_none());
+        assert!(queue.store(sample_ui_update("fresh")));
     }
 
     #[test]

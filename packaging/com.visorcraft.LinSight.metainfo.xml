@@ -42,6 +42,14 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.19.3" date="2026-06-27">
+      <description>
+        <p>Fix: GUI memory could grow without bound when QML fell behind live
+        samples. Live sample updates now coalesce before crossing into Qt, so
+        a slow render path keeps only the latest pending frame instead of
+        accumulating queued JSON update closures.</p>
+      </description>
+    </release>
     <release version="1.19.2" date="2026-06-21">
       <description>
         <p>Fix: the GUI auto-reconnects to the daemon instead of getting stuck

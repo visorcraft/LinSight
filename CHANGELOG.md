@@ -7,6 +7,15 @@ All notable changes to LinSight. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [SemVer](https://semver.org/).
 
+## [1.19.3] — 2026-06-27
+
+- **Fix: GUI memory could grow without bound when QML fell behind live
+  samples.** The Rust sample channels were bounded, but each pump tick still
+  queued a Qt-thread closure holding JSON strings. A slow render path could
+  therefore move the backlog into Qt's event queue and balloon the GUI's RSS.
+  Live sample updates now coalesce before crossing into Qt: only one UI update
+  closure can be queued, and newer frames replace the pending frame.
+
 ## [1.19.2] — 2026-06-21
 
 - **Fix: the GUI auto-reconnects to `linsightd` instead of getting stuck on
