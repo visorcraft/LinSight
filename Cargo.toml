@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[workspace]
+members = [
+    "apps/linsight-gui",
+    "apps/linsight-tunnel",
+    "apps/linsightd",
+    "crates/linsight-cli",
+    "crates/linsight-core",
+    "crates/linsight-protocol",
+    "crates/linsight-plugin-sdk",
+    "crates/linsight-sensors/cpu",
+    "crates/linsight-sensors/mem",
+    "crates/linsight-sensors/net",
+    "crates/linsight-sensors/nvme",
+    "crates/linsight-sensors/nvml",
+    "crates/linsight-sensors/xe",
+    "crates/linsight-sensors/system",
+    "crates/linsight-sensors/amdgpu",
+    "crates/linsight-sensors/disk",
+    "crates/linsight-sensors/hwmon",
+    "crates/linsight-sensors/fs",
+    "crates/linsight-sensors/proc",
+    "crates/linsight-sensors/zram",
+    "crates/linsight-sensors/i915",
+    "crates/linsight-sensors/systemd",
+    "crates/linsight-sensors/sock",
+    "crates/linsight-sensors/containers",
+    "crates/linsight-sensors/smart",
+    "examples/echo-plugin",
+    "examples/init-count-plugin",
+    "examples/legacy-init-count-plugin",
+]
+resolver = "3"
+
+[workspace.package]
+version = "1.19.5"
+edition = "2024"
+license = "GPL-3.0-only"
+repository = "https://github.com/visorcraft/linsight"
+authors = ["VisorCraft LLC"]
+rust-version = "1.95"
+
+[workspace.dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive"] }
+postcard = { version = "1.1", features = ["alloc"] }
+serde = { version = "1.0", features = ["derive"] }
+evalexpr = "13"
+libloading = "0.9"
+notify-rust = "4"
+rusqlite = { version = "0.40", features = ["bundled"] }
+toml = "1.1"
+serde_json = "1.0"
+signal-hook = "0.4"
+stabby = { version = "72", features = ["libloading"] }
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+ureq = { version = "3", features = ["rustls"] }
+tempfile = "3.27"
+assert_cmd = "2.2"
+escargot = "0.5"
+predicates = "3.1"
+proptest = "1.11"
+criterion = { version = "0.8", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+libc = "0.2"
+zbus = { version = "5.16", features = ["blocking"] }
+
+# Tunnel + future async surfaces. Versioned here so the workspace can
+# share one tokio / rustls revision across crates as the async surface
+# expands (today only `linsight-tunnel` uses them).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rustls-pki-types = "1"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+# Unwind (not abort) so the daemon's panic isolation actually works in
+# release: `catch_unwind` is a no-op under `panic = "abort"`, which would
+# silently defeat the plugin init/sample guards (host_init/host_sample) and
+# the alert-expression guards. With unwind, a panicking plugin (whose trait
+# methods are `extern "C-unwind"`) unwinds across the FFI boundary and is
+# caught by the host instead of taking the daemon down. The GUI's cxx-qt
+# boundary and the tunnel's tokio tasks already guard panics at their own
+# edges, so this is safe for every workspace binary.
+panic = "unwind"
+strip = "symbols"
+opt-level = 3
+
+# TEMP: verifying upstream fix for a cxx-qt issue (rcc "potential duplicate
+# alias detected: 'qmldir'" warning during build). Points at the published
+# visorcraft/cxx-qt fork (pinned by rev); remove this patch table once the
+# fix is merged into a published crate version.
+[patch.crates-io]
+qt-build-utils = { git = "https://github.com/visorcraft/cxx-qt.git", rev = "33bdd8209cf23a3b482e8d5cd8869eb9909c2f12" }

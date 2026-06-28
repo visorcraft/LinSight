@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Lean per-push gate: a single job mirroring `just ci`
+# (fmt-check -> clippy -> test). Doc-only changes are path-ignored.
+# No `${{ github.event.* }}` interpolation in run blocks (injection-safe).
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'packaging/screenshots/**'
+  pull_request:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'packaging/screenshots/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  QMAKE: /usr/bin/qmake6
+  QT_VERSION_MAJOR: "6"
+
+jobs:
+  test:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6 + C++ toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-tools-dev \
+            libgl1-mesa-dev \
+            clang
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  gui-smoke:
+    name: headless GUI smoke
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6 + xvfb + software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qt6-tools-dev \
+            libgl1-mesa-dev \
+            xvfb \
+            clang
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+      - name: GUI smoke
+        run: ./scripts/gui_smoke.sh

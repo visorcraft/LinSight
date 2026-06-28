@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# appimage-builder recipe. Driven by `just appimage` /
+# `scripts/build_appimage.sh`, which injects the workspace version and
+# runs appimage-builder (the script: section below builds + stages AppDir).
+
+version: 1
+script:
+  - cargo build --workspace --release --locked
+  - install -Dm755 target/release/linsight     AppDir/usr/bin/linsight
+  - install -Dm755 target/release/linsightd    AppDir/usr/bin/linsightd
+  - install -Dm755 target/release/linsight-cli AppDir/usr/bin/linsight-cli
+  - install -Dm644 packaging/com.visorcraft.LinSight.desktop
+      AppDir/usr/share/applications/com.visorcraft.LinSight.desktop
+  - install -Dm644 packaging/com.visorcraft.LinSight.metainfo.xml
+      AppDir/usr/share/metainfo/com.visorcraft.LinSight.metainfo.xml
+  - install -Dm644 packaging/icons/scalable/apps/com.visorcraft.LinSight.svg
+      AppDir/usr/share/icons/hicolor/scalable/apps/com.visorcraft.LinSight.svg
+  - install -Dm644 packaging/icons/256x256/apps/com.visorcraft.LinSight.png
+      AppDir/usr/share/icons/hicolor/256x256/apps/com.visorcraft.LinSight.png
+
+AppDir:
+  path: ./AppDir
+  app_info:
+    id: com.visorcraft.LinSight
+    name: LinSight
+    icon: com.visorcraft.LinSight
+    version: 1.19.5
+    exec: usr/bin/linsight
+    exec_args: $@
+  apt:
+    arch:
+      - amd64
+    sources:
+      - sourceline: deb [arch=amd64 signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://deb.debian.org/debian trixie main
+    include:
+      - libqt6core6
+      - libqt6quick6
+      - libqt6qml6
+      - qml6-module-qtquick-controls
+      - qml6-module-qtquick-dialogs
+      - qml6-module-qtquick-layouts
+      - qml6-module-org-kde-kirigami
+      - libqt6svg6
+      - qt6-svg-plugins
+      - breeze-icon-theme
+      - libsqlite3-0
+    exclude: []
+  runtime:
+    env:
+      QT_QPA_PLATFORM: wayland;xcb
+      LINSIGHT_LOG: info
+
+AppImage:
+  arch: x86_64

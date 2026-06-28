@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+# Maintainer: VisorCraft <support@visorcraft.com>
+pkgname=linsight
+pkgver=1.17.0
+pkgrel=1
+pkgdesc='Fast, beautiful Linux system-monitoring dashboard with multi-GPU support'
+arch=('x86_64')
+url='https://github.com/visorcraft/linsight'
+license=('GPL-3.0-only')
+depends=('qt6-base' 'qt6-declarative' 'kirigami' 'sqlite' 'nvidia-utils')
+makedepends=('rust' 'cargo' 'qt6-tools' 'clang')
+optdepends=(
+  'cuda: NVML diagnostics via nvidia-smi'
+)
+# Disable makepkg's LTO. It injects -flto into the C/asm build of the `ring`
+# crate, whose hand-written assembly objects then fail the final link
+# (undefined ring_core_* symbols). Cargo's own Rust-side lto="fat" in
+# Cargo.toml's [profile.release] is unaffected by this and still applies.
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/visorcraft/linsight/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --workspace --release --locked
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  cargo test --workspace --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/linsight     "$pkgdir/usr/bin/linsight"
+  install -Dm755 target/release/linsightd    "$pkgdir/usr/bin/linsightd"
+  install -Dm755 target/release/linsight-cli "$pkgdir/usr/bin/linsight-cli"
+
+  install -Dm644 packaging/com.visorcraft.LinSight.desktop \
+    "$pkgdir/usr/share/applications/com.visorcraft.LinSight.desktop"
+  install -Dm644 packaging/com.visorcraft.LinSight.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/com.visorcraft.LinSight.metainfo.xml"
+  install -Dm644 packaging/systemd/linsight.service \
+    "$pkgdir/usr/lib/systemd/user/linsight.service"
+
+  install -Dm644 packaging/icons/scalable/apps/com.visorcraft.LinSight.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.visorcraft.LinSight.svg"
+  for size in 16x16 24x24 32x32 48x48 64x64 96x96 128x128 192x192 256x256 512x512; do
+    install -Dm644 "packaging/icons/$size/apps/com.visorcraft.LinSight.png" \
+      "$pkgdir/usr/share/icons/hicolor/$size/apps/com.visorcraft.LinSight.png"
+  done
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+
+  install -d "$pkgdir/usr/lib/linsight/plugins"
+}

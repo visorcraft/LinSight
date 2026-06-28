@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "linsight-example-init-count-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Dynamic test plugin that records init calls and exports metadata."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+linsight-plugin-sdk = { path = "../../crates/linsight-plugin-sdk", version = "1.4.0" }
+stabby = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["stabby"]

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 VisorCraft LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="512" viewBox="0 0 1024 512" role="img" aria-label="LinSight — Linux system-monitoring dashboard">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1024" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#141d31"/>
+      <stop offset="0.55" stop-color="#0c1322"/>
+      <stop offset="1" stop-color="#080c15"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="25%" cy="50%" r="58%">
+      <stop offset="0" stop-color="#1d2b46" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#1d2b46" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#25d18b"/>
+      <stop offset="0.42" stop-color="#52cfff"/>
+      <stop offset="0.78" stop-color="#7a63ff"/>
+      <stop offset="1" stop-color="#ffcf5f"/>
+    </linearGradient>
+
+    <linearGradient id="top" x1="110" y1="118" x2="410" y2="338" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f2fffb"/>
+      <stop offset="0.42" stop-color="#9fe9ff"/>
+      <stop offset="1" stop-color="#c5c8ff"/>
+    </linearGradient>
+    <linearGradient id="left" x1="110" y1="190" x2="258" y2="438" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#31dfbf"/>
+      <stop offset="1" stop-color="#12856f"/>
+    </linearGradient>
+    <linearGradient id="right" x1="260" y1="180" x2="418" y2="438" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4dbdff"/>
+      <stop offset="1" stop-color="#5443d7"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="156" y1="112" x2="384" y2="382" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#25d18b"/>
+      <stop offset="0.42" stop-color="#52cfff"/>
+      <stop offset="0.72" stop-color="#7a63ff"/>
+      <stop offset="1" stop-color="#ffcf5f"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="19" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="512" fill="url(#bgGrad)"/>
+  <rect width="1024" height="512" fill="url(#bgGlow)"/>
+
+  <g transform="translate(56 56) scale(0.781)">
+    <rect x="56" y="56" width="400" height="400" rx="88" fill="#f6fbff" filter="url(#shadow)" opacity="0.82"/>
+    <g filter="url(#shadow)">
+      <path d="M112 142l144-72 144 72-144 72Z" fill="url(#top)"/>
+      <path d="M112 142l144 72v54l-144-70Z" fill="#56ddca"/>
+      <path d="M400 142l-144 72v54l144-70Z" fill="#6471f1"/>
+      <path d="M112 230l144-72 144 72-144 72Z" fill="url(#top)" opacity="0.94"/>
+      <path d="M112 230l144 72v58l-144-70Z" fill="#2fd2a6"/>
+      <path d="M400 230l-144 72v58l144-70Z" fill="#45a8ff"/>
+      <path d="M112 318l144-72 144 72-144 72Z" fill="url(#top)" opacity="0.86"/>
+      <path d="M112 318l144 72v48l-144-68Z" fill="#1a947d"/>
+      <path d="M400 318l-144 72v48l144-68Z" fill="#5a49db"/>
+    </g>
+    <rect x="304" y="150" width="82" height="180" rx="32" fill="#fff4e8" opacity="0.72"/>
+    <path d="M346 174v104" stroke="#ffcf5f" stroke-width="26" stroke-linecap="round"/>
+    <circle cx="346" cy="318" r="34" fill="#ff7a86"/>
+    <circle cx="346" cy="318" r="12" fill="#fff7df"/>
+    <path d="M172 98V330c22 40 54 40 76 0s54-40 76 0 56 40 80 0" fill="none" stroke="#d9e4ef" stroke-width="39" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M172 98V330c22 40 54 40 76 0s54-40 76 0 56 40 80 0" fill="none" stroke="url(#wave)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="172" cy="98" r="13" fill="#173040"/>
+    <circle cx="172" cy="330" r="13" fill="#173040"/>
+    <path d="M156 378h58M248 412h86" stroke="#ffffff" stroke-width="16" stroke-linecap="round" opacity="0.72"/>
+  </g>
+
+  <text x="466" y="218" font-family="Cantarell, 'DejaVu Sans', 'Noto Sans', sans-serif" font-weight="800" font-size="132" fill="#f6fbff">LinSight</text>
+  <text x="470" y="282" font-family="Cantarell, 'DejaVu Sans', 'Noto Sans', sans-serif" font-weight="400" font-size="38" fill="#ccd8ea">The fast, modular Linux</text>
+  <text x="470" y="328" font-family="Cantarell, 'DejaVu Sans', 'Noto Sans', sans-serif" font-weight="400" font-size="38" fill="#ccd8ea">system-monitoring dashboard.</text>
+  <rect x="472" y="352" width="168" height="6" rx="3" fill="url(#accent)"/>
+  <text x="470" y="406" font-family="Cantarell, 'DejaVu Sans', 'Noto Sans', sans-serif" font-weight="400" font-size="26" fill="#7e8ca6">Rust core · Qt 6 / Kirigami UI · GPL-3.0-only</text>
+</svg>

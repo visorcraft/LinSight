@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[advisories]
+yanked = "deny"
+ignore = [
+    # atomic-polyfill is unmaintained, but it's a transitive dep via
+    # postcard → heapless. No safe upgrade is available until postcard
+    # ships against a newer heapless. Tracked for removal when the
+    # upstream chain updates.
+    "RUSTSEC-2023-0089",
+]
+
+[licenses]
+allow = [
+    # AGPL-3.0-only is pulled in by evalexpr (>= v12, the alert
+    # expression engine). GPLv3 §13 explicitly permits combining a
+    # GPL-3.0 work with AGPL-3.0 code; the combined work as conveyed
+    # then carries AGPL §13's network-interaction source-offer clause.
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path-only internal deps (e.g., `linsight-core = { path = "../linsight-core" }`)
+# are normal in a Cargo workspace and not actually wildcards. This flag tells
+# cargo-deny to skip them.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    # VisorCraft fork of cxx-qt, pinned via [patch.crates-io] for
+    # qt-build-utils. The fork carries a build fix not yet upstream.
+    "https://github.com/visorcraft/cxx-qt.git",
+]

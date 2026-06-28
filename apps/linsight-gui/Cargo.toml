@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+publish = false  # internal workspace crate; not published to crates.io
+name = "linsight"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "LinSight GUI (Qt 6 / Kirigami)."
+
+[[bin]]
+name = "linsight"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+cxx = "1.0"
+cxx-qt = "0.8"
+cxx-qt-lib = { version = "0.8", features = ["qt_gui", "qt_qml"] }
+linsight-core = { path = "../../crates/linsight-core", version = "1.4.0" }
+linsight-protocol = { path = "../../crates/linsight-protocol", version = "1.4.0" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[build-dependencies]
+cxx-qt-build = "0.8"
+qt-build-utils = "0.8"
+
+# `cxx` has no textual use in src/, but the `cxx_qt::bridge` macro expands to
+# code with absolute `::cxx` paths, so it must stay a direct dependency.
+# cargo-machete can't see macro output and would otherwise flag it as unused.
+[package.metadata.cargo-machete]
+ignored = ["cxx"]

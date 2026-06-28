@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 VisorCraft LLC -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<component type="desktop-application">
+  <id>com.visorcraft.LinSight</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>LinSight</name>
+  <summary>Fast multi-GPU Linux system monitor</summary>
+  <description>
+    <p>
+      LinSight is a fast, beautiful, modular Linux system-monitoring dashboard.
+      It shows live CPU, RAM, multi-GPU (NVIDIA + Intel xe), NVMe, and network
+      sensors in a single Overview page, with a runtime plugin system for
+      hardware that isn't covered out of the box.
+    </p>
+    <p>Key features:</p>
+    <ul>
+      <li>Subscription-driven sampling — sensors only run when something is watching</li>
+      <li>Built-in support for NVIDIA NVML and Intel xe driver GPUs</li>
+      <li>Per-NVMe SSD temperatures and bytes-read/written counters</li>
+      <li>Per-interface network rx/tx counters and link state</li>
+      <li>Always-on mode (opt-in): SQLite history + Prometheus exporter</li>
+      <li>Remote dashboards over SSH-forwarded sockets</li>
+      <li>Drop-in .so plugin support for new hardware</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.visorcraft.LinSight.desktop</launchable>
+  <provides>
+    <binary>linsight</binary>
+    <binary>linsightd</binary>
+    <binary>linsight-cli</binary>
+  </provides>
+  <url type="homepage">https://github.com/visorcraft/linsight</url>
+  <url type="bugtracker">https://github.com/visorcraft/linsight/issues</url>
+  <developer id="com.visorcraft">
+    <name>VisorCraft LLC</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <categories>
+    <category>System</category>
+    <category>Monitor</category>
+  </categories>
+  <releases>
+    <release version="1.19.5" date="2026-06-27">
+      <description>
+        <p>Repo hygiene: stopped tracking a machine-specific .qmlls.ini that
+        pinned an absolute local build path; it is now git-ignored. No change to
+        the shipped binary.</p>
+        <p>Security: .gitignore now excludes mTLS key/cert material so a locally
+        generated linsight-tunnel keypair cannot be committed by accident.</p>
+      </description>
+    </release>
+    <release version="1.19.4" date="2026-06-27">
+      <description>
+        <p>Fix: clicking "Open" on a dashboard in the Gallery did nothing when
+        it was the dashboard you had just left — the Gallery button only cleared
+        the view slug without resetting the page-stack key, so a subsequent
+        "Open" of that same dashboard was short-circuited. The Gallery button
+        now resets the page key, so "Open" always navigates.</p>
+        <p>The sidebar tagline now reads "Whole system insight" instead of the
+        outdated "Multi-GPU system insight".</p>
+      </description>
+    </release>
+    <release version="1.19.3" date="2026-06-27">
+      <description>
+        <p>Fix: GUI memory could grow without bound when QML fell behind live
+        samples. Live sample updates now coalesce before crossing into Qt, so
+        a slow render path keeps only the latest pending frame instead of
+        accumulating queued JSON update closures.</p>
+      </description>
+    </release>
+    <release version="1.19.2" date="2026-06-21">
+      <description>
+        <p>Fix: the GUI auto-reconnects to the daemon instead of getting stuck
+        on "Disconnected". A keepalive stops the daemon's 30-minute idle timeout
+        from evicting a live-but-quiet dashboard, and a connection supervisor
+        automatically reconnects (respawning the local daemon if needed)
+        whenever the connection drops.</p>
+      </description>
+    </release>
+    <release version="1.19.1" date="2026-06-20">
+      <description>
+        <p>Packaging release: rebuilds the AppImage so the GPU, storage, and
+        dashboard tile-rendering fixes from 1.19.0 are carried in it, verified
+        to render correctly under the AppImage's bundled Qt 6.4. No source
+        changes since 1.19.0.</p>
+      </description>
+    </release>
+    <release version="1.19.0" date="2026-06-20">
+      <description>
+        <p>Fix: GPU and storage tiles frozen on "…" across category pages and
+        dashboards. The Qt pages merged each tick's value delta by mutating a
+        var map/array in place and reassigning the same object reference, which
+        QML's identity-based change detection ignores, so the value bindings
+        never re-evaluated. Fixed on the GPUs and Storage pages, custom
+        dashboards, the dashboard editor, and the Overview sparklines.</p>
+        <p>Fix: static sensor values (GPU VRAM, total RAM, disk capacity) could
+        stay on "…". A static sensor is sampled once then parked, so its value
+        arrives in a single delta a late-loading page could miss; the GUI now
+        re-emits already-sampled static tiles in every delta so any page
+        converges.</p>
+        <p>Fix: static sensors were parked after the first scheduler tick even
+        when their sample was dropped by the bounded sampler at cold start.
+        Parking now happens on a successful sample only, so a dropped or errored
+        static reading retries on the next due tick instead of hanging on "…"
+        forever.</p>
+      </description>
+    </release>
+    <release version="1.18.0" date="2026-06-17">
+      <description>
+        <p>Dependency maintenance: upgrade the workspace crate tree (stabby 72,
+        rusqlite 0.40, toml 1.1, evalexpr 13, rcgen 0.14, criterion 0.8, and
+        others). evalexpr relicensed to AGPL-3.0-only, permitted in a GPL-3.0
+        project via GPLv3 section 13. Regenerate and reconcile the third-party
+        license notices and credits.</p>
+      </description>
+    </release>
+    <release version="1.17.1" date="2026-06-17">
+      <description>
+        <p>Fix the packaged GUI failing to launch (no window): QML pages
+        imported shared JS helpers via an absolute qrc:/qml/Shared.js URL the
+        older Qt bundled in the AppImage could not resolve. Import them
+        relatively so they load on every Qt 6.x.</p>
+      </description>
+    </release>
+    <release version="1.17.0" date="2026-06-17">
+      <description>
+        <p>Performance and UI polish: Arc-shared samples and catalogues,
+        reusable serialization buffers, dirty-delta GUI tile updates,
+        lightweight history records, shared alert context, stack-buffer
+        sysfs reads, dashboard import in Rust, mutable daemon settings
+        toggles, and CLI format validation.</p>
+      </description>
+    </release>
+    <release version="1.16.0" date="2026-06-16">
+      <description>
+        <p>Harden daemon and GUI against hangs and leaks: capped, time-boxed
+        sensor worker threads, async alert notifications, transport and client
+        socket timeouts, idempotent subscriptions, and tunnel/Prometheus
+        write-timeouts.</p>
+      </description>
+    </release>
+    <release version="1.15.0" date="2026-06-14">
+      <description>
+        <p>Benchmarks, property tests, daemon transport unit tests,
+        GUI smoke in CI, and plugin sandbox design groundwork.</p>
+      </description>
+    </release>
+    <release version="1.14.1" date="2026-06-12">
+      <description>
+        <p>Bugfix release: fixed a GitHub release race that could drop
+        AppImage and Flatpak artifacts; added GUI client dispatch tests;
+        refactored daemon XDG path helpers; and added a deterministic
+        wire-size budget guard.</p>
+      </description>
+    </release>
+    <release version="1.14.0" date="2026-06-12">
+      <description>
+        <p>UI polish batch: dedicated Network page with per-interface
+        throughput, persisted process-table state, copy sensor ID from any
+        tile, read-only Prometheus bind hint in Settings, and refreshed
+        translations.</p>
+      </description>
+    </release>
+    <release version="1.13.0" date="2026-06-12">
+      <description>
+        <p>Multi-host view: save remote hosts, switch between them from the
+        sidebar, and survive reconnects with automatic catalogue rebuild,
+        subscription replay, and pump-interval replay.</p>
+      </description>
+    </release>
+    <release version="1.11.0" date="2026-06-11">
+      <description>
+        <p>Version bump to 1.11.0.</p>
+      </description>
+    </release>
+    <release version="1.10.0" date="2026-06-10">
+      <description>
+        <p>Process explorer page with sortable, filterable process table.
+        SMART disk health sensors via udisks2. Alert event log with per-rule
+        cooldown. Sensor snapshot caches for disk, net, fs, and system plugins.
+        History charts with configurable retention pruning.</p>
+      </description>
+    </release>
+    <release version="1.9.0" date="2026-06-04">
+      <description>
+        <p>Hardening and performance update: client subscriptions are isolated
+        and cleaned up on disconnect, history and Prometheus paths are bounded,
+        CPU and memory sensors reuse short-lived snapshots, dashboard writes are
+        more race-resistant, GUI daemon RPCs no longer block the QML thread, and
+        CLI/tunnel behavior is aligned with the documented defaults.</p>
+      </description>
+    </release>
+    <release version="1.8.0" date="2026-06-02">
+      <description>
+        <p>New application icon: the final LinSight mark (a layered hardware
+        stack with a wavelength "L" and a thermometer accent) replaces the
+        placeholder across all icon sizes and the in-app About and Credits
+        pages. The in-app third-party license credits now list only genuine
+        dependencies, and the documentation set was cleaned up.</p>
+      </description>
+    </release>
+    <release version="1.7.3" date="2026-06-02">
+      <description>
+        <p>Identity update: the application ID is now com.visorcraft.LinSight
+        (matching the visorcraft.com domain), changed across the desktop entry,
+        AppStream metadata, icons, Flatpak app-id and the window id. Users with
+        a pinned launcher should re-pin LinSight after upgrading.</p>
+      </description>
+    </release>
+    <release version="1.7.2" date="2026-06-02">
+      <description>
+        <p>Maintenance update: the bundled third-party license notices were
+        renamed to third-party-notices.md and regenerated against the current
+        dependency set, and the translation catalogs were refreshed.</p>
+      </description>
+    </release>
+    <release version="1.7.1" date="2026-06-02">
+      <description>
+        <p>Packaging and release-automation update: continuous integration
+        plus one-command multi-format release builds (portable tarball, Arch,
+        Debian, Fedora, openSUSE, AppImage and Flatpak), with assorted
+        packaging fixes and launcher icons in the distro packages.</p>
+      </description>
+    </release>
+    <release version="1.7.0" date="2026-06-01">
+      <description>
+        <p>Security and robustness hardening: a panicking plugin is now
+        isolated from the daemon instead of crashing it (plugin ABI v6); the
+        remote tunnel's idle timeout no longer drops healthy long-lived
+        sessions; and webhook alert targets are validated against SSRF.
+        Out-of-tree plugins must be rebuilt against the v6 SDK.</p>
+      </description>
+    </release>
+    <release version="1.6.0" date="2026-05-31">
+      <description>
+        <p>Storage page nests mount points inside their physical disk as
+        collapsible cards; GPU sections ordered by VRAM with unified "GPU
+        VRAM" sensor naming; inode sensors skipped for filesystems that do
+        not report them.</p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-05-25">
+      <description>
+        <p>All 10 spec phases shipped: daemon, CLI, Qt 6 / Kirigami GUI with sidebar, preset pages (Overview, GPUs, Storage, Network), canvas editor, alerts engine, Prometheus exporter, SQLite history, runtime .so plugin ABI v2 (stabby R-mirror types), and the linsight-tunnel mTLS bridge.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-05-24">
+      <description>
+        <p>Initial preview — Phase 1 through Phase 10 scaffolding.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,233 @@
+// SPDX-FileCopyrightText: 2026 VisorCraft LLC
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! `linsight-cli watch <sensors...> [--rate <hz>] [--format <plain|json>] [--count <n>]`
+//!
+//! Subscribe to one or more sensors and stream live formatted values
+//! until Ctrl+C or `--count` samples are received.
+
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::Result;
+use linsight_core::{Reading, SensorId, Unit};
+use linsight_protocol::{ClientMsg, RequestOp, ResponsePayload, ServerMsg};
+
+use crate::commands::{connect_and_hello, request_rpc};
+
+pub fn run(
+    socket: &Path,
+    sensors: &[String],
+    rate_hz: Option<f64>,
+    format: &str,
+    count: Option<u64>,
+) -> Result<()> {
+    // `--count 0` is a no-op: exit immediately without contacting the daemon.
+    if matches!(count, Some(0)) {
+        return Ok(());
+    }
+
+    let sensor_ids: Vec<SensorId> =
+        sensors.iter().map(SensorId::try_new).collect::<Result<Vec<_>, _>>()?;
+
+    let mut session = connect_and_hello(socket)?;
+
+    // Validate every requested sensor and capture its unit for formatting
+    // via a single `GetSensorInfo` RPC per sensor instead of the full
+    // `ListSensors` round-trip.
+    let mut units: std::collections::HashMap<SensorId, Unit> =
+        std::collections::HashMap::with_capacity(sensor_ids.len());
+    for id in &sensor_ids {
+        match request_rpc(&mut session, RequestOp::GetSensorInfo { sensor: id.to_string() })? {
+            ResponsePayload::SensorInfo { info } => {
+                units.insert(id.clone(), info.unit);
+            }
+            other => anyhow::bail!("expected SensorInfo, got {other:?}"),
+        }
+    }
+
+    // Register Ctrl+C handler so we can send a graceful Goodbye.
+    let term = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&term))?;
+
+    session.writer.write_client(&ClientMsg::Subscribe {
+        sensors: sensor_ids.clone(),
+        rate_hz: rate_hz.map(|h| h as f32),
+    })?;
+
+    let mut printed = 0u64;
+    let exit_code = loop {
+        // Check for Ctrl+C between samples so we don't have to wait for
+        // the next server message before reacting.
+        if term.load(Ordering::Relaxed) {
+            eprintln!("interrupted — shutting down");
+            break Ok(());
+        }
+
+        match session.reader.read_server()? {
+            ServerMsg::Sample(s) if sensor_ids.contains(&s.sensor) => {
+                let unit = match units.get(&s.sensor) {
+                    Some(u) => u,
+                    // Should never happen since we validated above, but
+                    // be defensive rather than panic.
+                    None => {
+                        tracing::warn!("sample for unknown sensor: {}", s.sensor);
+                        continue;
+                    }
+                };
+                match format {
+                    "json" => println!("{}", json_sample(&s.sensor, &s.reading, unit)),
+                    _ => println!("{}\t{}", s.sensor, plain_sample(&s.reading, unit)),
+                }
+                printed += 1;
+                if let Some(max) = count
+                    && printed >= max
+                {
+                    break Ok(());
+                }
+            }
+            ServerMsg::SensorDegraded { sensor: id, reason } if sensor_ids.contains(&id) => {
+                anyhow::bail!("{id} degraded: {reason}");
+            }
+            ServerMsg::Bye { reason } => {
+                eprintln!("daemon shutting down: {reason}");
+                break Ok(());
+            }
+            // Ignore samples / degradation for sensors we didn't
+            // subscribe to, duplicate Welcome, re-broadcast SensorList,
+            // and protocol-internal Response frames.
+            ServerMsg::Sample(_)
+            | ServerMsg::SensorDegraded { .. }
+            | ServerMsg::Welcome { .. }
+            | ServerMsg::SensorList(_)
+            | ServerMsg::Response { .. }
+            | ServerMsg::SensorListBroadcast(_) => continue,
+        }
+    };
+
+    // Best-effort cleanup — don't let a send failure mask the exit code.
+    session.writer.write_client(&ClientMsg::Unsubscribe { sensors: sensor_ids.clone() }).ok();
+    session.writer.write_client(&ClientMsg::Goodbye).ok();
+    exit_code
+}
+
+// ---------------------------------------------------------------------------
+// Plain-text formatting
+// ---------------------------------------------------------------------------
+
+fn plain_sample(r: &Reading, unit: &Unit) -> String {
+    match r {
+        Reading::Scalar(v) => format_scalar(*v, unit),
+        Reading::Counter(v) => format!("{v} {}", unit.symbol()),
+        Reading::State(s) => s.clone(),
+        Reading::Table(rows) => format!("<{} rows>", rows.len()),
+    }
+}
+
+fn format_scalar(v: f64, unit: &Unit) -> String {
+    match unit {
+        Unit::Percent => format!("{v:.1}%"),
+        Unit::Celsius => format!("{v:.1}°C"),
+        Unit::Bytes => format_bytes(v),
+        Unit::BytesPerSec => format!("{} B/s", v as i64),
+        Unit::Hertz => format!("{v:.0} Hz"),
+        Unit::Watts => format!("{v:.1} W"),
+        Unit::Volts => format!("{v:.3} V"),
+        Unit::Rpm => format!("{v:.0} rpm"),
+        Unit::Count => format!("{v}"),
+        Unit::Custom(s) => format!("{v} {s}"),
+    }
+}
+
+fn format_bytes(v: f64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    const TB: f64 = GB * 1024.0;
+    match v.abs() {
+        x if x >= TB => format!("{:.2} TiB", v / TB),
+        x if x >= GB => format!("{:.2} GiB", v / GB),
+        x if x >= MB => format!("{:.2} MiB", v / MB),
+        x if x >= KB => format!("{:.2} KiB", v / KB),
+        _ => format!("{v} B"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JSON formatting
+// ---------------------------------------------------------------------------
+
+fn json_sample(sensor: &SensorId, r: &Reading, unit: &Unit) -> String {
+    let unit_sym = unit.symbol();
+    let sensor = sensor.to_string();
+    match r {
+        Reading::Scalar(v) => json_string(&JsonValueSample {
+            sensor: &sensor,
+            value: *v,
+            unit: unit_sym,
+            kind: "scalar",
+        }),
+        Reading::Counter(v) => json_string(&JsonValueSample {
+            sensor: &sensor,
+            value: *v,
+            unit: unit_sym,
+            kind: "counter",
+        }),
+        Reading::State(s) => {
+            json_string(&JsonStateSample { sensor: &sensor, state: s, kind: "state" })
+        }
+        Reading::Table(rows) => {
+            json_string(&JsonTableSample { sensor: &sensor, rows: rows.len(), kind: "table" })
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct JsonValueSample<'a, T> {
+    sensor: &'a str,
+    value: T,
+    unit: &'a str,
+    kind: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct JsonStateSample<'a> {
+    sensor: &'a str,
+    state: &'a str,
+    kind: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct JsonTableSample<'a> {
+    sensor: &'a str,
+    rows: usize,
+    kind: &'static str,
+}
+
+fn json_string<T: serde::Serialize>(sample: &T) -> String {
+    serde_json::to_string(sample).expect("sample JSON serialization should not fail")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_sample_escapes_state_control_characters() {
+        let sensor = SensorId::try_new("test.state").unwrap();
+        let state = "line one\nline two\t\"quoted\"\\path\u{7}";
+        let json = json_sample(&sensor, &Reading::State(state.into()), &Unit::Count);
+
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "sensor": "test.state",
+                "state": state,
+                "kind": "state",
+            })
+        );
+    }
+}

@@ -1,0 +1,234 @@
+linsight (1.19.5-1) unstable; urgency=medium
+
+  * Repo hygiene: stopped tracking a machine-specific .qmlls.ini that pinned an
+    absolute local build path; it is now git-ignored.
+  * Security: .gitignore now excludes mTLS key/cert material so a locally
+    generated linsight-tunnel keypair cannot be committed by accident.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 27 Jun 2026 12:00:00 +0000
+
+linsight (1.19.4-1) unstable; urgency=medium
+
+  * Fix: clicking "Open" on a dashboard in the Gallery did nothing when it was
+    the dashboard you had just left; the Gallery button now resets the page key
+    so goTo no longer short-circuits it.
+  * The sidebar tagline now reads "Whole system insight".
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 27 Jun 2026 12:00:00 +0000
+
+linsight (1.19.3-1) unstable; urgency=medium
+
+  * Fix: prevent unbounded GUI memory growth when QML falls behind live sample
+    updates. The sample pump now coalesces pending Qt-thread updates so only
+    the latest rendered frame is retained.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 27 Jun 2026 12:00:00 +0000
+
+linsight (1.19.2-1) unstable; urgency=medium
+
+  * Fix: the GUI auto-reconnects to linsightd instead of getting stuck on
+    "Disconnected". The daemon evicts a client idle for 30 minutes, but the GUI
+    went silent after subscribing, so a live dashboard was dropped as stale and
+    never reconnected. The GUI now sends a keepalive so it is never falsely
+    evicted, and a supervisor auto-reconnects (respawning the local daemon if
+    needed) whenever the connection drops.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sun, 21 Jun 2026 12:00:00 +0000
+
+linsight (1.19.1-1) unstable; urgency=medium
+
+  * Packaging: rebuild the AppImage so the 1.19.0 GUI tile-rendering fixes ship
+    in it; verified rendering under the AppImage's bundled Qt 6.4. No source
+    changes since 1.19.0.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 20 Jun 2026 17:30:00 +0000
+
+linsight (1.19.0-1) unstable; urgency=medium
+
+  * Fix: GPU/storage tiles frozen on "…" on category pages and dashboards. The
+    Qt pages merged per-tick value deltas by mutating a var map/array in place
+    and reassigning the same reference, which QML treats as no change, so value
+    bindings never re-evaluated. Each path now assigns a fresh reference.
+  * Fix: static sensor values (VRAM/RAM/disk capacity) could stay on "…".
+    Statics are sampled once then parked, arriving in a single delta a late
+    page could miss; the GUI now re-emits sampled static tiles every delta.
+  * Fix: static sensors were parked after the first scheduler tick even when
+    their sample was dropped by the bounded sampler at cold start. Park on
+    successful sample only so a dropped or errored static reading retries.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 20 Jun 2026 14:00:00 +0000
+
+linsight (1.18.0-1) unstable; urgency=medium
+
+  * Dependency maintenance: upgrade the workspace crate tree (stabby 72,
+    rusqlite 0.40, toml 1.1, evalexpr 13, rcgen 0.14, criterion 0.8, and
+    others). evalexpr relicensed to AGPL-3.0-only (permitted in a GPL-3.0
+    project via GPLv3 §13). Regenerate and reconcile third-party notices.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 17 Jun 2026 14:00:00 +0000
+
+linsight (1.17.1-1) unstable; urgency=medium
+
+  * Fix packaged GUI failing to launch (no window): QML pages imported
+    shared JS helpers via an absolute qrc:/qml/Shared.js URL the older
+    Qt bundled in the AppImage could not resolve. Import them relatively.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 17 Jun 2026 13:00:00 +0000
+
+linsight (1.17.0-1) unstable; urgency=medium
+
+  * v1.17.0 release. Performance and UI polish: Arc-shared samples and
+    catalogues, reusable serialization buffers, dirty-delta GUI tile
+    updates, lightweight history records, shared alert context,
+    stack-buffer sysfs reads, dashboard import in Rust, mutable daemon
+    settings toggles, and CLI format validation.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 17 Jun 2026 12:00:00 +0000
+
+linsight (1.16.0-1) unstable; urgency=medium
+
+  * v1.16.0 release. Harden daemon and GUI against hangs and leaks:
+    capped, time-boxed sensor worker threads; async alert notifications;
+    transport and client socket timeouts; idempotent subscriptions;
+    tunnel and Prometheus write-timeouts.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 16 Jun 2026 12:00:00 +0000
+
+linsight (1.15.0-1) unstable; urgency=medium
+
+  * v1.15.0 release. Criterion benchmarks, proptest round-trips,
+    daemon transport unit tests, GUI smoke in CI, plugin sandbox design.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sun, 14 Jun 2026 12:00:00 +0000
+
+linsight (1.14.1-1) unstable; urgency=medium
+
+  * v1.14.1 release. Release artifact race fix, GUI client dispatch tests,
+    daemon XDG path helper refactor, and deterministic wire-size budget guard.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 12 Jun 2026 12:00:00 +0000
+
+linsight (1.14.0-1) unstable; urgency=medium
+
+  * v1.14.0 release. UI polish batch: dedicated Network page with
+    per-interface throughput, persisted process-table state, copy sensor ID
+    from any tile, read-only Prometheus bind hint, and refreshed i18n.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 12 Jun 2026 12:00:00 +0000
+
+linsight (1.13.0-1) unstable; urgency=medium
+
+  * v1.13.0 release. Multi-host view: save remote hosts, switch between them
+    from the sidebar, and survive reconnects with catalogue rebuild,
+    subscription replay, and pump-interval replay.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 12 Jun 2026 12:00:00 +0000
+
+linsight (1.11.0-1) unstable; urgency=medium
+
+  * v1.11.0 release. Version bump to 1.11.0.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Thu, 11 Jun 2026 12:00:00 +0000
+
+linsight (1.10.0-1) unstable; urgency=medium
+
+  * v1.10.0 release. Process explorer page with sortable/filterable process
+    table. SMART disk health sensors via udisks2. Alert event log with
+    per-rule cooldown. Sensor snapshot caches. History charts with retention
+    pruning.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 10 Jun 2026 12:00:00 +0000
+
+linsight (1.9.0-1) unstable; urgency=medium
+
+  * v1.9.0 release. Harden daemon subscriptions, history, Prometheus, plugin
+    loading, dashboard persistence, CLI JSON/socket defaults, tunnel shutdown,
+    and CPU/memory sensor sampling.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Thu, 04 Jun 2026 11:21:00 +0000
+
+linsight (1.8.0-1) unstable; urgency=medium
+
+  * New application icon across all sizes and the in-app About/Credits pages.
+  * Third-party license credits now exclude first-party crates (internal crates are publish = false), so the Credits page lists only genuine dependencies.
+  * Documentation cleanup.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 18:00:00 +0000
+
+linsight (1.7.3-1) unstable; urgency=medium
+
+  * v1.7.3 release. Rename the application ID to com.visorcraft.LinSight (desktop entry, metainfo, icons, Flatpak, window id) to match the visorcraft.com domain, and sensor plugin-ids to com.visorcraft.linsight.*. A pinned launcher must be re-pinned after upgrading.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 14:00:00 +0000
+
+linsight (1.7.2-1) unstable; urgency=medium
+
+  * v1.7.2 release. Rename bundled third-party credits to third-party-notices.md and regenerate; refresh translation catalogs.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 13:00:00 +0000
+
+linsight (1.7.1-1) unstable; urgency=medium
+
+  * v1.7.1 release. GitHub Actions CI + multi-format release automation; packaging fixes and launcher icons.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 02 Jun 2026 12:00:00 +0000
+
+linsight (1.7.0-1) unstable; urgency=medium
+
+  * v1.7.0 release. Plugin panic isolation (ABI v6) and audit-driven security hardening.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Mon, 01 Jun 2026 12:00:00 +0000
+
+linsight (1.6.0-1) unstable; urgency=medium
+
+  * v1.6.0 release. Storage page nests mount points inside their physical
+    disk as collapsible cards (ordered by capacity); GPU sections ordered by
+    VRAM with unified "GPU VRAM" sensor naming; inode sensors skipped for
+    filesystems that don't report them (btrfs, vfat).
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sun, 31 May 2026 12:00:00 +0000
+
+linsight (1.5.0-1) unstable; urgency=medium
+
+  * v1.5.0 release. Dynamic plugin config delivery plus container and
+    socket statistics sensors.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sat, 30 May 2026 22:56:00 +0000
+
+linsight (1.4.1-1) unstable; urgency=medium
+
+  * v1.4.1 release. Correct the company domain to visorcraft.com (Qt
+    organizationDomain + packaging contact fields). Packaging recipes
+    now build end-to-end from a clean checkout. No runtime change.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 29 May 2026 16:32:00 +0000
+
+linsight (1.4.0-1) unstable; urgency=medium
+
+  * v1.4.0 release. Theme-aware buttons and dropdowns across the app
+    (shared ThemedButton / ThemedComboBox components); dark-theme dropdown
+    readability fixes; About page rework; sidebar hover fix.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Fri, 29 May 2026 10:31:34 +0000
+
+linsight (0.5.1-1) unstable; urgency=medium
+
+  * v0.5.1 release. Hardware page with per-device nicknames; ABI v4
+    plugin surface.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 26 May 2026 12:00:00 +0000
+
+linsight (0.3.0-1) unstable; urgency=medium
+
+  * v0.3.0 release. All 10 spec phases shipped: daemon, CLI, Qt 6 /
+    Kirigami GUI, preset pages, canvas editor, alerts engine,
+    Prometheus exporter, SQLite history, runtime .so plugin ABI v2
+    (stabby R-mirror types), linsight-tunnel mTLS bridge.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Mon, 25 May 2026 21:00:00 +0000
+
+linsight (0.1.0-1) unstable; urgency=medium
+
+  * Initial preview release. Phases 1-10 scaffolded.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Sun, 24 May 2026 12:00:00 +0000

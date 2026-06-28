@@ -1,0 +1,34 @@
+# cargo-about license aggregation policy.
+#
+# `accepted` lists every license SPDX expression we are willing to
+# accept in the dependency tree. The list mirrors `deny.toml` —
+# changes here should land in both files in the same change.
+#
+# Generate the supplement: `just credits`.
+# Output: docs/third-party-notices.md (auto-regenerated, do not edit).
+
+accepted = [
+    "0BSD",
+    # AGPL-3.0-only: pulled in by evalexpr (>= v12). Permitted in a
+    # GPL-3.0 project via GPLv3 §13. Keep in sync with deny.toml.
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+# Our own workspace crates are first-party (GPL-3.0-only) and must not
+# appear in this third-party supplement — they are credited in
+# CREDITS.md's narrative instead. Every internal crate sets
+# `publish = false`, so cargo-about's `private.ignore` drops them (and
+# the echo-plugin example) from the graph. Keep new internal crates
+# `publish = false` and they are excluded automatically — no per-crate
+# entry is needed here.
+private = { ignore = true }

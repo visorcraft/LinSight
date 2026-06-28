@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+publish = false  # internal workspace crate; not published to crates.io
+name = "linsight-sensors-xe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Intel xe-driver GPU sensor backend (iGPUs + Battlemage/Arc discrete)."
+
+[dependencies]
+linsight-core = { path = "../../linsight-core", version = "1.4.0" }
+linsight-plugin-sdk = { path = "../../linsight-plugin-sdk", version = "1.4.0" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,579 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Tag-triggered release: build every artifact LinSight ships and attach
+# them to a GitHub Release. The tag is the source of version truth — the
+# version step verifies it against Cargo.toml and each package job patches
+# its version field from it. No `${{ github.event.* }}` interpolation in
+# run blocks (injection-safe): tag/version flow through env vars.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  QMAKE: /usr/bin/qmake6
+  QT_VERSION_MAJOR: "6"
+
+jobs:
+  linux-tarball:
+    name: Linux x86_64 tarball
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Install Arch dependencies
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Syu --noconfirm --needed \
+            git curl ca-certificates pkgconf \
+            qt6-base qt6-declarative qt6-tools kirigami \
+            clang ninja mesa file desktop-file-utils appstream
+
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Resolve + verify version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          workspace_version="$(awk -F'"' '
+              /^\[workspace\.package\]/ { in_section = 1; next }
+              in_section && /^\[/ { exit }
+              in_section && $1 ~ /^version[[:space:]]*=/ { print $2; exit }
+          ' Cargo.toml)"
+          tag_version="${TAG#v}"
+          tag_release_version="${tag_version%%-*}"
+          if [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]] \
+              && [[ "$tag_release_version" != "$workspace_version" ]]; then
+            echo "tag ${TAG} (release ${tag_release_version}) != workspace ${workspace_version}" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$workspace_version" >> "$GITHUB_OUTPUT"
+          echo "Building LinSight ${workspace_version} from tag ${TAG}"
+
+      - name: Format + clippy sanity gate
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Validate desktop file + metainfo
+        run: |
+          desktop-file-validate packaging/com.visorcraft.LinSight.desktop
+          appstreamcli validate --no-net packaging/com.visorcraft.LinSight.metainfo.xml
+
+      - name: Build release binaries
+        run: cargo build --workspace --release --locked
+
+      - name: Offscreen GUI smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # LinSight's GUI needs a writable XDG_RUNTIME_DIR for the daemon
+          # socket ($XDG_RUNTIME_DIR/linsight.sock); it refuses to start
+          # without one rather than fall back to /tmp.
+          XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          export XDG_RUNTIME_DIR
+          set +e
+          timeout --preserve-status 5 target/release/linsight
+          code=$?
+          set -e
+          if [[ "$code" -ne 124 && "$code" -ne 143 && "$code" -ne 0 ]]; then
+            echo "GUI exited unexpectedly with ${code}" >&2
+            exit "$code"
+          fi
+
+      - name: Stage portable tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          root="linsight-${VERSION}-linux-x86_64"
+          staging="target/release-dist/${root}"
+          dist="target/dist"
+          rm -rf "$staging" "$dist"
+          mkdir -p \
+            "$staging/bin" \
+            "$staging/share/applications" \
+            "$staging/share/metainfo" \
+            "$staging/lib/systemd/user" \
+            "$dist"
+          install -m755 target/release/linsight     "$staging/bin/linsight"
+          install -m755 target/release/linsightd    "$staging/bin/linsightd"
+          install -m755 target/release/linsight-cli "$staging/bin/linsight-cli"
+          install -m644 packaging/com.visorcraft.LinSight.desktop \
+            "$staging/share/applications/com.visorcraft.LinSight.desktop"
+          install -m644 packaging/com.visorcraft.LinSight.metainfo.xml \
+            "$staging/share/metainfo/com.visorcraft.LinSight.metainfo.xml"
+          install -m644 packaging/systemd/linsight.service \
+            "$staging/lib/systemd/user/linsight.service"
+          install -m644 README.md "$staging/README.md"
+          install -m644 LICENSE   "$staging/LICENSE"
+          tar -C target/release-dist \
+            --sort=name --mtime="@${SOURCE_DATE_EPOCH:-0}" \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "${dist}/${root}.tar.gz" "$root"
+          (cd "$dist" && sha256sum "${root}.tar.gz" >> sha256sums.txt)
+
+      - name: Upload tarball artefact
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-tarball
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  arch-pkg:
+    name: Arch pkg.tar.zst
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Syu --noconfirm --needed \
+            git sudo pkgconf \
+            qt6-base qt6-declarative qt6-tools kirigami \
+            clang ninja mesa rust cargo
+      - uses: actions/checkout@v5
+      - name: Create unprivileged build user
+        run: |
+          useradd -m -G wheel builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Patch pkgver to the release version
+        run: sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD.local
+      - name: Build pacman package
+        run: |
+          # shellcheck disable=SC2016
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE/packaging/arch"
+            makepkg -sf --noconfirm --syncdeps -p PKGBUILD.local
+          '
+      - name: Stage artefact + sha256
+        run: |
+          mkdir -p target/dist
+          mv packaging/arch/linsight-*.pkg.tar.zst target/dist/
+          (cd target/dist && sha256sum linsight-*.pkg.tar.zst > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: arch-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  arch-v3-pkg:
+    name: Arch pkg.tar.zst (x86-64-v3)
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Syu --noconfirm --needed \
+            git sudo pkgconf \
+            qt6-base qt6-declarative qt6-tools kirigami \
+            clang ninja mesa rust cargo
+      - uses: actions/checkout@v5
+      - name: Create unprivileged build user
+        run: |
+          useradd -m -G wheel builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Patch pkgver to the release version
+        run: sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch-v3/PKGBUILD.local
+      - name: Build pacman package
+        run: |
+          # shellcheck disable=SC2016
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE/packaging/arch-v3"
+            makepkg -sf --noconfirm --syncdeps -p PKGBUILD.local
+          '
+      - name: Stage artefact + sha256
+        run: |
+          mkdir -p target/dist
+          mv packaging/arch-v3/linsight-*.pkg.tar.zst target/dist/
+          (cd target/dist && sha256sum linsight-*.pkg.tar.zst > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: arch-v3-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  deb-pkg:
+    name: Debian .deb
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie-slim
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+    steps:
+      - name: Install Debian build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git curl \
+            build-essential debhelper devscripts dpkg-dev \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            qt6-tools-dev kirigami2-dev libgl1-mesa-dev \
+            pkg-config clang ninja-build
+      - name: Install Rust 1.95 via rustup
+        env:
+          RUSTUP_HOME: /usr/local/rustup
+          CARGO_HOME: /usr/local/cargo
+          HOME: /root
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.95 --profile minimal --no-modify-path
+          {
+            echo "RUSTUP_HOME=/usr/local/rustup"
+            echo "CARGO_HOME=/usr/local/cargo"
+          } >> "$GITHUB_ENV"
+          echo "/usr/local/cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v5
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Patch changelog version
+        env:
+          DEBEMAIL: "29009015+visorcraft@users.noreply.github.com"
+          DEBFULLNAME: "VisorCraft"
+        run: |
+          ln -sfn packaging/debian debian
+          if [ "$(dpkg-parsechangelog -S Version)" != "${VERSION}-1" ]; then
+            dch -b -v "${VERSION}-1" --distribution unstable \
+              "Release ${VERSION}."
+          fi
+      - name: Build .deb
+        run: dpkg-buildpackage -d -us -uc -b
+      - name: Stage Debian artefact + sha256
+        run: |
+          mkdir -p target/dist
+          mv ../linsight_*.deb target/dist/
+          (cd target/dist && sha256sum linsight_*.deb > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: deb-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  rpm-pkg:
+    name: Fedora .rpm
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:44
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+      # mold is mandatory here: under Fedora's --as-needed default,
+      # ld.bfd drops -lQt6Quick and the link fails with an undefined
+      # reference to QQuickWindow::grabWindow (see Containerfile.fedora44).
+      RUSTFLAGS: "-Clink-arg=-fuse-ld=mold"
+    steps:
+      - name: Install Fedora build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            rpm-build rpmdevtools git tar gzip make \
+            cargo rust clang mold pkgconf-pkg-config openssl-devel \
+            qt6-qtbase-devel qt6-qtbase-private-devel \
+            qt6-qtdeclarative-devel \
+            qt6-qttools-devel kf6-kirigami-devel sqlite-devel \
+            desktop-file-utils sudo
+      - uses: actions/checkout@v5
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Create unprivileged build user
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Patch spec version + build RPM
+        run: |
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" packaging/fedora/linsight.spec
+          # shellcheck disable=SC2016
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            export RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            # git archive must run from the repo root: from a subdirectory it
+            # only captures that subtree (dropping packaging/), which breaks
+            # the %install step.
+            cd "$GITHUB_WORKSPACE"
+            git archive --format=tar.gz \
+              --prefix="linsight-'"${VERSION}"'/" \
+              --output="packaging/fedora/linsight-'"${VERSION}"'.tar.gz" \
+              HEAD
+            cd packaging/fedora
+            rpmbuild \
+              --define "_topdir $(pwd)/_rpmbuild" \
+              --define "_sourcedir $(pwd)" \
+              --nocheck -bb linsight.spec
+          '
+      - name: Stage RPM artefact + sha256
+        run: |
+          mkdir -p target/dist
+          find packaging/fedora/_rpmbuild/RPMS -name "linsight-*.rpm" -exec mv {} target/dist/ \;
+          (cd target/dist && sha256sum linsight-*.rpm > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: rpm-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  opensuse-pkg:
+    name: openSUSE .rpm
+    runs-on: ubuntu-24.04
+    container:
+      image: opensuse/tumbleweed
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+      RUSTFLAGS: "-Clink-arg=-fuse-ld=mold"
+    steps:
+      - name: Install openSUSE build dependencies
+        env:
+          # The Tumbleweed OSS CDN intermittently times out fetching repo
+          # metadata (appdata.xml.gz); give each attempt a longer curl budget.
+          ZYPP_CURL_TIMEOUT: "300"
+        run: |
+          # ...and retry the whole refresh+install a few times to ride out
+          # transient mirror timeouts.
+          for attempt in 1 2 3 4 5; do
+            if zypper --non-interactive refresh \
+               && zypper --non-interactive install --no-recommends \
+                    rpm-build git tar gzip make \
+                    rust cargo clang mold pkgconf-pkg-config \
+                    'cmake(Qt6Core)' 'cmake(Qt6Quick)' 'cmake(KF6Kirigami)' \
+                    'pkgconfig(sqlite3)' sudo; then
+              break
+            fi
+            echo "zypper attempt ${attempt} failed; retrying in 20s..."
+            sleep 20
+          done
+          rpm -q rpm-build >/dev/null 2>&1 \
+            || { echo "openSUSE deps not installed after retries" >&2; exit 1; }
+      - uses: actions/checkout@v5
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Create unprivileged build user
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Patch spec version + build RPM
+        run: |
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" packaging/opensuse/linsight.spec
+          # shellcheck disable=SC2016
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            export RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            # git archive must run from the repo root (a subdirectory only
+            # captures that subtree, dropping packaging/).
+            cd "$GITHUB_WORKSPACE"
+            git archive --format=tar.gz \
+              --prefix="linsight-'"${VERSION}"'/" \
+              --output="packaging/opensuse/linsight-'"${VERSION}"'.tar.gz" \
+              HEAD
+            cd packaging/opensuse
+            rpmbuild \
+              --define "_topdir $(pwd)/_rpmbuild" \
+              --define "_sourcedir $(pwd)" \
+              --nocheck -bb linsight.spec
+          '
+      - name: Stage RPM artefact + sha256
+        run: |
+          mkdir -p target/dist
+          find packaging/opensuse/_rpmbuild/RPMS -name "linsight-*.rpm" -exec mv {} target/dist/ \;
+          (cd target/dist && sha256sum linsight-*.rpm > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: opensuse-pkg
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  appimage:
+    name: AppImage
+    # Best-effort: appimage-builder (frozen at 1.1.0) is incompatible with
+    # Debian trixie's removed apt-key; failures here must not block the
+    # native-package release. See follow-up notes.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie-slim
+    needs: [linux-tarball]
+    steps:
+      - name: Install build + appimage-builder dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git curl file \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            qt6-tools-dev kirigami2-dev libgl1-mesa-dev \
+            pkg-config clang ninja-build \
+            python3-pip patchelf desktop-file-utils fakeroot zsync \
+            squashfs-tools gnupg2 libglib2.0-bin debian-archive-keyring \
+            gtk-update-icon-cache
+          pip3 install --break-system-packages appimage-builder==1.1.0
+      - name: Install Rust 1.95 via rustup
+        env:
+          RUSTUP_HOME: /usr/local/rustup
+          CARGO_HOME: /usr/local/cargo
+          HOME: /root
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain 1.95 --profile minimal --no-modify-path
+          {
+            echo "RUSTUP_HOME=/usr/local/rustup"
+            echo "CARGO_HOME=/usr/local/cargo"
+          } >> "$GITHUB_ENV"
+          echo "/usr/local/cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v5
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          # apt-key was removed in Debian trixie, but appimage-builder 1.1.0
+          # still calls it. Provide a real replacement that securely imports
+          # `apt-key add <file>` keys into apt's trusted keyring dir, so
+          # package-signature verification stays enforced (the recipe's apt
+          # source is pinned with signed-by to the Debian archive keyring).
+          cat > /usr/local/bin/apt-key <<'SHIM'
+          #!/bin/sh
+          if [ "$1" = "add" ]; then
+            src="${2:--}"
+            out="/etc/apt/trusted.gpg.d/appimage-builder-added.gpg"
+            if [ "$src" = "-" ]; then cat; else cat "$src"; fi \
+              | gpg --dearmor >> "$out" 2>/dev/null || true
+          fi
+          exit 0
+          SHIM
+          chmod +x /usr/local/bin/apt-key
+          bash scripts/build_appimage.sh
+      - name: Stage AppImage + sha256
+        run: |
+          mkdir -p target/dist
+          mv ./*.AppImage target/dist/
+          (cd target/dist && sha256sum ./*.AppImage > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: appimage
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  flatpak:
+    name: Flatpak bundle
+    # Best-effort: the org.freedesktop rust-stable SDK-extension branch
+    # resolution against the KDE 6.10 runtime is still being sorted;
+    # failures here must not block the native-package release.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    needs: [linux-tarball]
+    env:
+      VERSION: ${{ needs.linux-tarball.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install flatpak + builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+      - name: Add flathub + install KDE 6.10 runtime/SDK
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub \
+            org.kde.Platform//6.10 \
+            org.kde.Sdk//6.10 \
+            org.freedesktop.Sdk.Extension.rust-stable//24.08
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Vendor crates
+        run: |
+          rm -rf packaging/flatpak/vendor
+          cargo vendor --locked packaging/flatpak/vendor >/dev/null
+          tar -C packaging/flatpak -czf packaging/flatpak/vendor.tar.gz vendor/
+      - name: Build + bundle Flatpak
+        run: |
+          flatpak-builder --user --disable-rofiles-fuse --force-clean \
+            --install-deps-from=flathub \
+            --repo=flatpak-repo flatpak-build \
+            packaging/flatpak/com.visorcraft.LinSight.yml
+          flatpak build-bundle flatpak-repo \
+            "linsight-${VERSION}.flatpak" com.visorcraft.LinSight master
+      - name: Stage Flatpak + sha256
+        run: |
+          mkdir -p target/dist
+          mv "linsight-${VERSION}.flatpak" target/dist/
+          (cd target/dist && sha256sum linsight-*.flatpak > sha256sums.txt)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: flatpak
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: [linux-tarball, arch-pkg, arch-v3-pkg, deb-pkg, rpm-pkg, opensuse-pkg, appimage, flatpak]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download all artefacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist-staging
+
+      - name: Aggregate artefacts + checksums
+        run: |
+          mkdir -p dist
+          find dist-staging -type f ! -name "sha256sums.txt" -exec mv {} dist/ \;
+          (cd dist && sha256sum ./* > sha256sums.txt)
+          echo "Release payload:" && ls -la dist/
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "LinSight $TAG" \
+            --generate-notes \
+            --verify-tag

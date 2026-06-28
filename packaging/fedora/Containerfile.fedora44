@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Build environment for the LinSight Fedora 44 RPM.
+#
+# Why this exists: cxx-qt-build runs qmlcachegen in full AOT-to-C++
+# mode, which links against Qt's *private* API. Private symbols are
+# pinned to the exact Qt minor version they were compiled against, so
+# the RPM must be built against the *same* Qt the target distro ships
+# (dnf rejects a mismatch with "nothing provides
+# libQt6Qml.so.6(Qt_6.NN_PRIVATE_API)"). Building inside this container
+# links the RPM against whatever Qt 6.x Fedora 44 currently ships
+# (6.11 as of 2026-05) so it installs cleanly there.
+#
+# mold is installed because cxx-qt-build probes PATH for a fast linker
+# (mold/lld/gold) and emits the matching -fuse-ld link arg. Without one
+# it falls back to ld.bfd, which under Fedora's --as-needed default drops
+# -lQt6Quick and fails with "undefined reference QQuickWindow::grabWindow".
+#
+# Build:   podman build -f Containerfile.fedora44 -t linsight-rpm-fedora44 .
+# Use:     packaging/fedora/build-in-container.sh
+#          (or `just package-rpm-fedora44` from repo root)
+
+FROM fedora:44
+
+# rpm-build + spec deps from packaging/fedora/linsight.spec, plus
+# cxx-qt build prereqs (clang/libclang for bindgen, qt6 private headers
+# via *-private-devel packages, OpenSSL for any TLS-using crates).
+RUN dnf install -y --setopt=install_weak_deps=False \
+        rpm-build rpmdevtools \
+        git tar gzip make \
+        cargo rust clang mold \
+        pkgconf-pkg-config \
+        openssl-devel \
+        qt6-qtbase-devel \
+        qt6-qtbase-private-devel \
+        qt6-qtdeclarative-devel \
+        qt6-qttools-devel \
+        kf6-kirigami-devel \
+        sqlite-devel \
+    && dnf clean all
+
+# rpmbuild should not run as root. Set up a builder user with the
+# standard rpmbuild dir tree, owned and writable by the user.
+RUN useradd --create-home --shell /bin/bash builder \
+    && su - builder -c 'rpmdev-setuptree'
+
+# The cargo registry/git cache lives on a named volume mounted by
+# build-in-container.sh at /home/builder/.cargo. The build deliberately uses
+# cargo's default ./target (inside the spec build dir) rather than a side
+# volume, so the spec's %install can find target/release/.
+
+WORKDIR /home/builder
+
+# Force the final binary link through mold (installed above). Belt-and-suspenders
+# alongside cxx-qt-build's own PATH-based linker detection.
+ENV RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+
+COPY container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
+RUN chmod 755 /usr/local/bin/container-entrypoint.sh
+
+USER builder
+ENTRYPOINT ["/usr/local/bin/container-entrypoint.sh"]

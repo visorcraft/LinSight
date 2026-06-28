@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 VisorCraft LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# LinSight user-level systemd unit for always-on mode. Enables history
+# persistence and the Prometheus exporter even when no GUI is open.
+#
+# Install (as user, not root):
+#   mkdir -p ~/.config/systemd/user
+#   cp linsight.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now linsight
+#
+# By default the unit enables BOTH history and Prometheus. Override via
+# `systemctl --user edit linsight` to disable either subsystem.
+
+[Unit]
+Description=LinSight sensor daemon (always-on)
+Documentation=https://github.com/visorcraft/linsight
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/linsightd
+Restart=on-failure
+RestartSec=2s
+Environment=LINSIGHT_LOG=info
+Environment=LINSIGHT_HISTORY=1
+# Retention window for history rows (d/h/m suffix; 0 = keep forever; default 30d).
+# Uncomment and adjust to override the default:
+# Environment=LINSIGHT_HISTORY_RETENTION=30d
+Environment=LINSIGHT_PROM_BIND=127.0.0.1:9777
+# Modest resource limits — the daemon is designed to fit well within these.
+MemoryMax=64M
+CPUQuota=10%
+
+[Install]
+WantedBy=default.target
