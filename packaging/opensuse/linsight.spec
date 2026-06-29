@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.0
+Version:        1.20.1
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,15 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.1-1
+- New: real-time read/write throughput (bytes per second) shown on each
+  disk card header on the Storage page, auto-scaling from B/s to TiB/s.
+- Fix: DesignTokens warning color referenced a non-existent
+  Kirigami.Theme property, causing an undefined-QColor cascade on
+  threshold-OK tile borders.
+- Fix: eliminated boot-time double page incubation that produced
+  spurious "not placed in the graphics scene" journal warnings.
+
 * Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.0-1
 - New: NVMe drives now expose read/write operation counts (iops_read,
   iops_written) and cumulative I/O busy time (io_util_ms) on the Storage

@@ -5,6 +5,8 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 
+import "Shared.js" as Shared
+
 ColumnLayout {
     id: root
     property string label: ""
@@ -19,17 +21,10 @@ ColumnLayout {
         color: app.tokens.textPrimary
     }
     Controls.Label {
-        text: root.isBytes ? formatByteRate(root.value) : formatRate(root.value)
+        text: root.isBytes ? Shared.formatByteRate(root.value) : formatRate(root.value)
         font.pixelSize: app.tokens.textBody
         font.weight: app.tokens.weightSemibold
         color: app.tokens.textPrimary
-    }
-
-    function formatByteRate(bytesPerSec) {
-        if (bytesPerSec >= 1024 * 1024 * 1024) return (bytesPerSec / (1024 * 1024 * 1024)).toFixed(2) + " GiB/s"
-        if (bytesPerSec >= 1024 * 1024) return (bytesPerSec / (1024 * 1024)).toFixed(2) + " MiB/s"
-        if (bytesPerSec >= 1024) return (bytesPerSec / 1024).toFixed(2) + " KiB/s"
-        return bytesPerSec.toFixed(1) + " B/s"
     }
 
     function formatRate(rate) {

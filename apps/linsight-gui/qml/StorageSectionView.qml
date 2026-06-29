@@ -5,16 +5,37 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 
+import "Shared.js" as Shared
+
 // Scrollable column of physical-disk cards. Each disk card shows the disk's
 // own sensors, then inset cards for the mounts that live on it. Orphan
 // sections render as a plain card (no disk chrome, no mounts).
-Controls.ScrollView {
-    id: view
-    property var sections: []
-    // Expansion state lives here (not on the delegates) so it survives the
-    // ~1s model rebuild. Keyed by mount label (unique per mountpoint).
-    property var expandedMounts: ({})
-    clip: true
+    Controls.ScrollView {
+        id: view
+        property var sections: []
+        // Expansion state lives here (not on the delegates) so it survives the
+        // ~1s model rebuild. Keyed by mount label (unique per mountpoint).
+        property var expandedMounts: ({})
+        // Per-device throughput lookup parsed from dashModel.diskJson.
+        property var _diskRates: ({})
+        function _refreshDiskRates() {
+            if (!app.dashModel) { view._diskRates = {}; return }
+            try {
+                const arr = JSON.parse(app.dashModel.diskJson || "[]")
+                const m = {}
+                for (var i = 0; i < arr.length; i++) {
+                    var e = arr[i]
+                    if (e.device) m[e.device] = e
+                }
+                view._diskRates = m
+            } catch (e) { view._diskRates = {} }
+        }
+        onSectionsChanged: view._refreshDiskRates()
+        Connections {
+            target: app.dashModel
+            function onDiskJsonChanged() { view._refreshDiskRates() }
+        }
+        clip: true
     contentWidth: availableWidth
 
     ColumnLayout {
@@ -57,6 +78,31 @@ Controls.ScrollView {
                             }
                             opacity: 0.6
                             font.pixelSize: app.tokens.textCaption
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: modelData.kind === "disk"
+                        spacing: app.tokens.spaceS
+                        Controls.Label {
+                            visible: {
+                                var r = view._diskRates[modelData.device]
+                                return r !== undefined && (r.read_bytes_per_sec > 0 || r.written_bytes_per_sec > 0)
+                            }
+                            text: {
+                                var r = view._diskRates[modelData.device]
+                                if (!r) return ""
+                                var parts = []
+                                if (r.read_bytes_per_sec > 0)
+                                    parts.append("↓ " + Shared.formatByteRate(r.read_bytes_per_sec))
+                                if (r.written_bytes_per_sec > 0)
+                                    parts.append("↑ " + Shared.formatByteRate(r.written_bytes_per_sec))
+                                return parts.join("  ")
+                            }
+                            font.pixelSize: app.tokens.textCaption
+                            font.family: app.tokens.monoFamily
+                            color: app.tokens.accent
                         }
                     }
 

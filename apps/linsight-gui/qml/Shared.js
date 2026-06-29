@@ -16,6 +16,20 @@ function formatBytes(b) {
     return val.toFixed(2) + " " + units[i]
 }
 
+function formatByteRate(bytesPerSec) {
+    const n = Number(bytesPerSec)
+    if (isNaN(n) || n <= 0) return "0 B/s"
+    const KIB = 1024
+    const MIB = KIB * 1024
+    const GIB = MIB * 1024
+    const TIB = GIB * 1024
+    if (n >= TIB) return (n / TIB).toFixed(2) + " TiB/s"
+    if (n >= GIB) return (n / GIB).toFixed(2) + " GiB/s"
+    if (n >= MIB) return (n / MIB).toFixed(2) + " MiB/s"
+    if (n >= KIB) return (n / KIB).toFixed(2) + " KiB/s"
+    return n.toFixed(1) + " B/s"
+}
+
 function sparklineVaries(pts) {
     if (!Array.isArray(pts) || pts.length < 2) return false
     let mn = pts[0]

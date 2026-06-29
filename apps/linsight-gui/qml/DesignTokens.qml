@@ -126,7 +126,7 @@ QtObject {
     // Status colors for badges and semantic UI elements.
     readonly property color positive: _pickColor("positive", Kirigami.Theme.positiveTextColor)
     readonly property color negative: _pickColor("negative", Kirigami.Theme.negativeTextColor)
-    readonly property color warning: _pickColor("warning", Kirigami.Theme.warningTextColor)
+    readonly property color warning: _pickColor("warning", Kirigami.Theme.neutralTextColor)
     readonly property color neutral: _pickColor("neutral", Kirigami.Theme.neutralTextColor)
 
     // Monospace family probe — picks the first installed of a small

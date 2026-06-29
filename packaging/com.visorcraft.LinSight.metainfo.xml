@@ -42,6 +42,21 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.1" date="2026-06-29">
+      <description>
+        <p>New: real-time read/write throughput is now shown on each disk
+        card header on the Storage page, auto-scaling from B/s to TiB/s.
+        The rate is computed in the GUI from the existing byte counters,
+        mirroring how the Network page already derives interface
+        throughput.</p>
+        <p>Fix: the warning color token referenced a non-existent
+        Kirigami.Theme property, causing an undefined-QColor cascade that
+        broke threshold-OK tile border colors on the system theme.</p>
+        <p>Fix: eliminated a boot-time double page incubation that produced
+        spurious "Created graphical object was not placed in the graphics
+        scene" journal warnings.</p>
+      </description>
+    </release>
     <release version="1.20.0" date="2026-06-29">
       <description>
         <p>New: NVMe drives now expose read/write operation counts and

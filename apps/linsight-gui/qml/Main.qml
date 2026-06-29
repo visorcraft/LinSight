@@ -164,7 +164,46 @@ Kirigami.ApplicationWindow {
     }
 
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
-    pageStack.initialPage: overviewPage
+    pageStack.initialPage: pageFor(initialPageKey())
+
+    /// Resolve the initial page key: CLI argument wins, otherwise the
+    /// saved Start Page preference. Evaluated declaratively so PageRow
+    /// only ever incubates ONE page at boot — `onCompleted` then syncs
+    /// `currentPageKey` to match without a redundant `replace`.
+    function initialPageKey() {
+        const args = Qt.application.arguments
+        const cli = args && args.length > 1 ? args[1] : ""
+        const known = ["overview","gpus","storage","network","hardware","processes","alerts","editor","settings","about","licenses","credits"]
+        if (cli && (known.indexOf(cli) !== -1
+                    || cli.indexOf("dashboard:") === 0
+                    || cli.indexOf("editor:") === 0)) {
+            return cli
+        }
+        return resolveStartPage()
+    }
+
+    /// Map a routing key to its Component. Used by both
+    /// `pageStack.initialPage` (declarative boot) and `goTo` (runtime
+    /// navigation) so PageRow only ever incubates ONE page per boot
+    /// instead of creating Overview then immediately replacing it.
+    function pageFor(key) {
+        switch (key) {
+            case "overview":  return overviewPage
+            case "gpus":      return gpusPage
+            case "storage":   return storagePage
+            case "network":   return networkPage
+            case "hardware":  return hardwarePage
+            case "processes": return processesPage
+            case "alerts":    return alertsPage
+            case "settings":  return settingsPage
+            case "about":     return aboutPage
+            case "licenses":  return licensesPage
+            case "credits":   return creditsPage
+        }
+        if (key.indexOf("dashboard:") === 0) return dashboardViewPage
+        if (key.indexOf("editor:") === 0) return editorPage
+        return overviewPage
+    }
 
     Component.onCompleted: {
         // Pull the window to the foreground so screenshot tools and the
@@ -172,22 +211,19 @@ Kirigami.ApplicationWindow {
         // happened to be active when the binary spawned.
         app.raise()
         app.requestActivate()
-        const initial = Qt.application.arguments && Qt.application.arguments.length > 1
-            ? Qt.application.arguments[1] : ""
-        const known = ["overview","gpus","storage","network","hardware","processes","alerts","editor","settings","about","licenses","credits"]
-        if (initial && (known.indexOf(initial) !== -1
-                        || initial.indexOf("dashboard:") === 0
-                        || initial.indexOf("editor:") === 0)) {
-            // Explicit CLI page wins — useful for headless screenshot
-            // captures and for users who alias `linsight settings`.
-            goTo(initial)
-            return
+        // pageStack.initialPage already resolved the right page via
+        // initialPageKey() — just sync currentPageKey to match.
+        currentPageKey = initialPageKey()
+        // Bare "editor" (no slug) needs resolution to the active dashboard,
+        // which may prompt a dialog — can't do that in a binding.
+        if (currentPageKey === "editor") {
+            const slug = resolveActiveSlug()
+            if (slug.length > 0) {
+                goTo("editor:" + slug)
+            } else {
+                newDashboardDialog.open()
+            }
         }
-        // No CLI override: honour the saved Start Page preference.
-        // `resolveStartPage` validates against the live dashboard
-        // list and falls back to Overview if a previously-selected
-        // dashboard has been deleted.
-        goTo(resolveStartPage())
     }
 
     /// Resolve the persisted `startPage` preference into a routing
@@ -327,19 +363,7 @@ Kirigami.ApplicationWindow {
             return
         }
         currentPageKey = key
-        switch (key) {
-            case "overview": app.pageStack.replace(overviewPage); break
-            case "gpus":     app.pageStack.replace(gpusPage); break
-            case "storage":  app.pageStack.replace(storagePage); break
-            case "network":  app.pageStack.replace(networkPage); break
-            case "hardware": app.pageStack.replace(hardwarePage); break
-            case "processes": app.pageStack.replace(processesPage); break
-            case "alerts":   app.pageStack.replace(alertsPage); break
-            case "settings": app.pageStack.replace(settingsPage); break
-            case "about":    app.pageStack.replace(aboutPage); break
-            case "licenses": app.pageStack.replace(licensesPage); break
-            case "credits":  app.pageStack.replace(creditsPage); break
-        }
+        app.pageStack.replace(pageFor(key))
     }
 
     globalDrawer: Kirigami.GlobalDrawer {

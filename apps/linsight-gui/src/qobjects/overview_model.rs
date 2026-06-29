@@ -48,6 +48,7 @@ pub mod ffi {
         /// snapshots after connect/reconnect/catalogue refresh.
         #[qproperty(QString, tiles_changed_json)]
         #[qproperty(QString, network_json)]
+        #[qproperty(QString, disk_json)]
         #[qproperty(QString, processes_json)]
         #[qproperty(bool, connected)]
         type OverviewModel = super::OverviewModelRust;
@@ -156,6 +157,13 @@ struct NetworkInterfaceJson {
     speed_mbps: f64,
 }
 
+#[derive(Clone, Debug, Serialize, Default)]
+struct DiskRateJson {
+    device: String,
+    read_bytes_per_sec: f64,
+    written_bytes_per_sec: f64,
+}
+
 struct SampleState {
     tiles: HashMap<String, TileJson>,
     id_order: Vec<String>,
@@ -166,6 +174,8 @@ struct SampleState {
     static_ids: HashSet<String>,
     /// Previous raw counter sample per net sensor, keyed by sensor id.
     net_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
+    /// Previous raw counter sample per disk/nvme byte sensor.
+    disk_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
     /// Tile ids updated during the current pump tick. Cleared after the
     /// delta JSON is serialized so the next tick starts empty.
     dirty: HashSet<String>,
@@ -175,6 +185,7 @@ struct SampleState {
 struct SampleUiUpdate {
     tiles_changed_json: String,
     network_json: String,
+    disk_json: String,
     cpu_text: Option<String>,
     mem_text: Option<String>,
     cpu_temp_text: Option<String>,
@@ -250,6 +261,7 @@ fn queue_sample_ui_drain(
 fn apply_sample_ui_update(mut pin: Pin<&mut ffi::OverviewModel>, update: SampleUiUpdate) {
     pin.as_mut().set_tiles_changed_json(QString::from(update.tiles_changed_json.as_str()));
     pin.as_mut().set_network_json(QString::from(update.network_json.as_str()));
+    pin.as_mut().set_disk_json(QString::from(update.disk_json.as_str()));
     if let Some(s) = update.cpu_text {
         pin.as_mut().set_cpu_text(QString::from(s.as_str()));
     }
@@ -344,6 +356,10 @@ pub struct OverviewModelRust {
     /// JSON array of per-interface network throughput objects. Empty "[]"
     /// until the first net counter samples have been processed.
     network_json: QString,
+    /// JSON array of per-device storage throughput objects (read/write
+    /// bytes-per-second). Empty "[]" until the first disk/nvme counter
+    /// samples have been processed.
+    disk_json: QString,
     /// JSON array of process objects from proc.list. Empty "[]" until
     /// the process page is opened and the first sample arrives.
     processes_json: QString,
@@ -365,6 +381,7 @@ impl Default for OverviewModelRust {
             tiles_json: QString::from("[]"),
             tiles_changed_json: QString::from("[]"),
             network_json: QString::from("[]"),
+            disk_json: QString::from("[]"),
             processes_json: QString::from("[]"),
             connected: false,
             started: false,
@@ -551,6 +568,7 @@ impl ffi::OverviewModel {
                                 let _ = qt_thread.queue(move |mut pin| {
                                     pin.as_mut().set_tiles_json(qjson);
                                     pin.as_mut().set_network_json(QString::from("[]"));
+                                    pin.as_mut().set_disk_json(QString::from("[]"));
                                     pin.as_mut().set_cpu_text(QString::from("…"));
                                     pin.as_mut().set_mem_text(QString::from("…"));
                                     pin.as_mut().set_cpu_temp_text(QString::from("…"));
@@ -564,15 +582,21 @@ impl ffi::OverviewModel {
                                     pin.as_mut().set_connected(true);
                                 });
                             }
-                            let (delta_json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json) = {
+                            let (
+                                delta_json,
+                                network_json,
+                                disk_json,
+                                cpu,
+                                mem,
+                                cpu_temp,
+                                cpu_freq,
+                                proc_json,
+                            ) = {
                                 let mut guard = state.lock().expect("tile state poisoned");
-                                // Drain the first sample plus any others already
-                                // queued (typically the rest of this pump tick's
-                                // batch) into the in-memory state. Non-blocking;
-                                // returns once the channel is empty.
                                 drain_into_state(&rx, &mut guard, first, &mut current_g);
                                 let delta_json = take_dirty_tiles_json(&mut guard);
                                 let network_json = compute_network_rates(&mut guard);
+                                let disk_json = compute_disk_rates(&mut guard);
                                 let cpu = guard.tiles.get("cpu.util").map(|t| t.value.clone());
                                 let mem =
                                     guard.tiles.get("mem.used_bytes").map(|t| t.value.clone());
@@ -585,7 +609,16 @@ impl ffi::OverviewModel {
                                     .get("proc.list")
                                     .map(|t| serialize_proc_rows(&t.rows))
                                     .unwrap_or_else(|| "[]".to_string());
-                                (delta_json, network_json, cpu, mem, cpu_temp, cpu_freq, proc_json)
+                                (
+                                    delta_json,
+                                    network_json,
+                                    disk_json,
+                                    cpu,
+                                    mem,
+                                    cpu_temp,
+                                    cpu_freq,
+                                    proc_json,
+                                )
                             };
                             queue_sample_ui_update(
                                 &qt_thread,
@@ -593,6 +626,7 @@ impl ffi::OverviewModel {
                                 SampleUiUpdate {
                                     tiles_changed_json: delta_json,
                                     network_json,
+                                    disk_json,
                                     cpu_text: cpu,
                                     mem_text: mem,
                                     cpu_temp_text: cpu_temp,
@@ -953,6 +987,7 @@ fn build_sample_state(sensor_infos: &[SensorInfo]) -> SampleState {
         units,
         static_ids,
         net_prev: HashMap::new(),
+        disk_prev: HashMap::new(),
         dirty: HashSet::new(),
     }
 }
@@ -1043,6 +1078,72 @@ fn compute_network_rates(state: &mut SampleState) -> String {
     state.net_prev.retain(|id, _| active_net_ids.contains(id));
 
     let ordered: Vec<&NetworkInterfaceJson> = by_iface.values().collect();
+    serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Compute per-device storage throughput from the latest `bytes_read` /
+/// `bytes_written` counter samples on `disk.*` and `nvme.*` sensors.
+///
+/// Mirrors [`compute_network_rates`]: uses `state.disk_prev` as the
+/// previous sample and updates it so the next call sees a one-tick delta.
+fn compute_disk_rates(state: &mut SampleState) -> String {
+    let mut by_device: BTreeMap<String, DiskRateJson> = BTreeMap::new();
+    let ids: Vec<String> = state
+        .tiles
+        .keys()
+        .filter(|id| {
+            (id.starts_with("disk.") || id.starts_with("nvme."))
+                && (id.ends_with(".bytes_read") || id.ends_with(".bytes_written"))
+        })
+        .cloned()
+        .collect();
+
+    for id in ids {
+        let metric = match id.rsplit_once('.') {
+            Some((_, m)) => m,
+            None => continue,
+        };
+        let tile = match state.tiles.get(&id) {
+            Some(t) => t,
+            None => continue,
+        };
+        let device = match &tile.device {
+            Some(d) if !d.is_empty() => d.clone(),
+            _ => continue,
+        };
+        let ts = tile.last_ts_micros;
+        let raw = tile.last_raw_value;
+
+        let entry = by_device
+            .entry(device.clone())
+            .or_insert_with(|| DiskRateJson { device: device.clone(), ..Default::default() });
+
+        let rate = if ts == 0 {
+            0.0
+        } else if let Some((prev_ts, prev_val)) = state.disk_prev.get(&id) {
+            let delta_val = raw.saturating_sub(*prev_val);
+            let delta_us = ts.saturating_sub(*prev_ts);
+            if delta_us > 0 { (delta_val as f64) / (delta_us as f64 / 1_000_000.0) } else { 0.0 }
+        } else {
+            0.0
+        };
+        match metric {
+            "bytes_read" => entry.read_bytes_per_sec = rate,
+            "bytes_written" => entry.written_bytes_per_sec = rate,
+            _ => {}
+        }
+        state.disk_prev.insert(id, (ts, raw));
+    }
+
+    let active: HashSet<String> = state
+        .tiles
+        .keys()
+        .filter(|id| id.starts_with("disk.") || id.starts_with("nvme."))
+        .cloned()
+        .collect();
+    state.disk_prev.retain(|id, _| active.contains(id));
+
+    let ordered: Vec<&DiskRateJson> = by_device.values().collect();
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -1230,6 +1331,7 @@ mod tests {
             units,
             static_ids: HashSet::new(),
             net_prev: HashMap::new(),
+            disk_prev: HashMap::new(),
             dirty: HashSet::new(),
         }
     }
@@ -1262,6 +1364,7 @@ mod tests {
         SampleUiUpdate {
             tiles_changed_json: value.to_owned(),
             network_json: "[]".to_owned(),
+            disk_json: "[]".to_owned(),
             cpu_text: None,
             mem_text: None,
             cpu_temp_text: None,
@@ -1556,6 +1659,117 @@ mod tests {
 
         assert!(state.net_prev.contains_key("net.eth0.rx_bytes"));
         assert!(!state.net_prev.contains_key("net.eth1.rx_bytes"));
+    }
+
+    fn set_tile_device(state: &mut SampleState, id: &str, device: &str) {
+        if let Some(t) = state.tiles.get_mut(id) {
+            t.device = Some(device.to_string());
+        }
+    }
+
+    fn disk_array(state: &mut SampleState) -> Vec<serde_json::Value> {
+        let json = compute_disk_rates(state);
+        serde_json::from_str::<serde_json::Value>(&json).unwrap().as_array().unwrap().clone()
+    }
+
+    fn disk_entry<'a>(arr: &'a [serde_json::Value], device: &str) -> &'a serde_json::Value {
+        arr.iter().find(|v| v["device"] == device).expect("device in disk_json")
+    }
+
+    #[test]
+    fn disk_rate_computes_from_counter_delta() {
+        let mut state = empty_state_with_tiles(&["nvme.nvme0.bytes_read"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_read", "nvme0");
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 0, 1_000_000));
+        let _ = compute_disk_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 1_000_000, 2_500_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr.len(), 1);
+        let dev = disk_entry(&arr, "nvme0");
+        assert_eq!(dev["read_bytes_per_sec"], 1_500_000.0);
+    }
+
+    #[test]
+    fn disk_rate_first_sample_populates_prev_without_rate() {
+        let mut state = empty_state_with_tiles(&["nvme.nvme0.bytes_written"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_written", "nvme0");
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_written", 1_000_000, 5_000_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["written_bytes_per_sec"], 0.0);
+        assert_eq!(state.disk_prev.get("nvme.nvme0.bytes_written"), Some(&(1_000_000, 5_000_000)));
+    }
+
+    #[test]
+    fn disk_rate_reads_and_writes_independently() {
+        let mut state =
+            empty_state_with_tiles(&["nvme.nvme0.bytes_read", "nvme.nvme0.bytes_written"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_read", "nvme0");
+        set_tile_device(&mut state, "nvme.nvme0.bytes_written", "nvme0");
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 0, 1_000_000));
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_written", 0, 2_000_000));
+        let _ = compute_disk_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 1_000_000, 4_000_000));
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_written", 1_000_000, 8_000_000));
+        let arr = disk_array(&mut state);
+        let dev = disk_entry(&arr, "nvme0");
+        assert_eq!(dev["read_bytes_per_sec"], 3_000_000.0);
+        assert_eq!(dev["written_bytes_per_sec"], 6_000_000.0);
+    }
+
+    #[test]
+    fn disk_rate_handles_sata_and_nvme_devices() {
+        let mut state = empty_state_with_tiles(&[
+            "disk.sda.bytes_read",
+            "disk.sda.bytes_written",
+            "nvme.nvme1.bytes_read",
+        ]);
+        set_tile_device(&mut state, "disk.sda.bytes_read", "sda");
+        set_tile_device(&mut state, "disk.sda.bytes_written", "sda");
+        set_tile_device(&mut state, "nvme.nvme1.bytes_read", "nvme1");
+        apply_sample(&mut state, &counter_sample("disk.sda.bytes_read", 0, 0));
+        apply_sample(&mut state, &counter_sample("disk.sda.bytes_written", 0, 0));
+        apply_sample(&mut state, &counter_sample("nvme.nvme1.bytes_read", 0, 0));
+        let _ = compute_disk_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("disk.sda.bytes_read", 1_000_000, 500_000));
+        apply_sample(&mut state, &counter_sample("disk.sda.bytes_written", 1_000_000, 200_000));
+        apply_sample(&mut state, &counter_sample("nvme.nvme1.bytes_read", 1_000_000, 2_000_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr.len(), 2);
+        let sda = disk_entry(&arr, "sda");
+        assert_eq!(sda["read_bytes_per_sec"], 500_000.0);
+        assert_eq!(sda["written_bytes_per_sec"], 200_000.0);
+        let nvme1 = disk_entry(&arr, "nvme1");
+        assert_eq!(nvme1["read_bytes_per_sec"], 2_000_000.0);
+    }
+
+    #[test]
+    fn disk_rate_decreasing_counter_saturates_to_zero() {
+        let mut state = empty_state_with_tiles(&["nvme.nvme0.bytes_read"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_read", "nvme0");
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 0, 1_000_000));
+        let _ = compute_disk_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 1_000_000, 500_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr[0]["read_bytes_per_sec"], 0.0);
+    }
+
+    #[test]
+    fn disk_rate_prunes_stale_prev_entries() {
+        let mut state = empty_state_with_tiles(&["nvme.nvme0.bytes_read", "nvme.nvme1.bytes_read"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_read", "nvme0");
+        set_tile_device(&mut state, "nvme.nvme1.bytes_read", "nvme1");
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 0, 1_000_000));
+        apply_sample(&mut state, &counter_sample("nvme.nvme1.bytes_read", 0, 2_000_000));
+        let _ = compute_disk_rates(&mut state);
+        assert!(state.disk_prev.contains_key("nvme.nvme0.bytes_read"));
+        assert!(state.disk_prev.contains_key("nvme.nvme1.bytes_read"));
+
+        state.tiles.remove("nvme.nvme1.bytes_read");
+        let _ = compute_disk_rates(&mut state);
+
+        assert!(state.disk_prev.contains_key("nvme.nvme0.bytes_read"));
+        assert!(!state.disk_prev.contains_key("nvme.nvme1.bytes_read"));
     }
 
     #[test]
