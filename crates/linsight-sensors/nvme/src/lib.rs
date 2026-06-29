@@ -9,17 +9,22 @@
 //! * `nvme.<id>.temp_c` — composite temperature from the first hwmon
 //! * `nvme.<id>.bytes_read` — cumulative bytes read (Counter)
 //! * `nvme.<id>.bytes_written` — cumulative bytes written (Counter)
+//! * `nvme.<id>.iops_read` — cumulative read operations (Counter)
+//! * `nvme.<id>.iops_written` — cumulative write operations (Counter)
+//! * `nvme.<id>.io_util_ms` — cumulative I/O time in ms (Counter)
 //!
-//! Bytes are derived from the namespace's `/sys/class/block/nvme<N>n1/stat`
-//! file (sectors × 512).
+//! Block I/O metrics are derived from the namespace's
+//! `/sys/class/block/nvme<N>n1/stat` file (sectors × 512 for bytes).
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use linsight_core::{
     Category, HardwareCategory, HardwareDevice, HardwareDeviceKey, Reading, SensorId, SensorKind,
-    Unit,
+    SnapshotCache, Unit,
 };
 use linsight_plugin_sdk::stabby::result::Result as SResult;
 use linsight_plugin_sdk::{
@@ -36,7 +41,10 @@ pub struct NvmePlugin {
 struct Inner {
     sysroot: Option<PathBuf>,
     devices: Vec<NvmeDevice>,
+    cache: Option<SnapshotCache<HashMap<String, BlockStat>>>,
 }
+
+const CACHE_TTL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug)]
 struct NvmeDevice {
@@ -74,7 +82,7 @@ impl NvmePlugin {
         inner.sysroot = ctx.sysroot().map(|p| p.to_path_buf());
         inner.devices = enumerate(ctx.sysroot()).map_err(|e| PluginError::Io(e.to_string()))?;
 
-        let mut sensors = Vec::with_capacity(inner.devices.len() * 4);
+        let mut sensors = Vec::with_capacity(inner.devices.len() * 7);
         let mut devices: Vec<HardwareDevice> = Vec::with_capacity(inner.devices.len());
         for dev in &inner.devices {
             // Device identity is carried via device_key → device_label and
@@ -146,6 +154,45 @@ impl NvmePlugin {
                     device_key: Some(key.clone()),
                     tags: vec![],
                 });
+                sensors.push(SensorDescriptor {
+                    id: SensorId::new(format!("nvme.{}.iops_read", dev.name)),
+                    display_name: "NVMe read operations".into(),
+                    unit: Unit::Count,
+                    kind: SensorKind::Counter,
+                    category: Category::Storage,
+                    native_rate_hz: 1.0,
+                    min: Some(0.0),
+                    max: None,
+                    device_id: Some(dev.name.clone()),
+                    device_key: Some(key.clone()),
+                    tags: vec![],
+                });
+                sensors.push(SensorDescriptor {
+                    id: SensorId::new(format!("nvme.{}.iops_written", dev.name)),
+                    display_name: "NVMe write operations".into(),
+                    unit: Unit::Count,
+                    kind: SensorKind::Counter,
+                    category: Category::Storage,
+                    native_rate_hz: 1.0,
+                    min: Some(0.0),
+                    max: None,
+                    device_id: Some(dev.name.clone()),
+                    device_key: Some(key.clone()),
+                    tags: vec![],
+                });
+                sensors.push(SensorDescriptor {
+                    id: SensorId::new(format!("nvme.{}.io_util_ms", dev.name)),
+                    display_name: "NVMe I/O time".into(),
+                    unit: Unit::Custom("ms".into()),
+                    kind: SensorKind::Counter,
+                    category: Category::Storage,
+                    native_rate_hz: 1.0,
+                    min: Some(0.0),
+                    max: None,
+                    device_id: Some(dev.name.clone()),
+                    device_key: Some(key.clone()),
+                    tags: vec![],
+                });
             }
         }
         Ok(PluginManifest {
@@ -158,37 +205,69 @@ impl NvmePlugin {
     }
 
     fn sample_inner(&self, sensor: SensorId) -> Result<Reading, PluginError> {
-        let inner = self.inner.lock().expect("NvmePlugin poisoned");
+        let mut inner = self.inner.lock().expect("NvmePlugin poisoned");
         let id = sensor.as_str();
         let rest = id.strip_prefix("nvme.").ok_or_else(|| PluginError::Unsupported(id.into()))?;
         let (name, metric) =
             rest.split_once('.').ok_or_else(|| PluginError::Unsupported(id.into()))?;
-        let dev = inner
-            .devices
-            .iter()
-            .find(|d| d.name == name)
-            .ok_or_else(|| PluginError::Unsupported(id.into()))?;
         match metric {
-            "capacity_bytes" => Ok(Reading::Scalar(dev.capacity_bytes as f64)),
+            "capacity_bytes" => {
+                let dev = inner
+                    .devices
+                    .iter()
+                    .find(|d| d.name == name)
+                    .ok_or_else(|| PluginError::Unsupported(id.into()))?;
+                Ok(Reading::Scalar(dev.capacity_bytes as f64))
+            }
             "temp_c" => {
+                let dev = inner
+                    .devices
+                    .iter()
+                    .find(|d| d.name == name)
+                    .ok_or_else(|| PluginError::Unsupported(id.into()))?;
                 let hwmon =
                     dev.hwmon_root.as_ref().ok_or_else(|| PluginError::Unsupported(id.into()))?;
                 let milli = read_i64(&hwmon.join("temp1_input"))?;
                 Ok(Reading::Scalar(milli as f64 / 1000.0))
             }
-            "bytes_read" | "bytes_written" => {
-                let stat =
-                    dev.block_stat.as_ref().ok_or_else(|| PluginError::Unsupported(id.into()))?;
-                let parsed = read_block_stat(stat)?;
-                let bytes = if metric == "bytes_read" {
-                    parsed.sectors_read.saturating_mul(512)
-                } else {
-                    parsed.sectors_written.saturating_mul(512)
+            "bytes_read" | "bytes_written" | "iops_read" | "iops_written" | "io_util_ms" => {
+                let stats = Self::snapshot(&mut inner)?;
+                let stat = stats.get(name).ok_or_else(|| PluginError::Unsupported(id.into()))?;
+                let value = match metric {
+                    "bytes_read" => stat.sectors_read.saturating_mul(512),
+                    "bytes_written" => stat.sectors_written.saturating_mul(512),
+                    "iops_read" => stat.reads_completed,
+                    "iops_written" => stat.writes_completed,
+                    "io_util_ms" => stat.io_ticks,
+                    _ => unreachable!(),
                 };
-                Ok(Reading::Counter(bytes))
+                Ok(Reading::Counter(value))
             }
             _ => Err(PluginError::Unsupported(id.into())),
         }
+    }
+
+    fn snapshot(inner: &mut Inner) -> Result<Arc<HashMap<String, BlockStat>>, PluginError> {
+        if let Some(cache) = &inner.cache
+            && let Some(stats) = cache.get(CACHE_TTL)
+        {
+            return Ok(stats);
+        }
+
+        let mut stats = HashMap::with_capacity(inner.devices.len());
+        let mut files_read = 0usize;
+        for dev in &inner.devices {
+            if let Some(ref stat_path) = dev.block_stat
+                && let Ok(stat) = read_block_stat(stat_path)
+            {
+                stats.insert(dev.name.clone(), stat);
+                files_read += 1;
+            }
+        }
+        tracing::debug!(target: "linsight_sensors::reads", plugin = "nvme", files_read);
+        let stats = Arc::new(stats);
+        inner.cache = Some(SnapshotCache::new(Arc::clone(&stats)));
+        Ok(stats)
     }
 }
 
@@ -210,29 +289,37 @@ impl LinsightPlugin for NvmePlugin {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct BlockStat {
+    reads_completed: u64,
+    writes_completed: u64,
     sectors_read: u64,
     sectors_written: u64,
+    io_ticks: u64,
 }
 
 fn read_block_stat(p: &Path) -> Result<BlockStat, PluginError> {
     let s = fs::read_to_string(p).map_err(|e| PluginError::Io(format!("{}: {e}", p.display())))?;
-    let mut fields = s.split_whitespace();
-    let _reads = fields.next();
-    let _read_merged = fields.next();
-    let sectors_read = fields
-        .next()
-        .and_then(|t| t.parse::<u64>().ok())
-        .ok_or_else(|| PluginError::Parse("missing sectors_read".into()))?;
-    let _read_ticks = fields.next();
-    let _writes = fields.next();
-    let _write_merged = fields.next();
-    let sectors_written = fields
-        .next()
-        .and_then(|t| t.parse::<u64>().ok())
-        .ok_or_else(|| PluginError::Parse("missing sectors_written".into()))?;
-    Ok(BlockStat { sectors_read, sectors_written })
+    let fields: Vec<&str> = s.split_whitespace().collect();
+    if fields.len() < 11 {
+        return Err(PluginError::Parse(format!(
+            "{}: expected ≥11 fields, got {}",
+            p.display(),
+            fields.len()
+        )));
+    }
+    let parse = |idx: usize| -> Result<u64, PluginError> {
+        fields[idx]
+            .parse::<u64>()
+            .map_err(|e| PluginError::Parse(format!("{} field {}: {e}", p.display(), idx + 1)))
+    };
+    Ok(BlockStat {
+        reads_completed: parse(0)?,
+        writes_completed: parse(4)?,
+        sectors_read: parse(2)?,
+        sectors_written: parse(6)?,
+        io_ticks: parse(9)?,
+    })
 }
 
 fn enumerate(sysroot: Option<&Path>) -> Result<Vec<NvmeDevice>, std::io::Error> {
@@ -336,7 +423,7 @@ fn read_i64(p: &Path) -> Result<i64, PluginError> {
 
 #[cfg(test)]
 mod tests {
-    use linsight_plugin_sdk::host_init;
+    use linsight_plugin_sdk::{host_init, host_sample};
 
     use super::*;
 
@@ -408,5 +495,90 @@ mod tests {
         assert_eq!(devices[0].name, "nvme0");
         assert!(devices[0].hwmon_root.is_some());
         assert!(devices[0].block_stat.is_some());
+    }
+
+    fn synthetic_nvme_sysroot() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ctrl = dir.path().join("sys/class/nvme/nvme0");
+        fs::create_dir_all(ctrl.join("hwmon5")).unwrap();
+        fs::write(ctrl.join("model"), "Predator SSD GM7 4TB\n").unwrap();
+        fs::write(ctrl.join("wwid"), "eui.0025388712345678\n").unwrap();
+        fs::write(ctrl.join("hwmon5/temp1_input"), "42000\n").unwrap();
+        let block = dir.path().join("sys/class/block/nvme0n1");
+        fs::create_dir_all(&block).unwrap();
+        // stat fields: reads=100, read_merged=200, sectors_read=300,
+        // read_ticks=400, writes=500, write_merged=600, sectors_written=700,
+        // write_ticks=800, in_progress=0, io_ticks=900, weighted_io_ticks=1000
+        fs::write(block.join("stat"), "100 200 300 400 500 600 700 800 0 900 1000\n").unwrap();
+        fs::write(block.join("size"), "500000000\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn init_advertises_seven_sensors_per_device() {
+        let dir = synthetic_nvme_sysroot();
+        let plugin = NvmePlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        let manifest = host_init(&plugin, &ctx).unwrap();
+
+        // capacity + temp + bytes_read + bytes_written + iops_read +
+        // iops_written + io_util_ms = 7 sensors for one device.
+        let ids: Vec<&str> = manifest.sensors.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids.len(), 7);
+        assert!(ids.contains(&"nvme.nvme0.capacity_bytes"));
+        assert!(ids.contains(&"nvme.nvme0.temp_c"));
+        assert!(ids.contains(&"nvme.nvme0.bytes_read"));
+        assert!(ids.contains(&"nvme.nvme0.bytes_written"));
+        assert!(ids.contains(&"nvme.nvme0.iops_read"));
+        assert!(ids.contains(&"nvme.nvme0.iops_written"));
+        assert!(ids.contains(&"nvme.nvme0.io_util_ms"));
+    }
+
+    #[test]
+    fn sample_io_sensors() {
+        let dir = synthetic_nvme_sysroot();
+        let plugin = NvmePlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+
+        // bytes_read = 300 sectors * 512 = 153600
+        let r = host_sample(&plugin, &SensorId::new("nvme.nvme0.bytes_read")).unwrap();
+        assert!(matches!(r, Reading::Counter(153600)));
+
+        // bytes_written = 700 * 512 = 358400
+        let r = host_sample(&plugin, &SensorId::new("nvme.nvme0.bytes_written")).unwrap();
+        assert!(matches!(r, Reading::Counter(358400)));
+
+        // iops_read = 100 (reads_completed, field 1)
+        let r = host_sample(&plugin, &SensorId::new("nvme.nvme0.iops_read")).unwrap();
+        assert!(matches!(r, Reading::Counter(100)));
+
+        // iops_written = 500 (writes_completed, field 5)
+        let r = host_sample(&plugin, &SensorId::new("nvme.nvme0.iops_written")).unwrap();
+        assert!(matches!(r, Reading::Counter(500)));
+
+        // io_util_ms = 900 (io_ticks, field 10)
+        let r = host_sample(&plugin, &SensorId::new("nvme.nvme0.io_util_ms")).unwrap();
+        assert!(matches!(r, Reading::Counter(900)));
+    }
+
+    #[test]
+    fn snapshot_cache_reuses_within_ttl() {
+        let dir = synthetic_nvme_sysroot();
+        let plugin = NvmePlugin::default();
+        let ctx = PluginCtx::new_with_sysroot(dir.path().to_path_buf()).unwrap();
+        host_init(&plugin, &ctx).unwrap();
+
+        // First sample populates the cache with sectors_read=300.
+        let r1 = host_sample(&plugin, &SensorId::new("nvme.nvme0.bytes_read")).unwrap();
+        assert!(matches!(r1, Reading::Counter(153600)));
+
+        // Rewrite the stat file on disk.
+        let stat_path = dir.path().join("sys/class/block/nvme0n1/stat");
+        fs::write(&stat_path, "999 200 999 400 500 600 700 800 0 900 1000").unwrap();
+
+        // Immediate second sample should still see the cached value.
+        let r2 = host_sample(&plugin, &SensorId::new("nvme.nvme0.bytes_read")).unwrap();
+        assert!(matches!(r2, Reading::Counter(153600)), "cache should serve stale value");
     }
 }

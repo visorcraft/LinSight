@@ -13,6 +13,7 @@ description = "NVMe SSD sensor backend (composite temperature + I/O counters)."
 [dependencies]
 linsight-core = { path = "../../linsight-core", version = "1.4.0" }
 linsight-plugin-sdk = { path = "../../linsight-plugin-sdk", version = "1.4.0" }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

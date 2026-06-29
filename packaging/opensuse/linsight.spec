@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.19.5
+Version:        1.20.0
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.0-1
+- New: NVMe drives now expose read/write operation counts (iops_read,
+  iops_written) and cumulative I/O busy time (io_util_ms) on the Storage
+  page. The nvme plugin already read the namespace's diskstats file but
+  discarded these fields; they are now surfaced alongside bytes read/written.
+
 * Sat Jun 27 2026 VisorCraft LLC <support@visorcraft.com> - 1.19.5-1
 - Repo hygiene: stopped tracking a machine-specific .qmlls.ini that pinned an
   absolute local build path; it is now git-ignored.

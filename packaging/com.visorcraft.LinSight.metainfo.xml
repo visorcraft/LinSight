@@ -42,6 +42,16 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.0" date="2026-06-29">
+      <description>
+        <p>New: NVMe drives now expose read/write operation counts and
+        cumulative I/O busy time on the Storage page. The nvme plugin already
+        read the namespace's diskstats file for bytes read/written but discarded
+        the operation-count and busy-time fields; these are now surfaced as
+        three new sensors (iops_read, iops_written, io_util_ms) alongside the
+        existing byte counters.</p>
+      </description>
+    </release>
     <release version="1.19.5" date="2026-06-27">
       <description>
         <p>Repo hygiene: stopped tracking a machine-specific .qmlls.ini that
