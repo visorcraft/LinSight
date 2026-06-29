@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.2
+Version:        1.20.3
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,10 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.3-1
+- Fix: Storage throughput now holds the last non-zero rate for 5 seconds
+  before decaying to zero, preventing flicker on bursty NVMe I/O.
+
 * Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.2-1
 - Fix: Storage throughput row was invisible because it was hidden when
   both read/write rates were zero (idle drives). Now always shown for

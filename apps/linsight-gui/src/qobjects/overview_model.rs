@@ -176,6 +176,10 @@ struct SampleState {
     net_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
     /// Previous raw counter sample per disk/nvme byte sensor.
     disk_prev: HashMap<String, (u64, u64)>, // (ts_micros, value)
+    /// Last non-zero rate per disk/nvme byte sensor, held so bursty I/O
+    /// doesn't flicker to zero between idle ticks. Keyed by sensor id:
+    /// `(ts_micros_when_nonzero, rate)`.
+    disk_rate_hold: HashMap<String, (u64, f64)>,
     /// Tile ids updated during the current pump tick. Cleared after the
     /// delta JSON is serialized so the next tick starts empty.
     dirty: HashSet<String>,
@@ -988,6 +992,7 @@ fn build_sample_state(sensor_infos: &[SensorInfo]) -> SampleState {
         static_ids,
         net_prev: HashMap::new(),
         disk_prev: HashMap::new(),
+        disk_rate_hold: HashMap::new(),
         dirty: HashSet::new(),
     }
 }
@@ -1086,7 +1091,14 @@ fn compute_network_rates(state: &mut SampleState) -> String {
 ///
 /// Mirrors [`compute_network_rates`]: uses `state.disk_prev` as the
 /// previous sample and updates it so the next call sees a one-tick delta.
+///
+/// A 5-second rate hold smooths bursty I/O: when a tick's computed rate
+/// is zero but the last non-zero rate was within the hold window, the
+/// held rate is reported instead. This prevents the display from
+/// flickering to "0 B/s" between short I/O bursts.
 fn compute_disk_rates(state: &mut SampleState) -> String {
+    const HOLD_US: u64 = 5_000_000; // 5 seconds
+
     let mut by_device: BTreeMap<String, DiskRateJson> = BTreeMap::new();
     let ids: Vec<String> = state
         .tiles
@@ -1118,7 +1130,7 @@ fn compute_disk_rates(state: &mut SampleState) -> String {
             .entry(device.clone())
             .or_insert_with(|| DiskRateJson { device: device.clone(), ..Default::default() });
 
-        let rate = if ts == 0 {
+        let raw_rate = if ts == 0 {
             0.0
         } else if let Some((prev_ts, prev_val)) = state.disk_prev.get(&id) {
             let delta_val = raw.saturating_sub(*prev_val);
@@ -1127,9 +1139,22 @@ fn compute_disk_rates(state: &mut SampleState) -> String {
         } else {
             0.0
         };
+
+        // Apply rate hold: if the raw rate is zero but the last non-zero
+        // rate was within HOLD_US, keep showing it so bursty I/O doesn't
+        // flicker to zero between idle ticks.
+        let held_rate = if raw_rate > 0.0 {
+            state.disk_rate_hold.insert(id.clone(), (ts, raw_rate));
+            raw_rate
+        } else if let Some((hold_ts, hold_rate)) = state.disk_rate_hold.get(&id) {
+            if ts.saturating_sub(*hold_ts) < HOLD_US { *hold_rate } else { 0.0 }
+        } else {
+            0.0
+        };
+
         match metric {
-            "bytes_read" => entry.read_bytes_per_sec = rate,
-            "bytes_written" => entry.written_bytes_per_sec = rate,
+            "bytes_read" => entry.read_bytes_per_sec = held_rate,
+            "bytes_written" => entry.written_bytes_per_sec = held_rate,
             _ => {}
         }
         state.disk_prev.insert(id, (ts, raw));
@@ -1142,6 +1167,7 @@ fn compute_disk_rates(state: &mut SampleState) -> String {
         .cloned()
         .collect();
     state.disk_prev.retain(|id, _| active.contains(id));
+    state.disk_rate_hold.retain(|id, _| active.contains(id));
 
     let ordered: Vec<&DiskRateJson> = by_device.values().collect();
     serde_json::to_string(&ordered).unwrap_or_else(|_| "[]".to_string())
@@ -1332,6 +1358,7 @@ mod tests {
             static_ids: HashSet::new(),
             net_prev: HashMap::new(),
             disk_prev: HashMap::new(),
+            disk_rate_hold: HashMap::new(),
             dirty: HashSet::new(),
         }
     }
@@ -1770,6 +1797,63 @@ mod tests {
 
         assert!(state.disk_prev.contains_key("nvme.nvme0.bytes_read"));
         assert!(!state.disk_prev.contains_key("nvme.nvme1.bytes_read"));
+    }
+
+    #[test]
+    fn disk_rate_holds_nonzero_for_five_seconds() {
+        // Bursty I/O: a real read happens, then two idle ticks. The rate
+        // must hold at the last non-zero value for ~5 seconds before
+        // decaying back to zero.
+        let mut state = empty_state_with_tiles(&["nvme.nvme0.bytes_read"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_read", "nvme0");
+
+        // Tick 0→1s: 3 MB read → 3 MB/s.
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 0, 0));
+        let _ = compute_disk_rates(&mut state);
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 1_000_000, 3_000_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr[0]["read_bytes_per_sec"], 3_000_000.0);
+
+        // Tick 1→2s: no new bytes (idle). Rate should HOLD at 3 MB/s.
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 2_000_000, 3_000_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr[0]["read_bytes_per_sec"], 3_000_000.0, "rate should hold within 5s window");
+
+        // Tick 1→6s: still idle, but now 5s past the last non-zero. Rate
+        // should decay to zero.
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 6_000_000, 3_000_000));
+        let arr = disk_array(&mut state);
+        assert_eq!(arr[0]["read_bytes_per_sec"], 0.0, "rate should decay after 5s hold");
+    }
+
+    #[test]
+    fn disk_rate_hold_independent_read_and_write() {
+        // Read holds while write is idle, and vice versa.
+        let mut state =
+            empty_state_with_tiles(&["nvme.nvme0.bytes_read", "nvme.nvme0.bytes_written"]);
+        set_tile_device(&mut state, "nvme.nvme0.bytes_read", "nvme0");
+        set_tile_device(&mut state, "nvme.nvme0.bytes_written", "nvme0");
+
+        // Establish baselines.
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 0, 0));
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_written", 0, 0));
+        let _ = compute_disk_rates(&mut state);
+
+        // Tick 0→1s: read 2 MB, write nothing.
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 1_000_000, 2_000_000));
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_written", 1_000_000, 0));
+        let arr = disk_array(&mut state);
+        let dev = disk_entry(&arr, "nvme0");
+        assert_eq!(dev["read_bytes_per_sec"], 2_000_000.0);
+        assert_eq!(dev["written_bytes_per_sec"], 0.0);
+
+        // Tick 1→2s: read idle (should hold), write 1 MB (new).
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_read", 2_000_000, 2_000_000));
+        apply_sample(&mut state, &counter_sample("nvme.nvme0.bytes_written", 2_000_000, 1_000_000));
+        let arr = disk_array(&mut state);
+        let dev = disk_entry(&arr, "nvme0");
+        assert_eq!(dev["read_bytes_per_sec"], 2_000_000.0, "read should hold");
+        assert_eq!(dev["written_bytes_per_sec"], 1_000_000.0);
     }
 
     #[test]

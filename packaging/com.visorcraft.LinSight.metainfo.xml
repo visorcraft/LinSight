@@ -42,6 +42,13 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.3" date="2026-06-29">
+      <description>
+        <p>Fix: Storage throughput now holds the last non-zero rate for 5
+        seconds before decaying to zero, preventing the display from
+        flickering to "0 B/s" between short I/O bursts on fast NVMe drives.</p>
+      </description>
+    </release>
     <release version="1.20.2" date="2026-06-29">
       <description>
         <p>Fix: the Storage throughput row added in 1.20.1 was invisible
