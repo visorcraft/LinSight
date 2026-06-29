@@ -122,3 +122,6 @@ Desktop.ini
 
 # ripgrep override for opencode (un-ignores AGENTS.md etc. for search); local-only
 .ignore
+
+# Local release-artifact cache kept by clean_visorcraft_repos
+/_releases/
