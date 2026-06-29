@@ -17,9 +17,9 @@ import "Shared.js" as Shared
         // ~1s model rebuild. Keyed by mount label (unique per mountpoint).
         property var expandedMounts: ({})
         // Per-device throughput lookup parsed from dashModel.diskJson.
-        property var _diskRates: ({})
-        function _refreshDiskRates() {
-            if (!app.dashModel) { view._diskRates = {}; return }
+        // Reactive: re-parses whenever diskJson changes (every sample tick).
+        readonly property var _diskRates: {
+            if (!app.dashModel) return {}
             try {
                 const arr = JSON.parse(app.dashModel.diskJson || "[]")
                 const m = {}
@@ -27,13 +27,8 @@ import "Shared.js" as Shared
                     var e = arr[i]
                     if (e.device) m[e.device] = e
                 }
-                view._diskRates = m
-            } catch (e) { view._diskRates = {} }
-        }
-        onSectionsChanged: view._refreshDiskRates()
-        Connections {
-            target: app.dashModel
-            function onDiskJsonChanged() { view._refreshDiskRates() }
+                return m
+            } catch (e) { return {} }
         }
         clip: true
     contentWidth: availableWidth
@@ -86,19 +81,11 @@ import "Shared.js" as Shared
                         visible: modelData.kind === "disk"
                         spacing: app.tokens.spaceS
                         Controls.Label {
-                            visible: {
-                                var r = view._diskRates[modelData.device]
-                                return r !== undefined && (r.read_bytes_per_sec > 0 || r.written_bytes_per_sec > 0)
-                            }
                             text: {
                                 var r = view._diskRates[modelData.device]
-                                if (!r) return ""
-                                var parts = []
-                                if (r.read_bytes_per_sec > 0)
-                                    parts.append("↓ " + Shared.formatByteRate(r.read_bytes_per_sec))
-                                if (r.written_bytes_per_sec > 0)
-                                    parts.append("↑ " + Shared.formatByteRate(r.written_bytes_per_sec))
-                                return parts.join("  ")
+                                if (!r) return "↓ 0 B/s  ↑ 0 B/s"
+                                return "↓ " + Shared.formatByteRate(r.read_bytes_per_sec)
+                                     + "  ↑ " + Shared.formatByteRate(r.written_bytes_per_sec)
                             }
                             font.pixelSize: app.tokens.textCaption
                             font.family: app.tokens.monoFamily
