@@ -1,3 +1,12 @@
+linsight (1.20.2-1) unstable; urgency=medium
+
+  * Fix: Storage throughput row was invisible because it was hidden when
+    both read/write rates were zero (idle drives). Now always shown for
+    disk sections. Switched to a reactive property binding for robust
+    per-tick updates.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Mon, 29 Jun 2026 16:00:00 +0000
+
 linsight (1.20.1-1) unstable; urgency=medium
 
   * New: real-time read/write throughput (bytes per second) shown on each

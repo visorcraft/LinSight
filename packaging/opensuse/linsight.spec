@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.1
+Version:        1.20.2
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,12 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.2-1
+- Fix: Storage throughput row was invisible because it was hidden when
+  both read/write rates were zero (idle drives). Now always shown for
+  disk sections. Switched to a reactive property binding for robust
+  per-tick updates.
+
 * Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.1-1
 - New: real-time read/write throughput (bytes per second) shown on each
   disk card header on the Storage page, auto-scaling from B/s to TiB/s.

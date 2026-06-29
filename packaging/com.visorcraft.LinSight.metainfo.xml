@@ -42,6 +42,15 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.2" date="2026-06-29">
+      <description>
+        <p>Fix: the Storage throughput row added in 1.20.1 was invisible
+        because its visibility was conditioned on non-zero rates, hiding it
+        on idle drives. It is now always shown for disk sections, and the
+        rate lookup uses a reactive property binding for robust per-tick
+        updates.</p>
+      </description>
+    </release>
     <release version="1.20.1" date="2026-06-29">
       <description>
         <p>New: real-time read/write throughput is now shown on each disk
