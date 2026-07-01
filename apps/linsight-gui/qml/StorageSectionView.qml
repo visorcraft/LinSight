@@ -13,6 +13,11 @@ import "Shared.js" as Shared
     Controls.ScrollView {
         id: view
         property var sections: []
+        // Live value maps passed from CategoryPage so tile values update
+        // every tick without rebuilding the section structure.
+        property var valuesById: ({})
+        property var sparklineById: ({})
+        property var rowsById: ({})
         // Expansion state lives here (not on the delegates) so it survives the
         // ~1s model rebuild. Keyed by mount label (unique per mountpoint).
         property var expandedMounts: ({})
@@ -98,23 +103,23 @@ import "Shared.js" as Shared
                         columns: Math.max(1, Math.floor(view.availableWidth / 240))
                         rowSpacing: app.tokens.spaceM
                         columnSpacing: app.tokens.spaceM
-                        Repeater {
-                            model: modelData.ownTiles
-                            delegate: SensorTile {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 156
-                                tileName: modelData.name
-                                tileDeviceLabel: ""
-                                tileValue: modelData.value
-                                tileKind: modelData.kind || "scalar"
-                                tileRows: modelData.rows || []
-                                tileSensorId: (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
-                                tileUnit: modelData.unit || ""
-                                tileSparkline: modelData.sparkline || []
-                                sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
-                            }
+                    Repeater {
+                        model: modelData.ownTiles
+                        delegate: SensorTile {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 156
+                            tileName: modelData.name
+                            tileDeviceLabel: ""
+                            tileValue: view.valuesById[modelData.id] || modelData.value || "…"
+                            tileKind: modelData.kind || "scalar"
+                            tileRows: view.rowsById[modelData.id] || modelData.rows || []
+                            tileSensorId: (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
+                            tileUnit: modelData.unit || ""
+                            tileSparkline: view.sparklineById[modelData.id] || modelData.sparkline || []
+                            sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
                         }
+                    }
                     }
 
                     Repeater {
@@ -179,12 +184,12 @@ import "Shared.js" as Shared
                                             Layout.preferredHeight: 156
                                             tileName: modelData.name
                                             tileDeviceLabel: ""
-                                            tileValue: modelData.value
+                                            tileValue: view.valuesById[modelData.id] || modelData.value || "…"
                                             tileKind: modelData.kind || "scalar"
-                                            tileRows: modelData.rows || []
+                                            tileRows: view.rowsById[modelData.id] || modelData.rows || []
                                             tileSensorId: (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
                                             tileUnit: modelData.unit || ""
-                                            tileSparkline: modelData.sparkline || []
+                                            tileSparkline: view.sparklineById[modelData.id] || modelData.sparkline || []
                                             sparklinesEnabled: app.preferences ? app.preferences.sparklines : true
                                         }
                                     }

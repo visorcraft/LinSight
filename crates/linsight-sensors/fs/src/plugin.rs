@@ -74,7 +74,18 @@ struct Inner {
     /// Limits how many statvfs worker threads can be in flight at once so a
     /// cluster of hung NFS mounts cannot spawn an unbounded number of threads.
     sem: Arc<Semaphore>,
+    /// JoinHandles for spawned statvfs workers that haven't been joined
+    /// yet. Finished handles are reaped at the start of each snapshot; the
+    /// cap prevents a perpetually-hung mount from accumulating detached
+    /// threads over long-running periods (each timed-out spawn would
+    /// otherwise linger forever).
+    detached_handles: Vec<std::thread::JoinHandle<()>>,
 }
+
+/// Upper bound on simultaneously-existing (not necessarily running) detached
+/// statvfs worker threads. When reached, further mounts are treated as timed
+/// out for this tick and backed off normally.
+const MAX_DETACHED_HANDLES: usize = 32;
 
 impl Default for Inner {
     fn default() -> Self {
@@ -85,6 +96,7 @@ impl Default for Inner {
             backoff: HashMap::new(),
             strikes: HashMap::new(),
             sem: Arc::new(Semaphore::new(MAX_CONCURRENT_STATVFS)),
+            detached_handles: Vec::new(),
         }
     }
 }
@@ -409,6 +421,11 @@ fn snapshot_with(
         ));
     }
 
+    // Reap finished statvfs workers so the detached-handle list doesn't
+    // grow without bound when mounts are healthy (their threads finish
+    // between ticks). Only perpetually-hung threads stay in the list.
+    inner.detached_handles.retain(|h| !h.is_finished());
+
     // Spawn each statvfs call in its own worker thread, capped by a
     // semaphore. A hung mount only blocks its own recv timeout; the
     // permit is released immediately so other mounts can proceed.
@@ -430,12 +447,20 @@ fn snapshot_with(
             outcomes.push((mp, rx.recv_timeout(remaining)));
             drop(permit);
         }
+        // Hard cap on detached worker threads: when too many previous
+        // statvfs calls are still stuck on hung mounts, skip this one
+        // and treat it as a timeout (escalating backoff applies).
+        if inner.detached_handles.len() >= MAX_DETACHED_HANDLES {
+            outcomes.push((mountpoint.clone(), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+            continue;
+        }
         let permit = inner.sem.acquire();
         let mp = mountpoint.clone();
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let _ = tx.send(stat_fn(&mp));
         });
+        inner.detached_handles.push(handle);
         pending.push((mountpoint, rx, permit));
     }
 

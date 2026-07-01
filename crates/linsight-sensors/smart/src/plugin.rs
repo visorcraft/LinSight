@@ -55,10 +55,27 @@ where
         return Err(PluginError::Unsupported("udisks2 backed off after repeated timeouts".into()));
     }
 
+    // Reap finished udisks2 fetch workers.
+    inner.detached_handles.retain(|h| !h.is_finished());
+
+    // Cap detached threads: when too many previous fetch calls are still
+    // stuck on a wedged D-Bus, treat this call as a timeout instead of
+    // spawning yet another thread.
+    if inner.detached_handles.len() >= MAX_DETACHED_HANDLES {
+        inner.timeout_strikes = inner.timeout_strikes.saturating_add(1);
+        let factor = 1u64 << inner.timeout_strikes.min(8);
+        inner.backoff_until =
+            Some(Instant::now() + BACKOFF_BASE.saturating_mul(factor as u32).min(BACKOFF_MAX));
+        return Err(PluginError::Unsupported(format!(
+            "udisks2 detached-worker cap reached ({MAX_DETACHED_HANDLES}); backing off"
+        )));
+    }
+
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         let _ = tx.send(fetch());
     });
+    inner.detached_handles.push(handle);
     let result = rx.recv_timeout(timeout).map_err(|_| {
         inner.timeout_strikes = inner.timeout_strikes.saturating_add(1);
         let factor = 1u64 << inner.timeout_strikes.min(8);
@@ -86,7 +103,13 @@ struct Inner {
     backoff_until: Option<Instant>,
     /// Consecutive timeout strikes, used to escalate backoff.
     timeout_strikes: u32,
+    /// JoinHandles for spawned udisks2 fetch workers. Reaped at the start
+    /// of each fetch so a wedged D-Bus doesn't accumulate detached threads.
+    detached_handles: Vec<std::thread::JoinHandle<()>>,
 }
+
+/// Upper bound on simultaneously-existing detached udisks2 worker threads.
+const MAX_DETACHED_HANDLES: usize = 8;
 
 impl SmartPlugin {
     fn init_inner(&self, _ctx: &PluginCtx) -> Result<PluginManifest, PluginError> {

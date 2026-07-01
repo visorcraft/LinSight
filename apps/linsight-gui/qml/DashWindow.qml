@@ -42,16 +42,56 @@ Kirigami.ApplicationWindow {
                 TabButton { text: qsTr("Network") }
             }
 
-            StackLayout {
+            // Loader instantiates only the visible tab page. A StackLayout
+            // would keep every CategoryPage live simultaneously, and since
+            // each page's `tilesArray` binding re-derives every ~150 ms
+            // (filter + group + sort), N tabs multiplied processing load
+            // even when only one tab was visible. The Loader destroys the
+            // previous page on tab switch so per-tick cost is bounded by
+            // the single visible page.
+            Loader {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                currentIndex: bar.currentIndex
-
-                OverviewPage { dashModel: root.dashModel }
-                CategoryPage { category: "gpu";     dashModel: root.dashModel; pageTitle: qsTr("GPUs"); groupBy: "deviceLabel" }
-                CategoryPage { category: "storage"; dashModel: root.dashModel; pageTitle: qsTr("Storage") }
-                CategoryPage { category: "network"; dashModel: root.dashModel; pageTitle: qsTr("Network") }
+                sourceComponent: {
+                    switch (bar.currentIndex) {
+                        case 0: return overviewComp
+                        case 1: return gpuComp
+                        case 2: return storageComp
+                        case 3: return networkComp
+                        default: return overviewComp
+                    }
+                }
             }
+        }
+    }
+
+    Component {
+        id: overviewComp
+        OverviewPage { dashModel: root.dashModel }
+    }
+    Component {
+        id: gpuComp
+        CategoryPage {
+            category: "gpu"
+            dashModel: root.dashModel
+            pageTitle: qsTr("GPUs")
+            groupBy: "deviceLabel"
+        }
+    }
+    Component {
+        id: storageComp
+        CategoryPage {
+            category: "storage"
+            dashModel: root.dashModel
+            pageTitle: qsTr("Storage")
+        }
+    }
+    Component {
+        id: networkComp
+        CategoryPage {
+            category: "network"
+            dashModel: root.dashModel
+            pageTitle: qsTr("Network")
         }
     }
 }

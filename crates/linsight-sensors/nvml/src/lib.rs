@@ -55,7 +55,14 @@ struct NvmlState {
     strikes: HashMap<u32, u32>,
     /// Limits concurrent NVML worker threads.
     sem: Arc<Semaphore>,
+    /// JoinHandles for spawned NVML workers that haven't been joined yet.
+    /// Reaped at the start of each sample so a stuck GPU driver call
+    /// doesn't accumulate detached threads over long-running periods.
+    detached_handles: Vec<std::thread::JoinHandle<()>>,
 }
+
+/// Upper bound on simultaneously-existing detached NVML worker threads.
+const MAX_DETACHED_HANDLES: usize = 16;
 
 /// Counting semaphore implemented with std primitives. The permit is held by
 /// the caller and released as soon as the timeout fires, so a stuck NVML
@@ -142,6 +149,7 @@ impl NvmlPlugin {
                 backoff_until: HashMap::new(),
                 strikes: HashMap::new(),
                 sem: Arc::new(Semaphore::new(MAX_CONCURRENT_NVML)),
+                detached_handles: Vec::new(),
             });
             (nvml, device_count)
         };
@@ -314,11 +322,25 @@ impl NvmlPlugin {
             )));
         }
 
+        // Reap finished NVML workers so the detached-handle list doesn't
+        // grow without bound on healthy GPUs (threads finish between ticks).
+        state.detached_handles.retain(|h| !h.is_finished());
+
+        // Cap detached threads: when too many previous NVML calls are
+        // still stuck on a hung driver, back off instead of spawning more.
+        if state.detached_handles.len() >= MAX_DETACHED_HANDLES {
+            mark_backoff(state, idx);
+            return Err(PluginError::Unsupported(format!(
+                "nvml gpu{idx} detached-worker cap reached ({MAX_DETACHED_HANDLES}); backing off"
+            )));
+        }
+
         let permit = state.sem.acquire();
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let _ = tx.send(sample_fn());
         });
+        state.detached_handles.push(handle);
         let recv_result = rx.recv_timeout(timeout);
         drop(permit);
         let result = recv_result.map_err(|_| {
@@ -580,6 +602,7 @@ mod tests {
             backoff_until: HashMap::new(),
             strikes: HashMap::new(),
             sem: Arc::new(Semaphore::new(MAX_CONCURRENT_NVML)),
+            detached_handles: Vec::new(),
         }
     }
 

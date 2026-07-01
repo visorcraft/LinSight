@@ -42,6 +42,25 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.4" date="2026-06-30">
+      <description>
+        <p>Fix: resolved a GUI performance regression where category pages
+        (GPUs, Storage, Network) progressively slowed during long-running
+        sessions. The root cause was per-tick delegate recreation — every
+        ~150 ms the entire tile layout was re-derived (filter, group, sort
+        with regex matching, Object.assign per tile), causing the Repeater
+        to destroy and recreate all delegates. Tile values now update in
+        place via reactive bindings; the structural model is only rebuilt
+        when tiles are actually added, removed, or renamed.</p>
+        <p>Fix: secondary dashboard windows now instantiate only the visible
+        tab page instead of keeping all four pages live simultaneously, and
+        the total number of secondary windows is capped at 8.</p>
+        <p>Fix: detached worker threads in the fs, smart, and nvml sensor
+        plugins are now tracked and reaped each tick with hard caps,
+        preventing thread accumulation on perpetually-hung NFS mounts,
+        wedged D-Bus, or stuck GPU driver calls.</p>
+      </description>
+    </release>
     <release version="1.20.3" date="2026-06-29">
       <description>
         <p>Fix: Storage throughput now holds the last non-zero rate for 5

@@ -295,6 +295,13 @@ Kirigami.ApplicationWindow {
     property int nextWindowNumber: 2
 
     function openNewWindow() {
+        // Cap secondary windows so a user holding Ctrl+N can't multiply
+        // per-tick processing load unboundedly. Each window instantiates
+        // at least one page whose bindings re-evaluate every ~150 ms.
+        if (app.extraWindows.length >= 8) {
+            console.warn("LinSight: secondary window cap reached (8)")
+            return
+        }
         const w = Qt.createComponent(Qt.resolvedUrl("DashWindow.qml"))
         if (w.status === Component.Error) {
             console.warn("LinSight: failed to load DashWindow.qml:", w.errorString())

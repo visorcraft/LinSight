@@ -22,10 +22,20 @@ Kirigami.Page {
 
     Rectangle { anchors.fill: parent; color: app.tokens.surface0; z: -1 }
 
-    // Full tile snapshot maintained by merging per-tick deltas. Pages that
-    // filter the whole catalogue read from this instead of parsing a full
-    // JSON array every 150 ms.
+    // Structural tile snapshot — rebuilt only when tiles are added,
+    // removed, or renamed (catalogue refresh, nickname change, first real
+    // sample of a static sensor). Live value updates (every ~150 ms tick)
+    // are routed through the value maps below so this array's identity
+    // stays stable across value-only ticks, preventing the Repeater from
+    // recreating every delegate every tick.
     property var _allTiles: []
+    // Live value maps, updated every tick from the delta. Delegates read
+    // `tileValue` / `tileSparkline` / `tileRows` from these via Binding
+    // blocks instead of from `modelData.*`, so values update in place
+    // without delegate recreation.
+    property var _valuesById: ({})
+    property var _sparklineById: ({})
+    property var _rowsById: ({})
 
     function _mergeTiles(delta) {
         const arr = page._allTiles
@@ -34,24 +44,59 @@ Kirigami.Page {
             const t = arr[i]
             if (t && t.id) byId[t.id] = i
         }
+        let structuralChanged = false
+        const vals = {}
+        const sparks = {}
+        const rows = {}
         for (let i = 0; i < delta.length; ++i) {
             const t = delta[i]
             if (!t || !t.id) continue
+            // Collect live-value updates for the binding maps.
+            vals[t.id] = t.value
+            if (t.sparkline !== undefined) sparks[t.id] = t.sparkline
+            if (t.rows !== undefined) rows[t.id] = t.rows
             const idx = byId[t.id]
             if (idx !== undefined) {
-                arr[idx] = t
+                const existing = arr[idx]
+                // Detect structural changes: rename, device-label change,
+                // kind change, parent-device change, the transition from
+                // the placeholder "…" to a real value (first sample), or a
+                // sentinel-state change (e.g. net.speed_mbps going from
+                // "-1" to a real value) that affects whether the tile is
+                // filtered into view. Dynamic value changes after the first
+                // sample do NOT trigger a structural rebuild.
+                const firstReal = (existing.value === "\u2026" || existing.value === "…")
+                                  && t.value !== "\u2026" && t.value !== "…"
+                const sentinelChanged =
+                    page.isUnknownSentinel(existing.value || "") !==
+                    page.isUnknownSentinel(t.value || "")
+                if (existing.name !== t.name
+                    || (existing.deviceLabel || "") !== (t.deviceLabel || "")
+                    || (existing.kind || "") !== (t.kind || "")
+                    || (existing.parentDevice || "") !== (t.parentDevice || "")
+                    || firstReal
+                    || sentinelChanged) {
+                    arr[idx] = t
+                    structuralChanged = true
+                }
             } else {
                 arr.push(t)
                 byId[t.id] = arr.length - 1
+                structuralChanged = true
             }
         }
-        // Reassign a NEW array reference. QML `var` change detection is by
-        // identity, so `page._allTiles = arr` (same ref, mutated in place)
-        // fires no change signal and the `tilesArray` binding never
-        // re-evaluates — category pages would show only the initial "…"
-        // snapshot forever. slice() is a cheap shallow copy (tile objects
-        // are shared) that still avoids re-parsing the full catalogue JSON.
-        page._allTiles = arr.slice()
+        // Always update the live-value maps (cheap reference swaps).
+        page._valuesById = vals.length === 0 ? page._valuesById : Object.assign({}, page._valuesById, vals)
+        page._sparklineById = sparks.length === 0 ? page._sparklineById : Object.assign({}, page._sparklineById, sparks)
+        page._rowsById = rows.length === 0 ? page._rowsById : Object.assign({}, page._rowsById, rows)
+        // Only reassign _allTiles (triggering tilesArray / storageSections
+        // re-evaluation and Repeater model change) when the structure
+        // actually changed. Value-only ticks leave the model untouched so
+        // existing delegates persist and just get new values via the
+        // Binding blocks below.
+        if (structuralChanged) {
+            page._allTiles = arr.slice()
+        }
     }
 
     Component.onCompleted: {
@@ -68,6 +113,11 @@ Kirigami.Page {
             try {
                 page._allTiles = JSON.parse(page.dashModel.tilesJson || "[]")
             } catch (e) { page._allTiles = [] }
+            // Reset live-value maps so stale entries from a previous
+            // catalogue don't linger after a reconnect.
+            page._valuesById = ({})
+            page._sparklineById = ({})
+            page._rowsById = ({})
         }
         function onTilesChangedJsonChanged() {
             try {
@@ -363,7 +413,12 @@ Kirigami.Page {
 
     Component {
         id: nestedView
-        StorageSectionView { sections: page.storageSections }
+        StorageSectionView {
+            sections: page.storageSections
+            valuesById: page._valuesById
+            sparklineById: page._sparklineById
+            rowsById: page._rowsById
+        }
     }
 
     Component {
@@ -392,18 +447,45 @@ Kirigami.Page {
                             if (modelData.type === "header") {
                                 item.label = modelData.label
                             } else {
+                                // Structural properties: set once at load
+                                // time. These only change on catalogue
+                                // refresh / rename, which triggers a model
+                                // rebuild and delegate recreation anyway.
                                 item.tileName = modelData.name
                                 item.tileDeviceLabel = modelData.deviceLabel || ""
-                                item.tileValue = modelData.value
                                 item.tileKind = modelData.kind || "scalar"
-                                item.tileRows = modelData.rows || []
                                 item.tileSensorId = (modelData.kind !== "table" && modelData.kind !== "state") ? (modelData.id || "") : ""
                                 item.tileCopyableSensorId = modelData.id || ""
                                 item.tileUnit = modelData.unit || ""
-                                item.tileSparkline = modelData.sparkline || []
-                                // sparklinesEnabled is kept in sync reactively by the Binding
-                                // below; no imperative assignment needed here.
                             }
+                        }
+                        // Live-value Bindings: read from the per-tick value
+                        // maps so tile values / sparklines / table rows
+                        // update in place WITHOUT recreating the delegate.
+                        // This is the key fix for per-tick Repeater churn.
+                        Binding {
+                            when: cellLoader.status === Loader.Ready
+                                  && cellLoader.item !== null
+                                  && modelData.type !== "header"
+                            target: cellLoader.item
+                            property: "tileValue"
+                            value: page._valuesById[modelData.id] || modelData.value || "…"
+                        }
+                        Binding {
+                            when: cellLoader.status === Loader.Ready
+                                  && cellLoader.item !== null
+                                  && modelData.type !== "header"
+                            target: cellLoader.item
+                            property: "tileSparkline"
+                            value: page._sparklineById[modelData.id] || modelData.sparkline || []
+                        }
+                        Binding {
+                            when: cellLoader.status === Loader.Ready
+                                  && cellLoader.item !== null
+                                  && modelData.type !== "header"
+                            target: cellLoader.item
+                            property: "tileRows"
+                            value: page._rowsById[modelData.id] || modelData.rows || []
                         }
                         // Reactively propagate the preference to the tile so that
                         // toggling Settings → Tile sparklines takes effect immediately

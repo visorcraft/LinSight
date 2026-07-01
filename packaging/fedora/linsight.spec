@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.3
+Version:        1.20.4
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,18 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Tue Jun 30 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.4-1
+- Fix: GUI performance regression — category pages (GPUs, Storage, Network)
+  now update tile values in place via reactive bindings instead of
+  recreating every delegate every ~150 ms tick, eliminating progressive
+  slowdown and memory growth during long-running sessions.
+- Fix: secondary dashboard windows no longer keep all tab pages live
+  simultaneously; only the visible page is instantiated.
+- Fix: capped secondary window count (8) to prevent unbounded processing
+  load multiplication.
+- Fix: detached worker threads in fs/smart/nvml plugins are now tracked
+  and reaped, with hard caps preventing accumulation on hung NFS/D-Bus/GPU.
+
 * Mon Jun 29 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.3-1
 - Fix: Storage throughput now holds the last non-zero rate for 5 seconds
   before decaying to zero, preventing flicker on bursty NVMe I/O.

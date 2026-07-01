@@ -1,3 +1,21 @@
+linsight (1.20.4-1) unstable; urgency=medium
+
+  * Fix: GUI performance regression — category pages (GPUs, Storage, Network)
+    recreated every tile delegate every ~150 ms tick, causing progressive
+    slowdown and memory growth during long-running sessions. Tile values now
+    update in place via reactive bindings; the structural model is only
+    rebuilt when tiles are added, removed, or renamed.
+  * Fix: secondary dashboard windows no longer keep all tab pages live
+    simultaneously; only the visible page is instantiated via Loader.
+  * Fix: capped secondary window count (8) to prevent unbounded per-tick
+    processing load multiplication.
+  * Fix: detached worker threads in fs, smart, and nvml sensor plugins are
+    now tracked and reaped each tick, with hard caps preventing thread
+    accumulation on perpetually-hung NFS mounts, wedged D-Bus, or stuck GPU
+    driver calls.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Tue, 30 Jun 2026 10:00:00 +0000
+
 linsight (1.20.3-1) unstable; urgency=medium
 
   * Fix: Storage throughput now holds the last non-zero rate for 5 seconds
