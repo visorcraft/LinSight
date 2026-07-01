@@ -1326,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "linsight"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1348,7 +1348,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-cli"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-core"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "criterion",
  "proptest",
@@ -1380,7 +1380,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-example-echo-plugin"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-plugin-sdk",
  "stabby",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-example-init-count-plugin"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-plugin-sdk",
  "stabby",
@@ -1396,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-example-legacy-init-count-plugin"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-plugin-sdk",
  "stabby",
@@ -1404,7 +1404,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-plugin-sdk"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "escargot",
  "libloading 0.9.0",
@@ -1416,7 +1416,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-protocol"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "criterion",
  "linsight-core",
@@ -1428,7 +1428,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-amdgpu"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-containers"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-cpu"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-disk"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-fs"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "libc",
  "linsight-core",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-hwmon"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1489,7 +1489,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-i915"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1498,7 +1498,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-mem"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1509,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-net"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1520,7 +1520,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-nvme"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-nvml"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-proc"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-smart"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-sock"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-system"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-systemd"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-xe"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1600,7 +1600,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-sensors-zram"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "linsight-core",
  "linsight-plugin-sdk",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "linsight-tunnel"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "linsightd"
-version = "1.20.4"
+version = "1.20.5"
 dependencies = [
  "anyhow",
  "clap",

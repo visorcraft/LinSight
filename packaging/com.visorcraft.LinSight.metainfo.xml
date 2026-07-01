@@ -42,6 +42,16 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.5" date="2026-07-01">
+      <description>
+        <p>Fix: prepared the public crates.io plugin SDK release. The SDK
+        package now carries publish metadata, crate READMEs, a current
+        linsight-core dependency, and the CLI plugin scaffold uses the
+        registry dependency instead of a local checkout path.</p>
+        <p>Docs: refreshed the README, plugin SDK notes, release checklist,
+        and local agent guidance for the public SDK crates.</p>
+      </description>
+    </release>
     <release version="1.20.4" date="2026-06-30">
       <description>
         <p>Fix: resolved a GUI performance regression where category pages

@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.4
+Version:        1.20.5
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,14 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Wed Jul 01 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.5-1
+- Fix: prepare the public crates.io plugin SDK release with publish metadata,
+  crate READMEs, and a current linsight-core dependency.
+- Fix: linsight-cli plugin scaffolds now depend on the registry
+  linsight-plugin-sdk crate instead of a local checkout path.
+- Docs: refresh README, plugin SDK notes, release checklist, and local agent
+  guidance for the public SDK crates.
+
 * Tue Jun 30 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.4-1
 - Fix: GUI performance regression — category pages (GPUs, Storage, Network)
   now update tile values in place via reactive bindings instead of

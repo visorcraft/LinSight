@@ -82,7 +82,7 @@ What it monitors today:
 
 - **GPUs:** NVIDIA, AMD, and Intel (xe + i915), with per-device nicknames.
 - **System:** CPU, memory, NVMe, disk, filesystem, network, hwmon, ZRAM,
-  processes, systemd units, and PSI / load / uptime.
+  SMART, processes, containers, sockets, systemd units, and PSI / load / uptime.
 - **Runtime plugins:** drop a `.so` in to add sensors; the bundled
   sensors are themselves in-tree plugins. Per-plugin TOML config.
 - **Custom dashboards & themes:** preset pages (Overview / GPUs /
@@ -102,8 +102,8 @@ What it monitors today:
 ```bash
 cargo run -p linsight
 # Kirigami window with a left sidebar:
-#   Workspace → Overview / GPUs / Storage / Network / Hardware / Editor
-#   System    → Settings / About
+#   Workspace → Overview / GPUs / Storage / Network / Hardware / Processes / Alerts / Editor
+#   System    → Settings / About / Licenses / Credits
 # Auto-spawns linsightd as a child if no daemon is running.
 ```
 
@@ -114,14 +114,18 @@ About, `StandardKey.Preferences` for Settings.
 
 ```bash
 just run-daemon                     # or let the GUI spawn it
-just run-cli list                   # sensor catalogue (52+ entries)
+just run-cli list                   # sensor catalogue
 just run-cli read cpu.util --count 5
 just run-cli read mem.used_bytes --count 3
-just run-cli plugin new my-sensor   # scaffold a third-party plugin
+just run-cli plugin new my-sensor   # scaffold a third-party plugin crate
 just run-cli db stats               # row count, sensors, time span, file size
 just run-cli db prune --older-than 7d          # delete rows older than 7 days
 just run-cli db prune --older-than 7d --vacuum # also reclaim file space
 ```
+
+The plugin scaffold uses the public `linsight-plugin-sdk` crate plus a
+direct `stabby` dependency, builds a `cdylib`, and installs the resulting
+`.so` into the user plugin directory.
 
 **Remote (mTLS, non-SSH topologies)**
 
@@ -193,9 +197,11 @@ just credits         # cargo about generate → docs/third-party-notices.md
 
 ## Install
 
-Install LinSight as a **pacman-tracked package** rather than hand-copying
-binaries into `/usr/`. For local development, build the working tree and
-install it via pacman:
+For normal installs, use the GitHub release assets: AppImage, tarball, Arch,
+Arch x86-64-v3, deb, Fedora rpm, openSUSE rpm, or Flatpak.
+
+For local Arch development, install LinSight as a **pacman-tracked package**
+rather than hand-copying binaries into `/usr/`:
 
 ```bash
 cd packaging/arch
@@ -249,12 +255,13 @@ shrink after pruning — freed pages are reused; use
 - **`crates/linsight-core/`** — shared types and dashboard model (no I/O).
 - **`crates/linsight-protocol/`** — postcard wire format + framing.
 - **`crates/linsight-plugin-sdk/`** — public `LinsightPlugin` trait +
-  `export_plugin!` macro. ABI v6 uses R-mirror types on the FFI boundary
-  for cross-rustc safety; see
+  `export_plugin!` macro, published as `linsight-plugin-sdk` with
+  `linsight-core` as its public dependency. ABI v6 uses R-mirror types on
+  the FFI boundary for cross-rustc safety; see
   [`docs/adr/0001-plugin-abi-stabby-deferral.md`](docs/adr/0001-plugin-abi-stabby-deferral.md).
 - **`crates/linsight-sensors/*`** — one in-tree plugin per hardware
   family / metric source (cpu, mem, net, nvme, nvml, xe, amdgpu, i915,
-  disk, fs, hwmon, proc, system, systemd, zram, smart, sock).
+  disk, fs, hwmon, proc, system, systemd, zram, containers, smart, sock).
 - **`crates/linsight-cli/`** — `list` / `read` / `plugin {new, install,
   ls, remove}` / `db {stats, prune}` (offline history-DB inspection and
   maintenance; works without a running daemon).

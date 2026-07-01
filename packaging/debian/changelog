@@ -1,3 +1,14 @@
+linsight (1.20.5-1) unstable; urgency=medium
+
+  * Fix: prepare the public crates.io plugin SDK release. The SDK package now
+    carries publish metadata, crate READMEs, a current linsight-core dependency,
+    and the CLI plugin scaffold now uses the registry dependency instead of a
+    local checkout path.
+  * Docs: refresh README, plugin SDK notes, release checklist, and local agent
+    guidance for the public SDK crates.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Wed, 01 Jul 2026 12:00:00 +0000
+
 linsight (1.20.4-1) unstable; urgency=medium
 
   * Fix: GUI performance regression — category pages (GPUs, Storage, Network)

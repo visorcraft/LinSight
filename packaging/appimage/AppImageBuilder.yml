@@ -26,7 +26,7 @@ AppDir:
     id: com.visorcraft.LinSight
     name: LinSight
     icon: com.visorcraft.LinSight
-    version: 1.20.4
+    version: 1.20.5
     exec: usr/bin/linsight
     exec_args: $@
   apt:

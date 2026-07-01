@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
-publish = false  # internal workspace crate; not published to crates.io
+publish = ["crates-io"]
 name = "linsight-plugin-sdk"
 version.workspace = true
 edition.workspace = true
@@ -9,9 +9,14 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 description = "Public SDK for authoring LinSight sensor plugins."
+repository.workspace = true
+documentation = "https://docs.rs/linsight-plugin-sdk"
+readme = "README.md"
+keywords = ["linsight", "plugin", "sensors", "monitoring"]
+include = ["src/**", "tests/fixtures/**", "README.md"]
 
 [dependencies]
-linsight-core = { path = "../linsight-core", version = "1.4.0" }
+linsight-core = { path = "../linsight-core", version = "1.20.5" }
 serde_json = { workspace = true }
 stabby = { workspace = true }
 thiserror = { workspace = true }

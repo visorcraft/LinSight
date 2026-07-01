@@ -36,6 +36,7 @@ pub fn new(name: &str) -> Result<()> {
     std::fs::create_dir_all(root.join("src"))
         .with_context(|| format!("mkdir {}", root.join("src").display()))?;
     let cargo_toml = root.join("Cargo.toml");
+    let sdk_version = env!("CARGO_PKG_VERSION");
     std::fs::write(
         &cargo_toml,
         format!(
@@ -51,16 +52,12 @@ license = "GPL-3.0-only"
 crate-type = ["cdylib"]
 
 [dependencies]
-# linsight-plugin-sdk is not on crates.io yet. Edit the path below to point
-# at your local LinSight checkout, OR uncomment the registry line once the
-# SDK ships.
-linsight-plugin-sdk = {{ path = "../linsight/crates/linsight-plugin-sdk" }}
-# linsight-plugin-sdk = "0.3"  # use this once published
+linsight-plugin-sdk = "{sdk_version}"
 
 # Direct stabby dep is required because the `export_plugin!` macro
 # expands `#[stabby::export]` at the plugin crate's call site, and
 # stabby's proc-macros locate the crate via the plugin's Cargo.toml.
-stabby = "36"
+stabby = "72"
 "#,
         ),
     )
@@ -165,11 +162,9 @@ export_plugin!(
     std::fs::write(
         &readme,
         format!(
-            "# {name}\n\nA LinSight plugin.\n\n## Prerequisites\n\n\
-             The generated `Cargo.toml` references `linsight-plugin-sdk` via a\n\
-             local `path = \"...\"` dep because the SDK isn't on crates.io yet.\n\
-             Edit that path to point at your LinSight checkout before building.\n\n\
-             ## Build\n\n```\ncargo build --release\n```\n\n## Install\n\n```\nlinsight-cli plugin install target/release/lib{}.so\n```\n",
+            "# {name}\n\nA LinSight plugin.\n\n## Build\n\n\
+             ```\ncargo build --release\n```\n\n## Install\n\n\
+             ```\nlinsight-cli plugin install target/release/lib{}.so\n```\n",
             name.replace('-', "_")
         ),
     )

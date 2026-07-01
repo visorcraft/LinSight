@@ -26,9 +26,9 @@ accepted = [
 
 # Our own workspace crates are first-party (GPL-3.0-only) and must not
 # appear in this third-party supplement — they are credited in
-# CREDITS.md's narrative instead. Every internal crate sets
-# `publish = false`, so cargo-about's `private.ignore` drops them (and
-# the echo-plugin example) from the graph. Keep new internal crates
-# `publish = false` and they are excluded automatically — no per-crate
-# entry is needed here.
-private = { ignore = true }
+# CREDITS.md's narrative instead. Internal crates stay `publish = false`;
+# public first-party crates set `publish = ["crates-io"]`. cargo-about
+# only has a "private" exclusion mechanism for workspace crates, so the
+# crates.io registry name is listed here to keep public first-party crates
+# out of the generated third-party notice.
+private = { ignore = true, registries = ["crates-io"] }

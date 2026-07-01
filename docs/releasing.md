@@ -39,11 +39,15 @@ The release job produces, checksums, and uploads:
 1. Bump the version **everywhere**. `Cargo.toml`'s `[workspace] version` is the
    source of truth; keep these in lockstep with it:
    - `Cargo.toml` (workspace `version`) — then build once so `Cargo.lock` updates
+   - `crates/linsight-plugin-sdk/Cargo.toml` (`linsight-core` dependency version)
+   - `crates/linsight-plugin-sdk/README.md` (dependency example)
    - `packaging/fedora/linsight.spec` and `packaging/opensuse/linsight.spec`
      (`Version:` plus a new `%changelog` entry)
    - `packaging/com.visorcraft.LinSight.metainfo.xml` (new `<release>` entry)
    - `packaging/appimage/AppImageBuilder.yml` (`version:`)
-   - `packaging/arch/PKGBUILD.local` (`pkgver`)
+   - `packaging/arch/PKGBUILD` and `packaging/arch-v3/PKGBUILD` (`pkgver`)
+   - `packaging/arch/PKGBUILD.local` and `packaging/arch-v3/PKGBUILD.local`
+     (`pkgver`)
    - `packaging/debian/changelog` (new top entry)
    - the latest-release line in `AGENTS.md`
 2. Run `just ci` locally, then commit on `master`.

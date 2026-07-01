@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 VisorCraft LLC
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
-publish = false  # internal workspace crate; not published to crates.io
+publish = ["crates-io"]
 name = "linsight-core"
 version.workspace = true
 edition.workspace = true
@@ -9,6 +9,11 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 description = "LinSight shared types and pure-logic primitives."
+repository.workspace = true
+documentation = "https://docs.rs/linsight-core"
+readme = "README.md"
+keywords = ["linsight", "monitoring", "sensors"]
+include = ["src/**", "benches/**", "README.md"]
 
 [dependencies]
 serde = { workspace = true }

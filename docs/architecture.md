@@ -71,7 +71,7 @@ without subscribing.
   `FrameReader`/`FrameWriter` + version handshake helper.
 - `linsight-plugin-sdk` — public `LinsightPlugin` trait, manifest
   types, and the `export_plugin!` macro. Plugins compile against
-  this crate alone (plus a direct `stabby = "36"` dep for its
+  this crate alone (plus a direct `stabby = "72"` dep for its
   proc-macros). The `mirror` submodule holds the FFI-boundary
   R-types (`RUnit`, `RSensorKind`, `RCategory`, `RReading`, …).
   v3 encodes payload-bearing mirrors as `(kind, payload)` structs

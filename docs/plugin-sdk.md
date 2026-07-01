@@ -17,10 +17,6 @@ the in-tree ones.
 linsight-cli plugin new my-sensor
 cd my-sensor
 # Edit src/lib.rs — implement LinsightPlugin.
-# Then point linsight-plugin-sdk's `path = "..."` line in Cargo.toml
-# at your local LinSight checkout (the scaffold defaults to
-# `../linsight/crates/linsight-plugin-sdk`; the registry version
-# isn't published yet).
 cargo build --release
 linsight-cli plugin install target/release/libmy_sensor.so
 # Restart linsightd (or `systemctl --user restart linsight` for
@@ -29,7 +25,7 @@ linsight-cli list | grep my-sensor
 ```
 
 The `plugin new` scaffold includes a working `LinsightPlugin` impl,
-the required `stabby = "36"` dep, and a `[lib]` section with
+the required `stabby = "72"` dep, and a `[lib]` section with
 `crate-type = ["cdylib"]`.
 
 For a known-good reference implementation, see
