@@ -294,6 +294,7 @@ Bugs / feature requests:
 
 - [Architecture](docs/architecture.md)
 - [Alerts](docs/alerts.md)
+- [Plugin SDK](docs/plugin-sdk.md)
 - [Plugin ABI ADR-0001](docs/adr/0001-plugin-abi-stabby-deferral.md)
 - [Remote tunnel](apps/linsight-tunnel/README.md)
 - [Security](docs/SECURITY.md)
