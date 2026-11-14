@@ -16,7 +16,7 @@ keywords = ["linsight", "plugin", "sensors", "monitoring"]
 include = ["src/**", "tests/fixtures/**", "README.md"]
 
 [dependencies]
-linsight-core = { path = "../linsight-core", version = "1.20.5" }
+linsight-core = { path = "../linsight-core", version = "1.20.6" }
 serde_json = { workspace = true }
 stabby = { workspace = true }
 thiserror = { workspace = true }

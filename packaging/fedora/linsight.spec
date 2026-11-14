@@ -8,7 +8,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.5
+Version:        1.20.6
 Release:        1%{?dist}
 Summary:        Fast, beautiful Linux system-monitoring dashboard with multi-GPU support
 
@@ -88,6 +88,11 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Sat Nov 14 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.6-1
+- Upgrade runtime and build dependencies to their current releases,
+  including cxx-qt 0.10, zbus 6, rusqlite 0.42, and nvml-wrapper 0.13.
+- SMART disk reads follow zbus 6, which removed the blocking D-Bus API.
+
 * Wed Jul 01 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.5-1
 - Fix: prepare the public crates.io plugin SDK release with publish metadata,
   crate READMEs, and a current linsight-core dependency.
