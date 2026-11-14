@@ -42,8 +42,3 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = [
-    # VisorCraft fork of cxx-qt, pinned via [patch.crates-io] for
-    # qt-build-utils. The fork carries a build fix not yet upstream.
-    "https://github.com/visorcraft/cxx-qt.git",
-]

@@ -25,7 +25,7 @@ use linsight_plugin_sdk::{PluginError, SensorDescriptor};
 /// `org.freedesktop.UDisks2.Drive.Ata` or `org.freedesktop.UDisks2.NVMe.Controller`.
 pub fn sensors_from_drive(
     disk_name: &str,
-    props: &HashMap<String, zbus::zvariant::OwnedValue>,
+    props: &HashMap<String, zbus::OwnedVariant>,
 ) -> Result<Vec<(SensorId, SensorDescriptor, Reading)>, PluginError> {
     let mut out = Vec::new();
 
@@ -135,76 +135,82 @@ fn make_sensor(
 ///
 /// Returns a map of kernel disk name → property dictionary for the
 /// SMART-bearing interface (`Drive.Ata` or `NVMe.Controller`).
-pub fn fetch_smart_drives()
--> Result<HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>, String> {
-    let conn =
-        zbus::blocking::Connection::system().map_err(|e| format!("D-Bus connection: {e}"))?;
+pub fn fetch_smart_drives() -> Result<HashMap<String, HashMap<String, zbus::OwnedVariant>>, String>
+{
+    // zbus 6 dropped the blocking API. `block_on` drives the async connection
+    // on this thread with zbus's own runtime, which is the sync replacement.
+    zbus::block_on(async {
+        let conn =
+            zbus::Connection::system().await.map_err(|e| format!("D-Bus connection: {e}"))?;
 
-    let proxy = zbus::blocking::Proxy::new(
-        &conn,
-        "org.freedesktop.UDisks2",
-        "/org/freedesktop/UDisks2",
-        "org.freedesktop.DBus.ObjectManager",
-    )
-    .map_err(|e| format!("ObjectManager proxy: {e}"))?;
+        let proxy = zbus::Proxy::new(
+            &conn,
+            "org.freedesktop.UDisks2",
+            "/org/freedesktop/UDisks2",
+            "org.freedesktop.DBus.ObjectManager",
+        )
+        .await
+        .map_err(|e| format!("ObjectManager proxy: {e}"))?;
 
-    let managed_objects: HashMap<
-        zbus::zvariant::OwnedObjectPath,
-        HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>,
-    > = proxy
-        .call_method("GetManagedObjects", &())
-        .and_then(|m| m.body().deserialize())
-        .map_err(|e| format!("GetManagedObjects: {e}"))?;
+        let managed_objects: HashMap<
+            zbus::OwnedObjectPath,
+            HashMap<String, HashMap<String, zbus::OwnedVariant>>,
+        > = proxy
+            .call("GetManagedObjects", &())
+            .await
+            .map_err(|e| format!("GetManagedObjects: {e}"))?;
 
-    let mut out = HashMap::new();
-    for (_path, ifaces) in managed_objects {
-        // Find the block device interface to get the kernel name
-        let Some(block) = ifaces.get("org.freedesktop.UDisks2.Block") else {
-            continue;
-        };
-        let Some(device_val) = block.get("Device") else {
-            continue;
-        };
-        let disk_name = if let Ok(arr) = zbus::zvariant::Array::try_from(&**device_val) {
-            let bytes: Vec<u8> = arr.iter().filter_map(|v| v.downcast_ref::<u8>().ok()).collect();
-            String::from_utf8_lossy(&bytes)
-                .trim_end_matches('\0')
-                .trim_start_matches("/dev/")
-                .to_string()
-        } else {
-            String::new()
-        };
-        if disk_name.is_empty() {
-            continue;
+        let mut out = HashMap::new();
+        for (_path, ifaces) in managed_objects {
+            // Find the block device interface to get the kernel name
+            let Some(block) = ifaces.get("org.freedesktop.UDisks2.Block") else {
+                continue;
+            };
+            let Some(device_val) = block.get("Device") else {
+                continue;
+            };
+            let disk_name = if let Ok(arr) = zbus::Array::try_from(&**device_val) {
+                let bytes: Vec<u8> =
+                    arr.iter().filter_map(|v| v.downcast_ref::<u8>().ok()).collect();
+                String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .trim_start_matches("/dev/")
+                    .to_string()
+            } else {
+                String::new()
+            };
+            if disk_name.is_empty() {
+                continue;
+            }
+
+            // Check for ATA SMART interface
+            if let Some(ata) = ifaces.get("org.freedesktop.UDisks2.Drive.Ata")
+                && (ata.contains_key("SmartTemperature") || ata.contains_key("SmartFailing"))
+            {
+                out.insert(disk_name, ata.clone());
+                continue;
+            }
+
+            // Check for NVMe SMART interface
+            if let Some(nvme) = ifaces.get("org.freedesktop.UDisks2.NVMe.Controller")
+                && (nvme.contains_key("SmartTemperature") || nvme.contains_key("SmartPercentUsed"))
+            {
+                out.insert(disk_name, nvme.clone());
+                continue;
+            }
         }
 
-        // Check for ATA SMART interface
-        if let Some(ata) = ifaces.get("org.freedesktop.UDisks2.Drive.Ata")
-            && (ata.contains_key("SmartTemperature") || ata.contains_key("SmartFailing"))
-        {
-            out.insert(disk_name, ata.clone());
-            continue;
-        }
-
-        // Check for NVMe SMART interface
-        if let Some(nvme) = ifaces.get("org.freedesktop.UDisks2.NVMe.Controller")
-            && (nvme.contains_key("SmartTemperature") || nvme.contains_key("SmartPercentUsed"))
-        {
-            out.insert(disk_name, nvme.clone());
-            continue;
-        }
-    }
-
-    Ok(out)
+        Ok(out)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use zbus::zvariant::OwnedValue;
+    use zbus::OwnedVariant;
 
-    fn owned(v: impl Into<OwnedValue>) -> OwnedValue {
+    fn owned(v: impl Into<OwnedVariant>) -> OwnedVariant {
         v.into()
     }
 

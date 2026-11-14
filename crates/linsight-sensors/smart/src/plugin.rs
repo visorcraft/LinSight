@@ -31,7 +31,7 @@ pub struct SmartPlugin {
     inner: Mutex<Inner>,
 }
 
-type SmartDrives = HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>;
+type SmartDrives = HashMap<String, HashMap<String, zbus::OwnedVariant>>;
 
 /// Fetch SMART drive data from udisks2 with a wall-clock timeout. The D-Bus
 /// call can hang if udisks2 itself is wedged; without this, the daemon's
