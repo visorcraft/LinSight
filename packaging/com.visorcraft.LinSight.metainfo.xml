@@ -42,6 +42,12 @@
     <category>Monitor</category>
   </categories>
   <releases>
+    <release version="1.20.7" date="2026-11-16">
+      <description>
+        <p>Upgrade rusqlite to 0.43, which rejects empty or comment-only SQL and
+        fixes use-after-free bugs in the SQLite bindings used by optional history.</p>
+      </description>
+    </release>
     <release version="1.20.6" date="2026-11-14">
       <description>
         <p>Upgrade runtime and build dependencies to their current releases,

@@ -1,3 +1,10 @@
+linsight (1.20.7-1) unstable; urgency=medium
+
+  * Upgrade rusqlite to 0.43, which rejects empty or comment-only SQL and
+    fixes use-after-free bugs in the SQLite bindings used by optional history.
+
+ -- VisorCraft LLC <support@visorcraft.com>  Mon, 16 Nov 2026 18:48:00 +0000
+
 linsight (1.20.6-1) unstable; urgency=medium
 
   * Upgrade runtime and build dependencies to their current releases,

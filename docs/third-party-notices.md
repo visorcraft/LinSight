@@ -5772,7 +5772,7 @@ Used by:
 - [`qt-build-utils 0.10.0`](https://github.com/KDAB/cxx-qt/)
 - [`quote 1.0.47`](https://github.com/dtolnay/quote)
 - [`r-efi 6.0.0`](https://github.com/r-efi/r-efi)
-- [`rand 0.10.3`](https://github.com/rust-random/rand)
+- [`rand 0.10.4`](https://github.com/rust-random/rand)
 - [`rand_xorshift 0.5.0`](https://github.com/rust-random/rngs)
 - [`rcgen 0.14.10`](https://github.com/rustls/rcgen)
 - [`rustversion 1.0.23`](https://github.com/dtolnay/rustversion)
@@ -6413,7 +6413,7 @@ THE SOFTWARE.
 
 Used by:
 - [`libsqlite3-sys 0.40.0`](https://github.com/rusqlite/rusqlite)
-- [`rusqlite 0.42.0`](https://github.com/rusqlite/rusqlite)
+- [`rusqlite 0.43.0`](https://github.com/rusqlite/rusqlite)
 
 ```
 Copyright (c) 2014 The rusqlite developers

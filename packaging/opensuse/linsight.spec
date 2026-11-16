@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           linsight
-Version:        1.20.6
+Version:        1.20.7
 Release:        0
 Summary:        Fast multi-GPU Linux system monitor
 License:        GPL-3.0-only
@@ -72,6 +72,10 @@ install -d %{buildroot}%{_libdir}/linsight/plugins
 %dir %{_libdir}/linsight/plugins
 
 %changelog
+* Mon Nov 16 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.7-1
+- Upgrade rusqlite to 0.43, which rejects empty or comment-only SQL and
+  fixes use-after-free bugs in the SQLite bindings used by optional history.
+
 * Sat Nov 14 2026 VisorCraft LLC <support@visorcraft.com> - 1.20.6-1
 - Upgrade runtime and build dependencies to their current releases,
   including cxx-qt 0.10, zbus 6, rusqlite 0.42, and nvml-wrapper 0.13.

@@ -13,7 +13,7 @@ the built-in ones.
 
 ```toml
 [dependencies]
-linsight-plugin-sdk = "1.20.6"
+linsight-plugin-sdk = "1.20.7"
 stabby = "72"
 ```
 
